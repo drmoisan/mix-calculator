@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "drm-copilot": {
+      "command": "npx",
+      "args": ["-y", "@danmoisan/drm-copilot-mcp"]
+    }
+  }
+}

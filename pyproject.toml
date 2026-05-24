@@ -1,0 +1,98 @@
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "mix-calculator"
+version = "0.1.0"
+description = "A mix calculator."
+authors = ["Dan Moisan <dan@danmoisan.org>"]
+license = "MIT"
+readme = "README.md"
+packages = [
+    { include = "src" },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<4.0"
+pyside6 = {version = "^6.11.1", python = ">=3.12,<3.15"}
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+pytest-cov = ">=7.0"
+black = ">=24.0"
+ruff = ">=0.14"
+pyright = ">=1.1.407"
+nuitka = "^4.1.1"
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+fix = true
+show-fixes = true
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit (security)
+    "TID",  # flake8-tidy-imports
+    "TCH",  # flake8-type-checking
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["S101"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra --cov-report=lcov:artifacts/python/lcov.info"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src"]
+data_file = "artifacts/.coverage"
+omit = [
+    "tests/*",
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+reportMissingTypeArgument = "error"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+include = [
+    "src",
+    "tests"
+]
+exclude = [
+    "**/__pycache__",
+    ".idea",
+    ".ruff_cache",
+    ".venv",
+    "build",
+    "dist",
+    "node_modules"
+]
