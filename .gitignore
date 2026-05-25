@@ -49,6 +49,7 @@ env/
 htmlcov/
 .tox/
 .nox/
+coverage.xml
 
 # Type checking
 .mypy_cache/

@@ -5,38 +5,29 @@
     mix-calculator development environment, then provisions the in-project venv.
 
 .DESCRIPTION
-    Checks each prerequisite in order (Python 3.12-3.14, Poetry, MSVC C++ build
-    tools, and the in-project Poetry environment). For any missing prerequisite the
-    script asks for confirmation (via ShouldProcess) and installs it, requesting
-    elevation only for the install that needs administrator rights (MSVC build
-    tools). The script is idempotent: prerequisites already satisfied are reported
-    as skipped. A summary of every requirement's final state is emitted at the end.
+    Checks each prerequisite in order (Python 3.12-3.14, Poetry, MSVC C++ build tools,
+    and the in-project Poetry environment). For any missing prerequisite the script asks
+    for confirmation (via ShouldProcess) and installs it, requesting elevation only for
+    the install that needs administrator rights (MSVC build tools). The script is
+    idempotent and ends with a summary of every requirement's final state.
 
-    Pure decision logic (version-band checks, requirement definitions, install
-    decisions, summary building) is separated from the external-process seams
-    (winget, the py launcher, Poetry, vswhere, the VS Installer, the elevation
-    relaunch). Every external executable call goes through a wrapper function so
-    tests mock the wrapper, never the real executable.
+    Pure decision logic lives in the sibling module DevEnvironment.psm1. This file holds
+    the external-process wrapper seams, detection, install actions, orchestration, and
+    the entrypoint. Every external executable call is isolated behind a wrapper so tests
+    mock the wrapper, never the real executable. Installs are winget-first, with
+    documented fallbacks: Poetry uses its official installer, and the MSVC build tools
+    modify an existing Visual Studio install via the VS Installer when one is present,
+    else fall back to the winget BuildTools package.
 
 .PARAMETER AutoApprove
-    Approve every required install without an interactive confirmation prompt.
-    Intended for non-interactive runs. Alias: -Force.
+    Approve every required install without an interactive prompt. Alias: -Force.
 
 .PARAMETER DryRun
-    Report what would be installed without changing any state. Equivalent in effect
-    to -WhatIf; provided as an explicit switch for readability.
-
-.EXAMPLE
-    pwsh ./scripts/dev-tools/Initialize-DevEnvironment.ps1
-    Interactively verifies and installs prerequisites, prompting before each install.
+    Report what would be installed without changing state. Equivalent to -WhatIf.
 
 .EXAMPLE
     pwsh ./scripts/dev-tools/Initialize-DevEnvironment.ps1 -AutoApprove
     Verifies and installs prerequisites without prompting.
-
-.EXAMPLE
-    pwsh ./scripts/dev-tools/Initialize-DevEnvironment.ps1 -DryRun
-    Reports the actions that would be taken without changing state.
 
 .NOTES
     Compatible with PowerShell 7+. Tier T4 (dev tooling); coverage thresholds are
@@ -52,181 +43,12 @@ param(
     [switch] $DryRun
 )
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+Import-Module -Name (Join-Path $PSScriptRoot 'DevEnvironment.psm1') -Force
 
-Set-Variable -Name PythonMinVersion -Value ([version]'3.12') -Option Constant -Scope Script -Force
-Set-Variable -Name PythonMaxExclusiveVersion -Value ([version]'3.15') -Option Constant -Scope Script -Force
-
-# ---------------------------------------------------------------------------
-# Pure decision logic (no I/O; fully unit-testable)
-# ---------------------------------------------------------------------------
-
-function Test-PythonVersionInBand {
-    <#
-    .SYNOPSIS
-        Returns $true when a Python version string falls in [3.12, 3.15).
-    .PARAMETER VersionText
-        A version string such as '3.13.12', 'Python 3.13.12', or '3.12'.
-    #>
-    [CmdletBinding()]
-    [OutputType([bool])]
-    param(
-        [Parameter(Mandatory)]
-        [AllowEmptyString()]
-        [string] $VersionText
-    )
-
-    $match = [regex]::Match($VersionText, '(?<major>\d+)\.(?<minor>\d+)(?:\.(?<patch>\d+))?')
-    if (-not $match.Success) {
-        return $false
-    }
-
-    $parsed = [version]::new(
-        [int]$match.Groups['major'].Value,
-        [int]$match.Groups['minor'].Value)
-
-    return ($parsed -ge $script:PythonMinVersion) -and ($parsed -lt $script:PythonMaxExclusiveVersion)
-}
-
-function Select-PythonBandSatisfied {
-    <#
-    .SYNOPSIS
-        Returns $true when any of the supplied version strings is in band.
-    .PARAMETER VersionText
-        Zero or more candidate version strings from detected interpreters.
-    #>
-    [CmdletBinding()]
-    [OutputType([bool])]
-    param(
-        [Parameter()]
-        [AllowEmptyCollection()]
-        [string[]] $VersionText = @()
-    )
-
-    foreach ($candidate in $VersionText) {
-        if (Test-PythonVersionInBand -VersionText $candidate) {
-            return $true
-        }
-    }
-
-    return $false
-}
-
-function Resolve-InstallDecision {
-    <#
-    .SYNOPSIS
-        Decides the action for a single requirement given its detected state.
-    .DESCRIPTION
-        Returns one of: 'Skip' (already satisfied), 'WouldInstall' (missing, but a
-        dry-run/WhatIf path is active), 'Install' (missing and approved to proceed),
-        or 'Declined' (missing and the user did not confirm).
-    .PARAMETER IsPresent
-        Whether the requirement is already satisfied.
-    .PARAMETER IsDryRun
-        Whether a non-mutating dry-run/WhatIf path is active.
-    .PARAMETER IsConfirmed
-        Whether installation was confirmed (by ShouldProcess or -AutoApprove).
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory)] [bool] $IsPresent,
-        [Parameter(Mandatory)] [bool] $IsDryRun,
-        [Parameter(Mandatory)] [bool] $IsConfirmed
-    )
-
-    if ($IsPresent) { return 'Skip' }
-    if ($IsDryRun) { return 'WouldInstall' }
-    if ($IsConfirmed) { return 'Install' }
-    return 'Declined'
-}
-
-function Get-DevRequirementDefinition {
-    <#
-    .SYNOPSIS
-        Returns the ordered prerequisite definitions for this repository.
-    .DESCRIPTION
-        Each definition is a hashtable with: Id, Name, RequiresElevation. The order
-        of the returned array is the order in which requirements are checked.
-    #>
-    [CmdletBinding()]
-    [OutputType([System.Collections.Hashtable[]])]
-    param()
-
-    return @(
-        @{ Id = 'python'; Name = 'Python 3.12-3.14'; RequiresElevation = $false },
-        @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false },
-        @{ Id = 'msvc'; Name = 'MSVC C++ build tools'; RequiresElevation = $true },
-        @{ Id = 'project'; Name = 'Project environment (poetry install)'; RequiresElevation = $false }
-    )
-}
-
-function New-RequirementResult {
-    <#
-    .SYNOPSIS
-        Builds a single requirement-result record for the summary.
-    .PARAMETER Id
-        Stable requirement identifier.
-    .PARAMETER Name
-        Human-readable requirement name.
-    .PARAMETER State
-        Final state: 'Satisfied', 'Installed', 'WouldInstall', 'Declined', or 'Failed'.
-    .PARAMETER Detail
-        Optional supporting detail (detected version, error text, etc.).
-    #>
-    [CmdletBinding()]
-    [OutputType([System.Collections.Specialized.OrderedDictionary])]
-    param(
-        [Parameter(Mandatory)] [string] $Id,
-        [Parameter(Mandatory)] [string] $Name,
-        [Parameter(Mandatory)]
-        [ValidateSet('Satisfied', 'Installed', 'WouldInstall', 'Declined', 'Failed')]
-        [string] $State,
-        [Parameter()] [string] $Detail = ''
-    )
-
-    return [ordered]@{
-        Id     = $Id
-        Name   = $Name
-        State  = $State
-        Detail = $Detail
-    }
-}
-
-function Get-DevEnvironmentSummary {
-    <#
-    .SYNOPSIS
-        Formats requirement-result records into summary text lines.
-    .PARAMETER Result
-        One or more records produced by New-RequirementResult.
-    #>
-    [CmdletBinding()]
-    [OutputType([string[]])]
-    param(
-        [Parameter()]
-        [AllowEmptyCollection()]
-        [System.Collections.Specialized.OrderedDictionary[]] $Result = @()
-    )
-
-    $lines = @('Development environment summary:')
-    foreach ($record in $Result) {
-        $line = "  [{0}] {1} - {2}" -f $record.State, $record.Name, $record.Id
-        if ($record.Detail) {
-            $line += " ({0})" -f $record.Detail
-        }
-        $lines += $line
-    }
-
-    return $lines
-}
-
-# ---------------------------------------------------------------------------
-# External-process wrapper seams (mocked in tests; never call real exes in tests)
-# ---------------------------------------------------------------------------
+# --- External-process wrapper seams (mock the wrapper, never the real exe) --
 
 function Invoke-WingetExe {
+    # SYNOPSIS: Splat args into winget and return combined output.
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)] [string[]] $WingetArgs)
@@ -234,6 +56,7 @@ function Invoke-WingetExe {
 }
 
 function Invoke-PyLauncherExe {
+    # SYNOPSIS: Splat args into the py launcher and return combined output.
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)] [string[]] $PyArgs)
@@ -241,6 +64,7 @@ function Invoke-PyLauncherExe {
 }
 
 function Invoke-PythonExe {
+    # SYNOPSIS: Splat args into python and return combined output.
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)] [string[]] $PythonArgs)
@@ -248,6 +72,7 @@ function Invoke-PythonExe {
 }
 
 function Invoke-PoetryExe {
+    # SYNOPSIS: Splat args into poetry and return combined output.
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)] [string[]] $PoetryArgs)
@@ -255,6 +80,7 @@ function Invoke-PoetryExe {
 }
 
 function Invoke-VsWhereExe {
+    # SYNOPSIS: Splat args into vswhere.exe at the given path and return output.
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -265,6 +91,7 @@ function Invoke-VsWhereExe {
 }
 
 function Invoke-PoetryInstaller {
+    # SYNOPSIS: Run the official Poetry installer via the py launcher.
     [CmdletBinding()]
     [OutputType([string])]
     param()
@@ -272,6 +99,7 @@ function Invoke-PoetryInstaller {
 }
 
 function Invoke-ElevatedProcess {
+    # SYNOPSIS: Start a process with -Verb RunAs (UAC) and return its exit code.
     [CmdletBinding()]
     [OutputType([int])]
     param(
@@ -282,11 +110,10 @@ function Invoke-ElevatedProcess {
     return $process.ExitCode
 }
 
-# ---------------------------------------------------------------------------
-# Environment / host adapter seams
-# ---------------------------------------------------------------------------
+# --- Environment / host adapter seams --------------------------------------
 
 function Test-IsElevated {
+    # SYNOPSIS: Return $true when the current process is elevated (Administrator).
     [CmdletBinding()]
     [OutputType([bool])]
     param()
@@ -296,13 +123,23 @@ function Test-IsElevated {
 }
 
 function Test-CommandAvailable {
+    # SYNOPSIS: Return $true when a command of the given name is resolvable.
     [CmdletBinding()]
     [OutputType([bool])]
     param([Parameter(Mandatory)] [string] $Name)
     return [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
 }
 
+function Test-WingetAvailable {
+    # SYNOPSIS: Return $true when winget is resolvable.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    return Test-CommandAvailable -Name 'winget'
+}
+
 function Get-EnvironmentVariableValue {
+    # SYNOPSIS: Read a process-scoped environment variable.
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)] [string] $Name)
@@ -310,15 +147,19 @@ function Get-EnvironmentVariableValue {
 }
 
 function Set-EnvironmentVariableValue {
-    [CmdletBinding()]
+    # SYNOPSIS: Set or clear a process-scoped environment variable.
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Low')]
     param(
         [Parameter(Mandatory)] [string] $Name,
         [Parameter()] [AllowNull()] [string] $Value
     )
-    [Environment]::SetEnvironmentVariable($Name, $Value, [EnvironmentVariableTarget]::Process)
+    if ($PSCmdlet.ShouldProcess($Name, 'Set process environment variable')) {
+        [Environment]::SetEnvironmentVariable($Name, $Value, [EnvironmentVariableTarget]::Process)
+    }
 }
 
 function Get-VsWhereLocation {
+    # SYNOPSIS: Return the vswhere.exe path if present, else an empty string.
     [CmdletBinding()]
     [OutputType([string])]
     param()
@@ -327,15 +168,10 @@ function Get-VsWhereLocation {
     return ''
 }
 
-# ---------------------------------------------------------------------------
-# Detection helpers (compose seams + pure logic)
-# ---------------------------------------------------------------------------
+# --- Detection helpers (compose seams + pure logic) ------------------------
 
 function Get-DetectedPythonVersion {
-    <#
-    .SYNOPSIS
-        Collects candidate Python version strings via the py launcher and python.
-    #>
+    # SYNOPSIS: Collect candidate Python versions via the py launcher and python.
     [CmdletBinding()]
     [OutputType([string[]])]
     param()
@@ -360,6 +196,7 @@ function Get-DetectedPythonVersion {
 }
 
 function Test-PythonRequirementSatisfied {
+    # SYNOPSIS: Return $true when any detected interpreter is in the 3.12-3.14 band.
     [CmdletBinding()]
     [OutputType([bool])]
     param()
@@ -367,6 +204,7 @@ function Test-PythonRequirementSatisfied {
 }
 
 function Test-PoetryRequirementSatisfied {
+    # SYNOPSIS: Return $true when `poetry --version` resolves and reports Poetry.
     [CmdletBinding()]
     [OutputType([bool])]
     param()
@@ -376,16 +214,13 @@ function Test-PoetryRequirementSatisfied {
 }
 
 function Test-MsvcRequirementSatisfied {
-    <#
-    .SYNOPSIS
-        Returns the detected MSVC install path when the VC tools workload is present,
-        or an empty string when not present. Also reports whether a VS install exists.
-    #>
+    # SYNOPSIS: Return @{Satisfied;VsInstallPath}. VsInstallPath is the latest VS install
+    # path when any VS install exists (even without VC tools), so the caller can modify it.
     [CmdletBinding()]
-    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    [OutputType([pscustomobject])]
     param()
 
-    $result = [ordered]@{ Satisfied = $false; VsInstallPath = '' }
+    $result = [pscustomobject]@{ Satisfied = $false; VsInstallPath = '' }
 
     $vsWhere = Get-VsWhereLocation
     if (-not $vsWhere) { return $result }
@@ -407,24 +242,11 @@ function Test-MsvcRequirementSatisfied {
     return $result
 }
 
-# ---------------------------------------------------------------------------
-# Confirmation seam
-# ---------------------------------------------------------------------------
+# --- Confirmation seam -----------------------------------------------------
 
 function Approve-RequirementInstall {
-    <#
-    .SYNOPSIS
-        Decides whether an install is approved, honoring -AutoApprove and ShouldProcess.
-    .DESCRIPTION
-        When -AutoApprove is set, returns $true without prompting. Otherwise defers to
-        the caller's $PSCmdlet.ShouldProcess result, which honors -WhatIf and -Confirm.
-    .PARAMETER Target
-        The description of the item being installed (for the ShouldProcess prompt).
-    .PARAMETER ShouldProcessResult
-        The boolean result of $PSCmdlet.ShouldProcess(...) evaluated by the caller.
-    .PARAMETER AutoApprove
-        Whether non-interactive approval is in effect.
-    #>
+    # SYNOPSIS: Decide whether an install is approved. -AutoApprove returns $true without
+    # prompting; otherwise the caller's ShouldProcessResult (honoring -WhatIf/-Confirm) wins.
     [CmdletBinding()]
     [OutputType([bool])]
     param(
@@ -433,15 +255,15 @@ function Approve-RequirementInstall {
         [Parameter(Mandatory)] [bool] $AutoApprove
     )
 
+    [void]$Target
     if ($AutoApprove) { return $true }
     return $ShouldProcessResult
 }
 
-# ---------------------------------------------------------------------------
-# Install actions (compose seams; elevation only where required)
-# ---------------------------------------------------------------------------
+# --- Install actions (compose seams; elevation only where required) --------
 
 function Install-PythonRequirement {
+    # SYNOPSIS: Install Python 3.12 via winget, or fail clearly when winget is absent.
     [CmdletBinding()]
     [OutputType([void])]
     param()
@@ -452,22 +274,17 @@ function Install-PythonRequirement {
 }
 
 function Install-PoetryRequirement {
+    # SYNOPSIS: Install Poetry via the official installer (winget has no reliable pkg).
     [CmdletBinding()]
     [OutputType([void])]
     param()
-    # Poetry is not reliably on winget; use the official installer.
     [void](Invoke-PoetryInstaller)
 }
 
 function Install-MsvcRequirement {
-    <#
-    .SYNOPSIS
-        Installs the MSVC C++ build tools, modifying an existing VS install when present.
-    .PARAMETER VsInstallPath
-        The installation path of an existing Visual Studio install, or empty.
-    .PARAMETER IsElevated
-        Whether the current process is already elevated.
-    #>
+    # SYNOPSIS: Install MSVC C++ build tools (requires elevation). Modifies an existing VS
+    # install via the VS Installer when present, else winget BuildTools. Invoke-ElevatedProcess
+    # uses -Verb RunAs to trigger UAC for the scoped child; the script itself is not relaunched.
     [CmdletBinding()]
     [OutputType([void])]
     param(
@@ -475,10 +292,6 @@ function Install-MsvcRequirement {
         [Parameter(Mandatory)] [bool] $IsElevated
     )
 
-    # Elevation: Invoke-ElevatedProcess uses -Verb RunAs, which triggers the UAC
-    # prompt when the current process is not already elevated. The scoped elevated
-    # child process is sufficient; the whole script is not relaunched. $IsElevated
-    # is retained for caller diagnostics and future no-prompt paths.
     [void]$IsElevated
 
     if ($VsInstallPath) {
@@ -503,14 +316,9 @@ function Install-MsvcRequirement {
 }
 
 function Install-ProjectRequirement {
-    <#
-    .SYNOPSIS
-        Runs `poetry install` with VIRTUAL_ENV cleared so the in-project .venv is used.
-    .DESCRIPTION
-        This machine's shell sets VIRTUAL_ENV to the global Python install, which makes
-        Poetry install into global site-packages. The variable is cleared for the child
-        invocation and restored afterward.
-    #>
+    # SYNOPSIS: Run `poetry install` with VIRTUAL_ENV cleared so the in-project .venv is used.
+    # The shell sets VIRTUAL_ENV to the global Python, which would push Poetry into global
+    # site-packages; clear it for the child invocation and restore it afterward.
     [CmdletBinding()]
     [OutputType([void])]
     param()
@@ -519,37 +327,64 @@ function Install-ProjectRequirement {
     try {
         Set-EnvironmentVariableValue -Name 'VIRTUAL_ENV' -Value $null
         [void](Invoke-PoetryExe -PoetryArgs @('install'))
-    } finally {
+    }
+    finally {
         Set-EnvironmentVariableValue -Name 'VIRTUAL_ENV' -Value $previous
     }
 }
 
-function Test-WingetAvailable {
+# --- Orchestration ---------------------------------------------------------
+
+function Test-RequirementPresent {
+    # SYNOPSIS: Detect whether a requirement is satisfied; return @{IsPresent;MsvcState}.
+    # 'project' is always not-present because `poetry install` is idempotent and is the
+    # final provisioning step.
     [CmdletBinding()]
-    [OutputType([bool])]
-    param()
-    return Test-CommandAvailable -Name 'winget'
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string] $Id)
+
+    $state = [pscustomobject]@{ IsPresent = $false; MsvcState = $null }
+
+    switch ($Id) {
+        'python' { $state.IsPresent = Test-PythonRequirementSatisfied }
+        'poetry' { $state.IsPresent = Test-PoetryRequirementSatisfied }
+        'msvc' {
+            $state.MsvcState = Test-MsvcRequirementSatisfied
+            $state.IsPresent = [bool]$state.MsvcState.Satisfied
+        }
+        'project' { $state.IsPresent = $false }
+        default { throw "Unknown requirement id: $Id" }
+    }
+
+    return $state
 }
 
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
+function Invoke-RequirementInstall {
+    # SYNOPSIS: Dispatch the install action for a single requirement id. MsvcState is used
+    # for the 'msvc' id; IsElevated is passed through to the MSVC install.
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)] [string] $Id,
+        [Parameter()] [psobject] $MsvcState,
+        [Parameter(Mandatory)] [bool] $IsElevated
+    )
+
+    switch ($Id) {
+        'python' { Install-PythonRequirement }
+        'poetry' { Install-PoetryRequirement }
+        'msvc' {
+            $path = if ($MsvcState) { [string]$MsvcState.VsInstallPath } else { '' }
+            Install-MsvcRequirement -VsInstallPath $path -IsElevated $IsElevated
+        }
+        'project' { Install-ProjectRequirement }
+        default { throw "Unknown requirement id: $Id" }
+    }
+}
 
 function Invoke-RequirementCheck {
-    <#
-    .SYNOPSIS
-        Detects, optionally installs, and records the outcome of one requirement.
-    .PARAMETER Definition
-        A requirement definition from Get-DevRequirementDefinition.
-    .PARAMETER IsDryRun
-        Whether a non-mutating dry-run/WhatIf path is active.
-    .PARAMETER AutoApprove
-        Whether non-interactive approval is in effect.
-    .PARAMETER ShouldProcessCallback
-        A ScriptBlock taking a target string and returning the ShouldProcess result.
-    .PARAMETER IsElevated
-        Whether the current process is already elevated.
-    #>
+    # SYNOPSIS: Detect, optionally install, and record the outcome of one requirement.
+    # ShouldProcessCallback takes a target string and returns the ShouldProcess result.
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
@@ -560,24 +395,10 @@ function Invoke-RequirementCheck {
         [Parameter(Mandatory)] [bool] $IsElevated
     )
 
-    $msvcState = $null
-    switch ($Definition.Id) {
-        'python' { $isPresent = Test-PythonRequirementSatisfied }
-        'poetry' { $isPresent = Test-PoetryRequirementSatisfied }
-        'msvc' {
-            $msvcState = Test-MsvcRequirementSatisfied
-            $isPresent = [bool]$msvcState.Satisfied
-        }
-        'project' {
-            # The project environment is always (re)provisioned when host tools pass;
-            # `poetry install` is idempotent, so treat it as not-yet-satisfied to run it.
-            $isPresent = $false
-        }
-        default { throw "Unknown requirement id: $($Definition.Id)" }
-    }
+    $state = Test-RequirementPresent -Id $Definition.Id
 
-    if ($isPresent) {
-        return New-RequirementResult -Id $Definition.Id -Name $Definition.Name -State 'Satisfied'
+    if ($state.IsPresent) {
+        return Get-RequirementResult -Id $Definition.Id -Name $Definition.Name -State 'Satisfied'
     }
 
     $confirmed = Approve-RequirementInstall `
@@ -587,37 +408,23 @@ function Invoke-RequirementCheck {
 
     $decision = Resolve-InstallDecision -IsPresent $false -IsDryRun $IsDryRun -IsConfirmed $confirmed
 
-    switch ($decision) {
-        'WouldInstall' {
-            return New-RequirementResult -Id $Definition.Id -Name $Definition.Name `
-                -State 'WouldInstall' -Detail 'dry-run: no changes made'
-        }
-        'Declined' {
-            return New-RequirementResult -Id $Definition.Id -Name $Definition.Name `
-                -State 'Declined' -Detail 'install not confirmed'
-        }
-        'Install' {
-            try {
-                switch ($Definition.Id) {
-                    'python' { Install-PythonRequirement }
-                    'poetry' { Install-PoetryRequirement }
-                    'msvc' { Install-MsvcRequirement -VsInstallPath $msvcState.VsInstallPath -IsElevated $IsElevated }
-                    'project' { Install-ProjectRequirement }
-                }
-                return New-RequirementResult -Id $Definition.Id -Name $Definition.Name -State 'Installed'
-            } catch {
-                return New-RequirementResult -Id $Definition.Id -Name $Definition.Name `
-                    -State 'Failed' -Detail $_.Exception.Message
-            }
-        }
+    $terminal = Resolve-RequirementOutcome -Decision $decision -Id $Definition.Id -Name $Definition.Name
+    if ($terminal) {
+        return $terminal
+    }
+
+    try {
+        Invoke-RequirementInstall -Id $Definition.Id -MsvcState $state.MsvcState -IsElevated $IsElevated
+        return Get-RequirementResult -Id $Definition.Id -Name $Definition.Name -State 'Installed'
+    }
+    catch {
+        return Get-RequirementResult -Id $Definition.Id -Name $Definition.Name `
+            -State 'Failed' -Detail $_.Exception.Message
     }
 }
 
 function Invoke-DevEnvironmentSetup {
-    <#
-    .SYNOPSIS
-        Runs every requirement check in order and returns the result records.
-    #>
+    # SYNOPSIS: Run every requirement check in order and return the result records.
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary[]])]
     param(
@@ -640,9 +447,36 @@ function Invoke-DevEnvironmentSetup {
     return $results
 }
 
-# ---------------------------------------------------------------------------
-# Entrypoint (guarded so the script can be dot-sourced for testing)
-# ---------------------------------------------------------------------------
+function Invoke-DevEnvironmentMain {
+    # SYNOPSIS: Run the full setup, print the summary, and return an exit code (0 ok,
+    # 1 when any requirement Failed). Separated from the exit-calling guard block so it
+    # is unit-testable without terminating the test host.
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)] [bool] $IsDryRun,
+        [Parameter(Mandatory)] [bool] $AutoApprove,
+        [Parameter(Mandatory)] [scriptblock] $ShouldProcessCallback,
+        [Parameter(Mandatory)] [bool] $IsElevated
+    )
+
+    $results = Invoke-DevEnvironmentSetup `
+        -IsDryRun $IsDryRun `
+        -AutoApprove $AutoApprove `
+        -ShouldProcessCallback $ShouldProcessCallback `
+        -IsElevated $IsElevated
+
+    foreach ($line in (Get-DevEnvironmentSummary -Result $results)) {
+        Write-Information -MessageData $line -InformationAction Continue
+    }
+
+    if ($results | Where-Object { $_.State -eq 'Failed' }) {
+        return 1
+    }
+    return 0
+}
+
+# --- Entrypoint (guarded so the script can be dot-sourced for testing) -----
 
 if ($MyInvocation.InvocationName -eq '.') {
     return
@@ -651,18 +485,10 @@ if ($MyInvocation.InvocationName -eq '.') {
 $dryRunEffective = [bool]($DryRun -or $WhatIfPreference)
 $shouldProcessCallback = { param($target) $PSCmdlet.ShouldProcess($target, 'Install') }
 
-$results = Invoke-DevEnvironmentSetup `
+$exitCode = Invoke-DevEnvironmentMain `
     -IsDryRun $dryRunEffective `
     -AutoApprove ([bool]$AutoApprove) `
     -ShouldProcessCallback $shouldProcessCallback `
     -IsElevated (Test-IsElevated)
 
-foreach ($line in (Get-DevEnvironmentSummary -Result $results)) {
-    Write-Host $line
-}
-
-if ($results | Where-Object { $_.State -eq 'Failed' }) {
-    exit 1
-}
-
-exit 0
+exit $exitCode
