@@ -65,4 +65,5 @@ extensions/drm-copilot/coverage
 .claude/agent-memory
 .claude/state/
 .claude/worktrees
+excel-pq-symbols
 
