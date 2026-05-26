@@ -38,6 +38,11 @@ Deliver a single-file Python CLI, `normalize_le.py` (Python 3.10+; dependencies
   keeps it; if a `KEY` column is present but its values do not match the pattern,
   resolves the conflict per `--key-mismatch` (prompt the user when interactive,
   otherwise fail fast).
+- Fills blank `FY`/`Q1..Q4` totals from their monthly components before collapsing:
+  the source omits these totals on some rows even though they are definitionally the
+  sum of their months, and a blank total reads as 0 and breaks the per-row tie-out. A
+  blank `FY` is filled with `sum(Jan..Dec)` and a blank `Qn` with the sum of its three
+  months; populated totals are left unchanged (NaN months count as 0).
 - Collapses all source rows sharing a `KEY` into one normalized row: text columns
   taken from the first matching row; month, `FY`, and quarter columns summed.
 - Drops the `YTD/YTG` column and adds a derived `YTG` column = sum(May..Dec).
@@ -118,11 +123,11 @@ required.
 | F   | `Type`           | text    | e.g. `Gross Sales`, `Off Invoice`, `PPD`, `Lbs`. |
 | G   | `GtN Mapping`    | text    | Roll-up label. |
 | H–S | `Jan`..`Dec`     | numeric | 12 monthly value columns. |
-| T   | `FY`             | numeric | SUM(H:S) per row. |
-| U   | `Q1`             | numeric | SUM(Jan-Mar). |
-| V   | `Q2`             | numeric | SUM(Apr-Jun). |
-| W   | `Q3`             | numeric | SUM(Jul-Sep). |
-| X   | `Q4`             | numeric | SUM(Oct-Dec). |
+| T   | `FY`             | numeric | SUM(H:S) per row. May be blank; filled with `sum(Jan..Dec)` when blank. |
+| U   | `Q1`             | numeric | SUM(Jan-Mar). May be blank; filled with `sum(Jan..Mar)` when blank. |
+| V   | `Q2`             | numeric | SUM(Apr-Jun). May be blank; filled with `sum(Apr..Jun)` when blank. |
+| W   | `Q3`             | numeric | SUM(Jul-Sep). May be blank; filled with `sum(Jul..Sep)` when blank. |
+| X   | `Q4`             | numeric | SUM(Oct-Dec). May be blank; filled with `sum(Oct..Dec)` when blank. |
 | Y   | `Super Category` | text    | |
 | Z   | `PPG`            | text    | |
 
@@ -173,9 +178,12 @@ not persisted and an existing table of the same name is dropped and rewritten.
 - [x] `YTG` = sum(May..Dec) computed on the output row, not from source.
 - [x] `Super Category` and `PPG` are both populated from the source `PPG` column
       (the as-built quirk) and are identical per row.
+- [ ] Blank `FY`/`Q1..Q4` cells in the source are filled from their monthly
+      components before collapsing (`FY <- sum(Jan..Dec)`, `Qn <- sum(its months)`);
+      populated totals are left unchanged and NaN months count as 0.
 - [x] Validation enforces output-row-count == unique keys, per-column source/output
-      tie-outs within `1e-6`, and `FY == sum(months)` per row; failures raise and
-      exit non-zero.
+      tie-outs within `1e-6`, `FY == sum(months)` per row, and `Qn == sum(its months)`
+      per row; failures raise and exit non-zero.
 - [x] stdout prints source rows, unique keys, output rows, per-month/FY/quarter
       tie-outs, and first/middle/last output rows for spot-checking.
 - [x] The normalized DataFrame is persisted to the SQLite database at `--output`

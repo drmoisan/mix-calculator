@@ -32,6 +32,7 @@ import pandas as pd
 
 from src.le_columns import normalize_name, resolve_columns
 from src.le_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
+from src.le_totals import fill_blank_totals, total_vs_months_violations
 from src.pandas_io import read_excel_sheet, write_table
 
 if TYPE_CHECKING:
@@ -72,6 +73,15 @@ YTG_MONTHS: list[str] = MONTH_COLUMNS[4:]
 
 # Quarter columns (source columns U..X).
 QUARTER_COLUMNS: list[str] = ["Q1", "Q2", "Q3", "Q4"]
+
+# Maps each quarter to its three constituent monthly columns sliced from
+# MONTH_COLUMNS in calendar order (Q1->Jan,Feb,Mar ... Q4->Oct,Nov,Dec). Used to
+# fill blank FY/quarter cells at the read boundary and to validate per-row
+# quarter consistency.
+QUARTER_TO_MONTHS: dict[str, list[str]] = {
+    quarter: MONTH_COLUMNS[index * 3 : index * 3 + 3]
+    for index, quarter in enumerate(QUARTER_COLUMNS)
+}
 
 # Numeric columns that are summed when collapsing rows that share a KEY.
 SUM_COLUMNS: list[str] = [*MONTH_COLUMNS, "FY", *QUARTER_COLUMNS]
@@ -202,6 +212,11 @@ def load_source(
     )
     frame = frame.loc[~customer_blank].copy()
 
+    # Fill only the blank FY/quarter totals from their monthly components: the
+    # source omits these totals on some rows even though they are definitionally
+    # the sum of their months, and left blank they read as 0 and trip the tie-out.
+    frame = fill_blank_totals(frame, MONTH_COLUMNS, QUARTER_TO_MONTHS)
+
     # Establish KEY per the documented branches (create/trust/resolve).
     frame = resolve_key(
         frame,
@@ -293,8 +308,9 @@ def validate_tieouts(
     Raises:
         ValueError: When the output row count differs from the number of unique
             KEYs, when any month/``FY``/quarter column total differs between
-            source and output beyond ``tol``, or when any output row violates
-            ``FY == sum(months)`` beyond ``tol``.
+            source and output beyond ``tol``, when any output row violates
+            ``FY == sum(months)`` beyond ``tol``, or when any output row violates
+            ``Qn == sum(its months)`` beyond ``tol``.
     """
     unique_keys = source_df["KEY"].nunique()
     if len(output_df) != unique_keys:
@@ -313,14 +329,17 @@ def validate_tieouts(
                 f"{source_total} != output total {output_total} (tol={tol})."
             )
 
-    # Every output row's FY must equal the sum of its monthly columns.
-    month_sums = output_df[MONTH_COLUMNS].sum(axis=1)
-    fy_diff = (output_df["FY"] - month_sums).abs()
-    if bool((fy_diff > tol).any()):
-        offending = output_df.loc[fy_diff > tol, "KEY"].tolist()
-        raise ValueError(
-            "Tie-out failure: FY != sum(months) for KEY(s) " f"{offending} (tol={tol})."
-        )
+    # Every output row's FY and each quarter must equal the sum of their months;
+    # FY covers Jan..Dec and each quarter covers its three-month group. These
+    # per-row checks confirm the load-time blank-total fill stayed consistent.
+    per_row_checks = {"FY": MONTH_COLUMNS, **QUARTER_TO_MONTHS}
+    for total_column, months in per_row_checks.items():
+        offending = total_vs_months_violations(output_df, total_column, months, tol)
+        if offending:
+            raise ValueError(
+                f"Tie-out failure: {total_column} != sum(months) for KEY(s) "
+                f"{offending} (tol={tol})."
+            )
 
 
 def write_sqlite(df: pd.DataFrame, db_path: str, table_name: str) -> None:

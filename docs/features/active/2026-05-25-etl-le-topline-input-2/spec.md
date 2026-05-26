@@ -64,7 +64,9 @@ SQLite, and prints a tie-out summary.
       `--key-mismatch trust|overwrite`.
 - Main user flow (happy path): a workbook whose columns resolve to the documented
   source schema is loaded (Excel row 3 as header, data from row 4); rows with blank
-  `Customer` are dropped; columns are resolved and renamed to canonical names; `KEY`
+  `Customer` are dropped; columns are resolved and renamed to canonical names; blank
+  `FY`/`Q1..Q4` totals are filled from their monthly components (`FY <- sum(Jan..Dec)`,
+  `Qn <- sum(its months)`; populated totals untouched, NaN months count as 0); `KEY`
   is established per KEY handling; all rows sharing a `KEY` collapse into one row (text
   from the first matching row, numeric columns summed); the `YTD/YTG` column is dropped
   and a derived `YTG = sum(May..Dec)` is added after `Q4`; all transformations occur in
@@ -169,7 +171,10 @@ Public functions (per the research module layout):
   schema.
 - `compute_ytg(df) -> pd.Series` — derived `YTG = sum(May..Dec)` on the output row.
 - `validate_tieouts(source_df, output_df) -> None` — enforces row-count, per-column
-  tie-outs within `1e-6`, and `FY == sum(months)`; raises on failure.
+  tie-outs within `1e-6`, `FY == sum(months)`, and `Qn == sum(its months)` per row;
+  raises on failure.
+- `fill_blank_totals(df, ...) -> pd.DataFrame` — fills only blank (`NaN`) `FY`/quarter
+  cells with the sum of their constituent months; populated totals are left unchanged.
 - `write_sqlite(df, dest, table_name) -> None` — I/O boundary; persists the normalized
   DataFrame to the SQLite database at `dest` via
   `df.to_sql(table_name, conn, if_exists="replace", index=False)`.

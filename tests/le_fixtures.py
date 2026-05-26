@@ -27,7 +27,7 @@ from src.normalize_le import (
 from src.pandas_io import read_table as pandas_io_read_table
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     import pandas as pd
     import pytest
@@ -176,12 +176,13 @@ def make_row(
     sku: object,
     type_: str,
     ppg: str,
-    months: list[float],
+    months: Sequence[float | None],
     ytd_ytg: str = "YTD",
     super_category: str = "SOURCE_SUPER_SHOULD_BE_IGNORED",
     description: str = "Some Description",
     gtn: str = "RollUp",
     key: str | None = None,
+    blank_totals: bool = False,
 ) -> dict[str, object]:
     """Build a single source-row dict keyed by :data:`SOURCE_COLUMNS`.
 
@@ -200,6 +201,10 @@ def make_row(
             ``KEY`` column so KEY is created from the rebuilt pattern. A present
             ``KEY`` is exercised by passing an explicit value together with a
             ``header`` that includes ``"KEY"``.
+        blank_totals: When ``True``, leave the ``FY`` and ``Q1``..``Q4`` cells
+            blank (``None``) to reproduce the source workbook quirk where those
+            totals are omitted while the monthly columns are populated. When
+            ``False`` (the default), each total is set to the sum of its months.
 
     Returns:
         A dict mapping every source column to a cell value.
@@ -218,12 +223,35 @@ def make_row(
     # Populate the 12 monthly columns from the supplied vector.
     for index, month in enumerate(MONTH_COLUMNS):
         record[month] = months[index]
-    record["FY"] = float(sum(months))
-    record["Q1"] = float(sum(months[0:3]))
-    record["Q2"] = float(sum(months[3:6]))
-    record["Q3"] = float(sum(months[6:9]))
-    record["Q4"] = float(sum(months[9:12]))
+
+    # Either omit the totals (blank-cell quirk) or set each to its month sum.
+    if blank_totals:
+        record["FY"] = None
+        record["Q1"] = None
+        record["Q2"] = None
+        record["Q3"] = None
+        record["Q4"] = None
+    else:
+        record["FY"] = _month_sum(months)
+        record["Q1"] = _month_sum(months[0:3])
+        record["Q2"] = _month_sum(months[3:6])
+        record["Q3"] = _month_sum(months[6:9])
+        record["Q4"] = _month_sum(months[9:12])
     return record
+
+
+def _month_sum(values: Sequence[float | None]) -> float:
+    """Sum a slice of monthly values, treating ``None`` (a blank cell) as 0.
+
+    Args:
+        values: A slice of the twelve monthly values, where ``None`` represents
+            a blank source cell.
+
+    Returns:
+        The float sum of the non-``None`` values.
+    """
+    # Blank monthly cells contribute 0, matching the load-time fill semantics.
+    return float(sum(value for value in values if value is not None))
 
 
 def build_workbook(

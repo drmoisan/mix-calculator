@@ -99,6 +99,26 @@ def test_validate_tieouts_fy_mismatch_raises() -> None:
         validate_tieouts(frame, out)
 
 
+def test_validate_tieouts_quarter_mismatch_raises() -> None:
+    """An output row where a quarter != sum(its months) raises ValueError.
+
+    Perturbs Q2 only and realigns both the source Q2 column total and the
+    monthly column it would otherwise tie to, so the column-total checks and the
+    FY == sum(months) check pass but the per-row Q2 consistency check fails.
+    """
+    # Arrange
+    frame = loaded_frame(
+        [make_row(customer="A", sku=1, type_="T", ppg="P", months=[1.0] * 12)]
+    )
+    out = normalize(frame)
+    out.loc[0, "Q2"] = as_float(out.loc[0, "Q2"]) + 5.0
+    frame.loc[frame.index[0], "Q2"] = as_float(frame.loc[frame.index[0], "Q2"]) + 5.0
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="Q2"):
+        validate_tieouts(frame, out)
+
+
 @given(
     specs=st.lists(
         st.lists(
@@ -211,6 +231,52 @@ def test_main_end_to_end_success(
     assert "First output row:" in captured.out
     assert "Middle output row:" in captured.out
     assert "Last output row:" in captured.out
+
+
+def test_main_end_to_end_blank_fy_row_completes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A dataset with a blank-FY/quarter row completes and persists via main.
+
+    Before the load-time blank-total fill, the deduction-style row's blank FY
+    (read as 0) would trip the per-row FY == sum(months) tie-out; the fill makes
+    main run to completion and write the table to the in-memory SQLite database.
+    """
+    # Arrange: one fully-populated row and one fabricated blank-FY/quarter row.
+    months_blank = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
+    buffer = build_workbook(
+        [
+            make_row(
+                customer="Acme Foods",
+                sku=5,
+                type_="GS",
+                ppg="PX",
+                months=[1.0] * 12,
+            ),
+            make_row(
+                customer="Globex Market",
+                sku=9,
+                type_="Deductions",
+                ppg="PY",
+                months=months_blank,
+                blank_totals=True,
+            ),
+        ]
+    )
+    patch_load_source(monkeypatch, buffer)
+    con = patch_connect(monkeypatch)
+
+    # Act: main must not raise on the blank-FY row and must persist both KEYs.
+    exit_code = main(["input.xlsx", "--output", "out.db", "--table-name", "LE"])
+    read_back = read_table(con, "LE")
+    con.real_close()
+    captured = capsys.readouterr()
+
+    # Assert
+    assert exit_code == 0
+    assert len(read_back) == 2
+    assert "Source rows:" in captured.out
 
 
 def test_main_missing_output_exits_nonzero() -> None:
