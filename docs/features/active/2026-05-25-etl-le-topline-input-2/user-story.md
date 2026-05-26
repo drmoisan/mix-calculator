@@ -42,7 +42,7 @@ corrected.
 - Scenario: monthly LE normalization
   - who is acting? The FP&A analyst.
   - what triggered the action? A new monthly LE workbook is ready for normalization.
-  - what steps do they take? They run `python -m src.normalize_le LE.xlsx --output le.db`.
+  - what steps do they take? They run `poetry run normalize-le LE.xlsx --output le.db`.
     The script loads `LE-8 + 4` (header on Excel row 3), drops blank-`Customer` rows,
     rebuilds `KEY`, collapses rows by key (first-row text, summed numerics), derives
     `YTG = sum(May..Dec)`, validates tie-outs, and persists the normalized table to the

@@ -83,10 +83,11 @@ persists the result to SQLite, and prints a tie-out summary.
 
 ## API / CLI Surface
 
-Invocation (package layout):
+Invocation (Poetry console-script entry point `normalize-le`, declared under
+`[tool.poetry.scripts]`):
 
 ```
-python -m src.normalize_le <input.xlsx> --output <path.db> \
+poetry run normalize-le <input.xlsx> --output <path.db> \
   [--source-sheet "LE-8 + 4"] [--table-name LE]
 ```
 
@@ -111,11 +112,11 @@ Public functions (per the research module layout):
 - `main(argv: list[str] | None = None) -> int` — CLI entry point returning an exit code.
 
 - Example invocations with expected outputs (concise):
-  - `python -m src.normalize_le book.xlsx --output le.db` — persists table `LE` to
+  - `poetry run normalize-le book.xlsx --output le.db` — persists table `LE` to
     `le.db`, prints tie-out summary, exits 0.
-  - `python -m src.normalize_le book.xlsx` (no `--output`) — exits non-zero (output is
+  - `poetry run normalize-le book.xlsx` (no `--output`) — exits non-zero (output is
     required).
-  - `python -m src.normalize_le bad.xlsx --output le.db` (schema mismatch) — prints the
+  - `poetry run normalize-le bad.xlsx --output le.db` (schema mismatch) — prints the
     missing/extra columns and exits non-zero.
 - Contracts and validation rules: `--output` is required and must be a SQLite database
   path. The literal column headers (including the space in `SKU Descripiton` and the

@@ -47,7 +47,7 @@ Deliver a single-file Python CLI, `normalize_le.py` (Python 3.10+; dependencies
 CLI:
 
 ```
-python -m src.normalize_le <input.xlsx> --output <path.db> \
+poetry run normalize-le <input.xlsx> --output <path.db> \
   [--source-sheet "LE-8 + 4"] [--table-name LE]
 ```
 

@@ -11,7 +11,7 @@ rows into a single full-year row, derives the `YTG` (`sum(May..Dec)`) column, an
 persists the result to a SQLite database.
 
 ```sh
-python -m src.normalize_le <input.xlsx> --output <path.db> \
+poetry run normalize-le <input.xlsx> --output <path.db> \
   [--source-sheet "LE-8 + 4"] [--table-name LE]
 ```
 
