@@ -1,10 +1,10 @@
-"""Position-independent column resolution for the LE normalization ETL.
+"""Position-independent column resolution for the ETL read boundary.
 
-The LE source workbook is authored by hand, so its columns may be reordered or
+ETL source workbooks are authored by hand, so their columns may be reordered or
 carry minor typographic variants relative to the documented schema. This module
 resolves a set of actual column labels to a set of expected (canonical) labels
 without requiring exact positions, so the downstream transform can always work
-against canonical names.
+against canonical names. It is consumed by both the LE and AOP loaders.
 
 Resolution proceeds in two passes:
 
@@ -16,7 +16,7 @@ Resolution proceeds in two passes:
       that meets the similarity threshold.
 
 The module is intentionally self-contained: it depends only on ``re``,
-``difflib``, and typing so it can be imported by ``normalize_le`` without
+``difflib``, and typing so it can be imported by the ETL loaders without
 creating an import cycle. It contains no I/O and no logging; the caller is
 responsible for emitting any warning about extra columns.
 """

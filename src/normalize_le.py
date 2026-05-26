@@ -30,9 +30,9 @@ from typing import IO, TYPE_CHECKING
 
 import pandas as pd
 
-from src.le_columns import normalize_name, resolve_columns
-from src.le_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
-from src.le_totals import fill_blank_totals, total_vs_months_violations
+from src.etl_columns import normalize_name, resolve_columns
+from src.etl_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
+from src.etl_totals import fill_blank_totals, total_vs_months_violations
 from src.pandas_io import read_excel_sheet, write_table
 
 if TYPE_CHECKING:
@@ -40,8 +40,8 @@ if TYPE_CHECKING:
 
 # Re-export the column resolver and KEY helpers so callers and tests can import
 # them from this module as well as from their home modules. The resolver lives
-# in ``src.le_columns`` and the KEY helpers in ``src.le_key`` so this file stays
-# under the 500-line limit.
+# in ``src.etl_columns`` and the KEY helpers in ``src.etl_key`` so this file
+# stays under the 500-line limit.
 __all__ = [
     "coerce_sku",
     "compute_ytg",
@@ -215,7 +215,7 @@ def load_source(
     # Fill only the blank FY/quarter totals from their monthly components: the
     # source omits these totals on some rows even though they are definitionally
     # the sum of their months, and left blank they read as 0 and trip the tie-out.
-    frame = fill_blank_totals(frame, MONTH_COLUMNS, QUARTER_TO_MONTHS)
+    frame = fill_blank_totals(frame, {"FY": MONTH_COLUMNS, **QUARTER_TO_MONTHS})
 
     # Establish KEY per the documented branches (create/trust/resolve).
     frame = resolve_key(

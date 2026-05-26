@@ -1,9 +1,10 @@
-"""Business-key derivation and KEY-column reconciliation for the LE ETL.
+"""Business-key derivation and KEY-column reconciliation for the ETL loaders.
 
-The LE source workbook stores ``KEY`` as an Excel formula (``=C&E&F``), so a
-loaded cell may hold the formula text, a stale cached value, or ``None``. This
-module rebuilds the canonical business key from its components and reconciles a
-present-but-diverging source ``KEY`` column against the rebuilt pattern.
+ETL source workbooks store ``KEY`` as an Excel concatenation of
+``Customer & SKU # & Type``, so a loaded cell may hold the formula text, a stale
+cached value, or ``None``. This module rebuilds the canonical business key from
+its components and reconciles a present-but-diverging source ``KEY`` column
+against the rebuilt pattern. It is consumed by both the LE and AOP loaders.
 
 Responsibilities:
     - ``coerce_sku`` / ``rebuild_key``: pure helpers that render the key exactly

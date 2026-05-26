@@ -1,0 +1,32 @@
+# Module rigor tier classification for every src project.
+#
+# Schema (derived in
+# docs/features/active/2026-05-26-load-aop-sheet-7/evidence/other/
+# quality-tiers-schema-derivation.2026-05-26T14-03.md): a top-level `projects`
+# mapping from each src module path to exactly one tier in {T1, T2, T3, T4}, per
+# .claude/rules/quality-tiers.md. Every project must be classified; an
+# unclassified project fails the CI tier-classification stage.
+#
+# Tier rationale:
+#   T2 (Core) — pure-transform ETL core and the AOP loader. Bugs cause feature
+#     regressions but not silent data loss; the per-row tie-out validation is the
+#     correctness gate, so these modules are Core rather than Critical.
+#   T3 (Adapters & UI) — the pandas I/O boundary wraps APIs the team does not own
+#     (pandas read_excel/to_sql, openpyxl), which is the T3 adapter role.
+#   T4 (Scaffolding) — the empty package marker.
+
+projects:
+  # Pure-transform ETL core and loaders (T2-Core).
+  src/normalize_le.py: T2
+  src/etl_columns.py: T2
+  src/etl_key.py: T2
+  src/etl_totals.py: T2
+  src/load_aop.py: T2
+  src/_load_aop_helpers.py: T2
+  src/calculator.py: T2
+
+  # I/O adapter boundary around pandas/openpyxl/SQLite (T3-Adapters).
+  src/pandas_io.py: T3
+
+  # Empty package marker / scaffolding (T4).
+  src/__init__.py: T4

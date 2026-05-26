@@ -1,4 +1,4 @@
-"""Tests for KEY derivation and reconciliation (:mod:`src.le_key`).
+"""Tests for KEY derivation and reconciliation (:mod:`src.etl_key`).
 
 Covers the pure ``decide_key_action`` decision seam and ``resolve_key`` KEY
 establishment (absent -> created; present-and-matching -> trusted;
@@ -149,7 +149,7 @@ def test_resolve_key_present_diverging_trust_keeps_existing(
     base["KEY"] = ["LEGACY_KEY"]
 
     # Act
-    with caplog.at_level("WARNING", logger="src.le_key"):
+    with caplog.at_level("WARNING", logger="src.etl_key"):
         result = resolve_key(base, "trust", has_key_column=True, is_tty=lambda: False)
 
     # Assert
@@ -167,7 +167,7 @@ def test_resolve_key_present_diverging_overwrite_replaces(
     base["KEY"] = ["LEGACY_KEY"]
 
     # Act
-    with caplog.at_level("WARNING", logger="src.le_key"):
+    with caplog.at_level("WARNING", logger="src.etl_key"):
         result = resolve_key(
             base, "overwrite", has_key_column=True, is_tty=lambda: False
         )

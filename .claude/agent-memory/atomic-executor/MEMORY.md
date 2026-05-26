@@ -1,1 +1,2 @@
 - [pandas strict-Pyright needs pandas-stubs](pandas-pyright-stubs.md) — pandas/openpyxl ship no py.typed; under strict Pyright add pandas-stubs or face 60+ Unknown-type errors
+- [Hypothesis float magnitude bounds](hypothesis-float-magnitude-bounds.md) — bound st.floats magnitude in sum+abs-tolerance property tests or they become unsatisfiable; green baseline doesn't prove soundness

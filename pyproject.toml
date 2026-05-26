@@ -31,6 +31,7 @@ pandas-stubs = ">=2.2,<4.0"
 
 [tool.poetry.scripts]
 normalize-le = "src.normalize_le:main"
+load-aop = "src.load_aop:main"
 
 [tool.black]
 line-length = 88
