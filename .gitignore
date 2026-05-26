@@ -62,7 +62,6 @@ extensions/drm-copilot/coverage
 # Local Tooling
 .agents/
 .codex/
-.claude/agent-memory
 .claude/state/
 .claude/worktrees
 excel-pq-symbols

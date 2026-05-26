@@ -1,0 +1,4 @@
+- [Poetry VIRTUAL_ENV quirk](poetry-virtualenv-quirk.md) — prefix all `poetry run` toolchain commands with `env -u VIRTUAL_ENV` in this repo
+- [MCP template tools unavailable](mcp-template-tools-unavailable.md) — review-artifact MCP template/validator tools absent; fall back to canonical headings + record MCP_TEMPLATE_RESOLUTION_UNAVAILABLE
+- [pyright:ignore authorization scope](pyright-ignore-authorization-scope.md) — when the caller brief lists `# pyright: ignore` as in-scope, gate it like noqa/type:ignore even though the repo rule text is narrower
+- [issue #2 file-size watch](issue2-file-size-watch.md) — normalize-le test files cluster near the 500-line limit; defect-fix coverage pushed test_normalize_le.py to 532 (FAIL); merge-base is 03eb801

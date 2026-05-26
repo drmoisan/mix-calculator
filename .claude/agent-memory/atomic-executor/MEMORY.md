@@ -1,0 +1,1 @@
+- [pandas strict-Pyright needs pandas-stubs](pandas-pyright-stubs.md) — pandas/openpyxl ship no py.typed; under strict Pyright add pandas-stubs or face 60+ Unknown-type errors
