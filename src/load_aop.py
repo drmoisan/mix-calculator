@@ -28,6 +28,7 @@ Boundaries:
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import sys
 from typing import IO, TYPE_CHECKING
@@ -94,6 +95,29 @@ logger = logging.getLogger(__name__)
 # file-like buffer (the in-memory test fixtures pass a BytesIO).
 ExcelSource = str | IO[bytes]
 
+# Values that disable debug mode when set in ``LOAD_AOP_DEBUG``. An unset
+# variable is also treated as falsey; anything not in this set is truthy.
+_FALSEY_DEBUG_VALUES = frozenset({"", "0", "false", "no"})
+
+
+def _debug_env_is_truthy(raw: str | None) -> bool:
+    """Return whether a ``LOAD_AOP_DEBUG`` value requests debug mode.
+
+    Args:
+        raw: The raw environment-variable value as returned by
+            ``os.environ.get`` (``None`` when the variable is unset).
+
+    Returns:
+        ``False`` when ``raw`` is ``None`` or, after stripping and
+        case-folding, equals one of ``""``, ``"0"``, ``"false"``, or
+        ``"no"``; ``True`` for any other value.
+    """
+    # Treat an unset variable as falsey; otherwise compare case-insensitively
+    # against the explicit falsey set so only intentional values enable debug.
+    if raw is None:
+        return False
+    return raw.strip().casefold() not in _FALSEY_DEBUG_VALUES
+
 
 def load_aop(
     source: ExcelSource,
@@ -110,6 +134,12 @@ def load_aop(
     resolves the source columns to canonical names position-independently,
     establishes the ``KEY`` column per the shared reconcile policy, validates
     per-row total identities, and finally applies the optional ``transform``.
+
+    Both ``KEY`` and ``YTG`` are optional columns resolved by name. ``YTG`` is
+    used when present (carried through, coerced, blank-filled, and validated as
+    ``YTG == sum(May..Dec)``) and is neither derived nor added when absent; older
+    AOP sheets predate it. Unlike :mod:`src.normalize_le`, this loader never
+    derives a ``YTG`` column.
 
     Args:
         source: Filesystem path or binary file-like buffer accepted by
@@ -153,9 +183,19 @@ def load_aop(
             key_actual = column
             break
 
+    # Locate an optional YTG column by normalized name only, mirroring the KEY
+    # lookup. Older AOP sheets predate the YTG column; when it is absent it is
+    # neither required nor reported as an extra, and it is not derived later.
+    ytg_actual: str | None = None
+    for column in actual_columns:
+        if normalize_name(column) == "ytg":
+            ytg_actual = column
+            break
+
     # Resolve every required expected column; resolve_columns raises naming any
-    # unmatched required column. Extras exclude the located KEY column below.
-    resolvable = [c for c in actual_columns if c != key_actual]
+    # unmatched required column. Extras exclude both the located KEY and YTG
+    # columns below so neither is treated as required or reported as extra.
+    resolvable = [c for c in actual_columns if c not in (key_actual, ytg_actual)]
     mapping, extras = resolve_columns(resolvable, EXPECTED_COLUMNS)
 
     # Surface extra source columns as a warning and continue (they are dropped
@@ -164,13 +204,17 @@ def load_aop(
         logger.warning("Ignoring extra source column(s): %s.", extras)
 
     # Select and rename to canonical expected names so all downstream logic uses
-    # canonical names regardless of source order. Carry the KEY column through
-    # under its canonical name when present.
+    # canonical names regardless of source order. Carry the optional KEY and YTG
+    # columns through under their canonical names when present; when absent they
+    # are simply not selected (YTG is never derived).
     selection = {mapping[expected]: expected for expected in EXPECTED_COLUMNS}
     columns_to_keep = [mapping[expected] for expected in EXPECTED_COLUMNS]
     if key_actual is not None:
         columns_to_keep.append(key_actual)
         selection[key_actual] = "KEY"
+    if ytg_actual is not None:
+        columns_to_keep.append(ytg_actual)
+        selection[ytg_actual] = "YTG"
     frame = frame[columns_to_keep].rename(columns=selection).copy()
 
     # Drop trailing/interspersed rows with no Customer; these are blank padding
@@ -180,12 +224,15 @@ def load_aop(
     )
     frame = frame.loc[~customer_blank].copy()
 
-    # Fill only the blank YTD/quarter/YTG totals from their monthly components:
-    # the source omits these totals on some rows even though they are
-    # definitionally the sum of their months.
-    frame = fill_blank_totals(
-        frame, {"YTD": MONTHS, **QUARTER_TO_MONTHS, "YTG": YTG_MONTHS}
-    )
+    # Fill only the blank YTD/quarter totals (and YTG when present) from their
+    # monthly components: the source omits these totals on some rows even though
+    # they are definitionally the sum of their months. The YTG mapping is added
+    # only when the optional YTG column is in the frame so an absent YTG is not
+    # created here.
+    totals_to_months: dict[str, list[str]] = {"YTD": MONTHS, **QUARTER_TO_MONTHS}
+    if "YTG" in frame.columns:
+        totals_to_months["YTG"] = YTG_MONTHS
+    frame = fill_blank_totals(frame, totals_to_months)
 
     # Establish KEY per the documented branches (create/trust/resolve), wired
     # exactly as normalize_le.load_source so AOP reuses the shared policy.
@@ -279,8 +326,16 @@ def main(argv: list[str] | None = None) -> int:
 
     Returns:
         ``0`` on success; ``1`` when a column-resolution, KEY-resolution, or
-        validation ``ValueError`` is raised. A missing required ``--output``
-        causes ``argparse`` to exit with a non-zero code.
+        validation ``ValueError`` is raised in normal operation. A missing
+        required ``--output`` causes ``argparse`` to exit with a non-zero code.
+        When debug mode is active (``--debug`` or a truthy ``LOAD_AOP_DEBUG``
+        environment variable), the original ``ValueError`` is re-raised with its
+        full traceback instead of being mapped to exit code 1.
+
+    Raises:
+        ValueError: Re-raised with its original traceback when debug mode is
+            active and ``load_aop`` raises a column-resolution, KEY-resolution,
+            or validation ``ValueError``.
 
     Side effects:
         Configures the stdlib ``logging`` module once to emit WARNING-level
@@ -302,6 +357,14 @@ def main(argv: list[str] | None = None) -> int:
             args.input, sheet=args.source_sheet, key_mismatch=args.key_mismatch
         )
     except ValueError as error:
+        # Decide how to surface the validation failure. Debug mode (the
+        # --debug flag or a truthy LOAD_AOP_DEBUG env var) re-raises the
+        # original exception so a debugger keeps the traceback and frame for
+        # diagnosis; normal operation maps the failure to a clean exit 1 with a
+        # one-line message for the operator.
+        debug = args.debug or _debug_env_is_truthy(os.environ.get("LOAD_AOP_DEBUG"))
+        if debug:
+            raise
         print(f"ERROR: {error}")
         return 1
 

@@ -117,6 +117,112 @@ def test_resolution_extra_column_warns_and_continues(
     assert "Unexpected Extra" not in frame.columns
 
 
+def test_source_without_ytg_loads_and_has_no_ytg_column() -> None:
+    """A source missing the optional YTG column loads and gains no YTG column."""
+    # Arrange / Act: build the older no-YTG layout and load it.
+    frame = loaded_aop_frame(
+        [make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)],
+        include_ytg=False,
+    )
+
+    # Assert: load succeeds, YTG is neither carried nor derived, and the other
+    # required columns plus the established KEY remain present.
+    assert "YTG" not in frame.columns
+    assert "YTD" in frame.columns
+    assert "KEY" in frame.columns
+
+
+def test_source_without_ytg_still_enforces_ytd_identity() -> None:
+    """Without YTG, a broken YTD identity still fails validation."""
+    # Arrange: a no-YTG source row whose YTD does not equal sum(months).
+    bad_row = make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)
+    bad_row["YTD"] = 999.0
+    buffer = build_aop_workbook(
+        [bad_row], header=aop_header_without_key(include_ytg=False)
+    )
+
+    # Act / Assert: the YTD identity is still enforced when YTG is absent.
+    with pytest.raises(ValueError, match="YTD"):
+        load_aop(buffer, sheet="AOP1")
+
+
+def test_source_without_ytg_still_enforces_quarter_identity() -> None:
+    """Without YTG, a broken quarter identity still fails validation."""
+    # Arrange: a no-YTG source row whose Q1 does not equal sum(Jan..Mar).
+    bad_row = make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)
+    bad_row["Q1"] = 999.0
+    buffer = build_aop_workbook(
+        [bad_row], header=aop_header_without_key(include_ytg=False)
+    )
+
+    # Act / Assert: the quarter identity is still enforced when YTG is absent.
+    with pytest.raises(ValueError, match="Q1"):
+        load_aop(buffer, sheet="AOP1")
+
+
+def test_validate_aop_skips_ytg_check_when_absent() -> None:
+    """validate_aop does not raise on a frame that lacks the YTG column."""
+    # Arrange / Act: a no-YTG frame whose YTD and quarters tie out.
+    frame = loaded_aop_frame(
+        [make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)],
+        include_ytg=False,
+    )
+
+    # Assert: validation passes and no YTG column was introduced by it.
+    assert validate_aop(frame) is None
+    assert "YTG" not in frame.columns
+
+
+def test_coerce_numeric_skips_absent_ytg_column() -> None:
+    """coerce_numeric does not create an absent optional YTG column."""
+    # Arrange: a frame with every numeric column except YTG.
+    record: dict[str, object] = dict(zip(MONTHS, [1.0] * 12, strict=True))
+    record["YTD"] = 12.0
+    record["Q1"] = 3.0
+    record["Q2"] = 3.0
+    record["Q3"] = 3.0
+    record["Q4"] = 3.0
+    frame = pd.DataFrame([record])
+
+    # Act
+    coerced = coerce_numeric(frame)
+
+    # Assert: present columns are coerced and the absent YTG is not added.
+    assert as_float(coerced.loc[coerced.index[0], "YTD"]) == 12.0
+    assert "YTG" not in coerced.columns
+
+
+def test_ytg_identity_violation_detected_when_ytg_present() -> None:
+    """When YTG IS present, a broken YTG identity still fails validation."""
+    # Arrange: a valid frame (with YTG), then perturb only YTG to break it.
+    frame = loaded_aop_frame(
+        [make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)]
+    )
+    assert "YTG" in frame.columns
+    frame.loc[frame.index[0], "YTG"] = as_float(frame.loc[frame.index[0], "YTG"]) + 5.0
+
+    # Act / Assert: the YTG identity check still fires when YTG is present.
+    with pytest.raises(ValueError, match="YTG"):
+        validate_aop(frame)
+
+
+def test_ytg_present_blank_on_some_rows_is_filled() -> None:
+    """A present-but-blank YTG cell is blank-filled from sum(May..Dec)."""
+    # Arrange: a row whose totals (including YTG) are left blank in the source.
+    rows = [
+        make_aop_row(
+            customer="A", sku=1, type_="T", months=[2.0] * 12, blank_totals=True
+        )
+    ]
+
+    # Act: the default workbook keeps the YTG column.
+    frame = loaded_aop_frame(rows)
+
+    # Assert: YTG was blank-filled to sum(May..Dec) = 8 months * 2.0 = 16.0.
+    assert "YTG" in frame.columns
+    assert as_float(frame.iloc[0]["YTG"]) == 16.0
+
+
 def test_optional_key_located_by_name_only() -> None:
     """A present KEY column is located by name and excluded from required set."""
     # Arrange: include KEY in the header with a value matching the rebuilt pattern.

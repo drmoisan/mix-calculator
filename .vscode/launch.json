@@ -26,7 +26,8 @@
             "args": [
                 "artifacts\\Input Files.xlsx",
                 "--output",
-                "artifacts\\aop.db"
+                "artifacts\\aop.db",
+                "--debug"
             ]
         }
     ]

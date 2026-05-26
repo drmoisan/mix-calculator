@@ -70,9 +70,13 @@ SOURCE_COLUMNS: list[str] = [
     "PPG",
 ]
 
-# Required expected columns for resolution: every source column except the
-# optional "KEY" (which is resolved by name only and handled separately).
-EXPECTED_COLUMNS: list[str] = [c for c in SOURCE_COLUMNS if c != "KEY"]
+# Required expected columns for resolution: every source column except the two
+# optional columns "KEY" and "YTG". Both are resolved by name only and handled
+# separately in load_aop. "YTG", like "KEY", is an optional column that older
+# AOP sheets predate; it is kept in SOURCE_COLUMNS/NUMERIC_COLS/SNAKE_CASE_RENAMES
+# /TARGET_COLUMNS (the full schema when present) but excluded from the required
+# set so a source without it still resolves.
+EXPECTED_COLUMNS: list[str] = [c for c in SOURCE_COLUMNS if c not in {"KEY", "YTG"}]
 
 # Target output header; AOP preserves the full source layout (no column dropped
 # and no derived column added), so the target equals the source header.
@@ -148,18 +152,28 @@ def clean_label_sentinels(
 
 
 def coerce_numeric(frame: pd.DataFrame) -> pd.DataFrame:
-    """Coerce every numeric AOP column to float, filling blanks with ``0.0``.
+    """Coerce every present numeric AOP column to float, filling blanks with ``0.0``.
+
+    Optional numeric columns (for example ``YTG``) that are absent from the
+    frame are skipped rather than coerced into existence, so a source that
+    predates the optional column does not gain it here.
 
     Args:
         frame: The working frame with the canonical numeric columns present.
 
     Returns:
-        The same ``frame`` with each :data:`NUMERIC_COLS` column converted via
-        ``pd.to_numeric(..., errors="coerce").fillna(0.0)``.
+        The same ``frame`` with each :data:`NUMERIC_COLS` column present in
+        ``frame.columns`` converted via
+        ``pd.to_numeric(..., errors="coerce").fillna(0.0)``; absent optional
+        columns are left out.
     """
-    # Coerce each numeric column to float; non-numeric cells become NaN and are
-    # then filled with 0.0 so validation arithmetic never sees text or blanks.
+    # Coerce each numeric column that is present to float; non-numeric cells
+    # become NaN and are then filled with 0.0 so validation arithmetic never
+    # sees text or blanks. An absent optional column (such as YTG) is skipped so
+    # it is not created here.
     for column in NUMERIC_COLS:
+        if column not in frame.columns:
+            continue
         frame[column] = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
     return frame
 
@@ -175,7 +189,8 @@ def validate_aop(frame: pd.DataFrame) -> None:
         - At least one data row remains.
         - ``YTD == sum(Jan..Dec)`` within :data:`TIEOUT_TOL`.
         - Each ``Q1..Q4`` equals the sum of its three months.
-        - ``YTG == sum(May..Dec)``.
+        - ``YTG == sum(May..Dec)``, but only when the optional ``YTG`` column is
+          present in the frame; an absent ``YTG`` is neither derived nor checked.
 
     Args:
         frame: The coerced working frame with an established ``KEY`` column.
@@ -197,13 +212,16 @@ def validate_aop(frame: pd.DataFrame) -> None:
     if len(frame) < 1:
         failures.append("no data rows remain after dropping blank-Customer rows")
 
-    # Per-row identity checks: the grand total, each quarter, and the year-to-go
-    # measure must each equal the row-wise sum of their constituent months.
+    # Per-row identity checks: the grand total and each quarter must equal the
+    # row-wise sum of their constituent months. The year-to-go (YTG) identity is
+    # included only when the optional YTG column is present; older sheets predate
+    # it, so its absence must not fail validation.
     per_row_checks: dict[str, list[str]] = {
         "YTD": MONTHS,
         **QUARTER_TO_MONTHS,
-        "YTG": YTG_MONTHS,
     }
+    if "YTG" in frame.columns:
+        per_row_checks["YTG"] = YTG_MONTHS
     # Only run identity checks when rows exist; on an empty frame the row-count
     # failure above already explains the problem and the column math is moot.
     if len(frame) >= 1:
@@ -295,7 +313,9 @@ def build_parser() -> argparse.ArgumentParser:
     Returns:
         A configured ``ArgumentParser`` with the positional input path, the
         required ``--output``, and the ``--source-sheet``, ``--table-name``,
-        ``--key-mismatch``, ``--if-exists``, and ``--snake-case`` options.
+        ``--key-mismatch``, ``--if-exists``, ``--snake-case``, and ``--debug``
+        options. The ``--debug`` flag re-raises the original exception (with
+        its full traceback) instead of printing a clean error and exiting 1.
     """
     parser = argparse.ArgumentParser(
         prog="load-aop",
@@ -336,5 +356,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--snake-case",
         action="store_true",
         help="Rename columns to lowercase snake_case before writing.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help=(
+            "Re-raise the original exception with its full traceback instead "
+            "of printing a clean error and exiting 1 (for debugger use)."
+        ),
     )
     return parser

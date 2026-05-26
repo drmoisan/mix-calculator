@@ -207,6 +207,81 @@ def test_main_diverging_key_prompt_non_tty_returns_one(
     assert "--key-mismatch" in captured.out
 
 
+def test_main_debug_flag_reraises_original_valueerror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--debug re-raises the original ValueError instead of swallowing it."""
+    # Arrange: a row whose YTD does not tie out so load_aop raises a ValueError.
+    bad_row = make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)
+    bad_row["YTD"] = 999.0
+    buffer = build_aop_workbook([bad_row], header=aop_header_without_key())
+    patch_load_aop(monkeypatch, buffer)
+
+    # Act / Assert: the original validation message propagates out of main.
+    with pytest.raises(ValueError, match="YTD"):
+        main(["input.xlsx", "--output", "out.db", "--debug"])
+
+
+def test_main_debug_env_var_reraises_without_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A truthy LOAD_AOP_DEBUG re-raises even when --debug is absent."""
+    # Arrange: a failing workbook and a truthy env var, but no --debug flag.
+    bad_row = make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)
+    bad_row["YTD"] = 999.0
+    buffer = build_aop_workbook([bad_row], header=aop_header_without_key())
+    patch_load_aop(monkeypatch, buffer)
+    monkeypatch.setenv("LOAD_AOP_DEBUG", "1")
+
+    # Act / Assert: the env var alone activates debug-mode re-raise.
+    with pytest.raises(ValueError, match="YTD"):
+        main(["input.xlsx", "--output", "out.db"])
+
+
+@pytest.mark.parametrize("falsey", ["0", "false", "FALSE", "no", ""])
+def test_main_debug_env_var_falsey_preserves_swallow(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    falsey: str,
+) -> None:
+    """Falsey LOAD_AOP_DEBUG values keep the swallow-and-return-1 behavior."""
+    # Arrange: a failing workbook with a falsey debug env var and no --debug.
+    bad_row = make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)
+    bad_row["YTD"] = 999.0
+    buffer = build_aop_workbook([bad_row], header=aop_header_without_key())
+    patch_load_aop(monkeypatch, buffer)
+    monkeypatch.setenv("LOAD_AOP_DEBUG", falsey)
+
+    # Act
+    exit_code = main(["input.xlsx", "--output", "out.db"])
+    captured = capsys.readouterr()
+
+    # Assert: the error is swallowed and mapped to a clean exit 1.
+    assert exit_code == 1
+    assert "YTD" in captured.out
+
+
+def test_main_debug_env_var_unset_preserves_swallow(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unset LOAD_AOP_DEBUG keeps the swallow-and-return-1 behavior."""
+    # Arrange: a failing workbook with the debug env var explicitly unset.
+    bad_row = make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)
+    bad_row["YTD"] = 999.0
+    buffer = build_aop_workbook([bad_row], header=aop_header_without_key())
+    patch_load_aop(monkeypatch, buffer)
+    monkeypatch.delenv("LOAD_AOP_DEBUG", raising=False)
+
+    # Act
+    exit_code = main(["input.xlsx", "--output", "out.db"])
+    captured = capsys.readouterr()
+
+    # Assert: without flag or truthy env var, the failure is swallowed.
+    assert exit_code == 1
+    assert "YTD" in captured.out
+
+
 def test_main_snake_case_renames_before_writing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -231,6 +306,101 @@ def test_main_snake_case_renames_before_writing(
     assert "super_category" in read_back.columns
     assert "ytd" in read_back.columns
     assert "SKU Descripiton" not in read_back.columns
+
+
+def test_persist_aop_roundtrip_without_ytg_has_no_ytg_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A no-YTG frame persists and reads back without a YTG column."""
+    # Arrange: load the older no-YTG layout and share one in-memory connection.
+    frame = loaded_aop_frame(
+        [make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)],
+        include_ytg=False,
+    )
+    con = patch_connect(monkeypatch)
+
+    # Act
+    persist_aop(frame, "ignored.db", table="aop")
+    read_back = read_table(con, "aop")
+    con.real_close()
+
+    # Assert: neither the canonical nor the snake_case YTG name is present.
+    assert "YTG" not in read_back.columns
+    assert "ytg" not in read_back.columns
+    assert len(read_back) == 1
+
+
+def test_main_without_ytg_succeeds_and_table_has_no_ytg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end main on a no-YTG source persists a table without YTG."""
+    # Arrange: a no-YTG workbook routed through the patched load path.
+    buffer = build_aop_workbook(
+        [
+            make_aop_row(customer="CustA", sku=5, type_="GS", months=[1.0] * 12),
+            make_aop_row(customer="CustB", sku=9, type_="Lbs", months=[3.0] * 12),
+        ],
+        include_ytg=False,
+    )
+    patch_load_aop(monkeypatch, buffer)
+    con = patch_connect(monkeypatch)
+
+    # Act
+    exit_code = main(["input.xlsx", "--output", "out.db"])
+    read_back = read_table(con, "aop")
+    con.real_close()
+
+    # Assert: success, both rows persisted, and no YTG column on the table.
+    assert exit_code == 0
+    assert len(read_back) == 2
+    assert "YTG" not in read_back.columns
+    assert "ytg" not in read_back.columns
+
+
+def test_main_snake_case_without_ytg_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--snake-case works on a no-YTG source and produces no ytg column."""
+    # Arrange: a no-YTG workbook; --snake-case must not error on the absent YTG.
+    buffer = build_aop_workbook(
+        [make_aop_row(customer="A", sku=1, type_="T", months=[1.0] * 12)],
+        include_ytg=False,
+    )
+    patch_load_aop(monkeypatch, buffer)
+    con = patch_connect(monkeypatch)
+
+    # Act
+    exit_code = main(["input.xlsx", "--output", "out.db", "--snake-case"])
+    read_back = read_table(con, "aop")
+    con.real_close()
+
+    # Assert: the rename succeeds (pandas ignores the absent YTG key) and the
+    # other snake_case headers are present while no ytg column appears.
+    assert exit_code == 0
+    assert "ytd" in read_back.columns
+    assert "sku_description" in read_back.columns
+    assert "ytg" not in read_back.columns
+
+
+def test_main_with_ytg_persists_ytg_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end main on a YTG-bearing source persists the YTG column."""
+    # Arrange: the default workbook keeps the optional YTG column.
+    buffer = build_aop_workbook(
+        [make_aop_row(customer="A", sku=1, type_="T", months=[2.0] * 12)]
+    )
+    patch_load_aop(monkeypatch, buffer)
+    con = patch_connect(monkeypatch)
+
+    # Act
+    exit_code = main(["input.xlsx", "--output", "out.db"])
+    read_back = read_table(con, "aop")
+    con.real_close()
+
+    # Assert: the YTG column survives the round-trip under its canonical name.
+    assert exit_code == 0
+    assert "YTG" in read_back.columns
 
 
 def test_main_custom_sheet_and_table_name(

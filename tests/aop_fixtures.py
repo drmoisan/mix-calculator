@@ -28,14 +28,23 @@ if TYPE_CHECKING:
     import pytest
 
 
-def aop_header_without_key() -> list[str]:
+def aop_header_without_key(*, include_ytg: bool = True) -> list[str]:
     """Return the AOP source header with the optional ``KEY`` column removed.
 
+    Args:
+        include_ytg: When ``True`` (the default) the optional ``YTG`` column is
+            kept, preserving the historical fixture behavior. When ``False`` the
+            ``YTG`` column is also dropped to reproduce older sheets that predate
+            it.
+
     Returns:
-        A copy of :data:`src.load_aop.SOURCE_COLUMNS` excluding ``"KEY"``,
-        preserving order.
+        A copy of :data:`src.load_aop.SOURCE_COLUMNS` excluding ``"KEY"`` (and
+        excluding ``"YTG"`` when ``include_ytg`` is ``False``), preserving order.
     """
-    return [column for column in SOURCE_COLUMNS if column != "KEY"]
+    # Always drop the optional KEY column; drop YTG only when the caller asks for
+    # the older no-YTG layout.
+    excluded = {"KEY"} if include_ytg else {"KEY", "YTG"}
+    return [column for column in SOURCE_COLUMNS if column not in excluded]
 
 
 def make_aop_row(
@@ -122,6 +131,8 @@ def build_aop_workbook(
     rows: list[dict[str, object]],
     sheet_name: str = "AOP1",
     header: list[str] | None = None,
+    *,
+    include_ytg: bool = True,
 ) -> io.BytesIO:
     """Build an in-memory ``.xlsx`` matching the AOP source layout.
 
@@ -139,11 +150,20 @@ def build_aop_workbook(
         sheet_name: Name of the worksheet to create.
         header: Optional explicit header row; defaults to the source columns with
             the ``KEY`` column removed. Cells are emitted in this header's order.
+        include_ytg: Only consulted when ``header`` is ``None``. When ``True``
+            (the default) the generated default header keeps the optional
+            ``YTG`` column; when ``False`` the default header also omits ``YTG``
+            to reproduce older sheets that predate it. Ignored when an explicit
+            ``header`` is supplied.
 
     Returns:
         A ``BytesIO`` positioned at offset 0 containing the workbook bytes.
     """
-    columns = header if header is not None else aop_header_without_key()
+    columns = (
+        header
+        if header is not None
+        else aop_header_without_key(include_ytg=include_ytg)
+    )
     workbook = Workbook()
     worksheet = workbook.active
     assert worksheet is not None
@@ -165,11 +185,16 @@ def build_aop_workbook(
     return buffer
 
 
-def loaded_aop_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
+def loaded_aop_frame(
+    rows: list[dict[str, object]], *, include_ytg: bool = True
+) -> pd.DataFrame:
     """Build an AOP workbook from rows and return the loaded (validated) frame.
 
     Args:
         rows: AOP source-row dicts (see :func:`make_aop_row`).
+        include_ytg: When ``True`` (the default) the workbook keeps the optional
+            ``YTG`` column; when ``False`` the workbook omits ``YTG`` to exercise
+            the older no-YTG source path.
 
     Returns:
         The validated AOP DataFrame produced by ``load_aop`` (canonical column
@@ -180,7 +205,7 @@ def loaded_aop_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
         from the rebuilt pattern (the absent-KEY branch) without consulting the
         ``--key-mismatch`` policy or stdin.
     """
-    return load_aop(build_aop_workbook(rows), sheet="AOP1")
+    return load_aop(build_aop_workbook(rows, include_ytg=include_ytg), sheet="AOP1")
 
 
 def patch_load_aop(
