@@ -32,6 +32,7 @@ import pandas as pd
 
 from src.le_columns import normalize_name, resolve_columns
 from src.le_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
+from src.pandas_io import read_excel_sheet, write_table
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -161,13 +162,9 @@ def load_source(
         emits ``logging`` warnings for extra source columns and for
         ``trust``/``overwrite`` KEY resolution.
     """
-    # pandas-stubs types read_excel's overload against openpyxl Workbook/Book
-    # types, but openpyxl ships no stubs, so the overload member resolves as
-    # partially unknown under Pyright strict. The result is explicitly typed as
-    # pd.DataFrame; the ignore is scoped to this single boundary call.
-    frame: pd.DataFrame = pd.read_excel(  # pyright: ignore[reportUnknownMemberType]
-        path, sheet_name=sheet_name, header=2, engine="openpyxl"
-    )
+    # Route the read through the typed pandas_io boundary, which contains the
+    # openpyxl-driven unknown member type so it does not surface here.
+    frame: pd.DataFrame = read_excel_sheet(path, sheet_name=sheet_name, header=2)
     actual_columns = list(frame.columns.astype(str))
 
     # Locate an optional KEY column by normalized name only (no fuzzy match) so
@@ -347,13 +344,9 @@ def write_sqlite(df: pd.DataFrame, db_path: str, table_name: str) -> None:
     """
     con = sqlite3.connect(db_path)
     try:
-        # pandas-stubs types to_sql's con parameter against a union that
-        # includes an unstubbed connection type, so the member resolves as
-        # partially unknown under Pyright strict. sqlite3.Connection is a valid
-        # runtime argument; the ignore is scoped to this single boundary call.
-        df.to_sql(  # pyright: ignore[reportUnknownMemberType]
-            table_name, con, if_exists="replace", index=False
-        )
+        # Route the write through the typed pandas_io boundary so the
+        # SQLAlchemy-connectable unknown member type does not surface here.
+        write_table(df, table_name, con, if_exists="replace", index=False)
     finally:
         con.close()
 

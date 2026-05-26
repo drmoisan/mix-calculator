@@ -69,19 +69,19 @@ corrected.
       `--output` is required and must be a SQLite database path; SQLite is the only
       output sink (no Excel or CSV output).
 - [x] Source load uses `header=2` and drops rows with blank `Customer`.
-- [ ] Column resolution does not depend on positions: expected columns are matched
+- [x] Column resolution does not depend on positions: expected columns are matched
       first by position (normalized name equality at the same index), then unmatched
       expected columns are resolved against remaining actual columns by normalized
       equality and then `difflib` similarity `>= 0.85`. After resolution the frame is
       renamed to canonical expected names.
-- [ ] If any required expected column cannot be matched after the fuzzy pass, the run
+- [x] If any required expected column cannot be matched after the fuzzy pass, the run
       halts with a clear error naming the unmatched expected column(s).
-- [ ] If every required expected column is matched but extra actual columns remain,
+- [x] If every required expected column is matched but extra actual columns remain,
       a warning naming the extra column(s) is logged and the run continues.
-- [ ] `coerce_sku` renders whole-number SKUs as integer strings (no
+- [x] `coerce_sku` renders whole-number SKUs as integer strings (no
       decimals/separators) and preserves non-numeric SKU codes (e.g. `RGFBOWLCB`,
       `NotSKU`) verbatim; the rebuilt pattern is `Customer + coerce_sku(SKU #) + Type`.
-- [ ] `KEY` handling: when the source has no `KEY` column it is created from the
+- [x] `KEY` handling: when the source has no `KEY` column it is created from the
       rebuilt pattern; when present and all values equal the pattern it is trusted;
       when present and values diverge it is resolved per `--key-mismatch`
       (`trust`/`overwrite` log a warning; `prompt` asks interactively on a TTY and

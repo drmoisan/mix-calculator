@@ -16,7 +16,6 @@ import math
 import sqlite3
 from typing import TYPE_CHECKING, cast
 
-import pandas as pd
 from openpyxl import Workbook
 
 from src.normalize_le import (
@@ -25,10 +24,12 @@ from src.normalize_le import (
     load_source,
     normalize,
 )
+from src.pandas_io import read_table as pandas_io_read_table
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import pandas as pd
     import pytest
 
 
@@ -75,6 +76,11 @@ def close(
 def read_table(con: sqlite3.Connection, table_name: str) -> pd.DataFrame:
     """Read a full table back from an open SQLite connection as a DataFrame.
 
+    Thin wrapper over :func:`src.pandas_io.read_table`. It exists so the test
+    suite imports the read helper from this fixtures module alongside the other
+    shared helpers; the typed pandas boundary (and identifier quoting) lives in
+    ``src.pandas_io`` so the read here carries no type suppression.
+
     Args:
         con: An open SQLite connection.
         table_name: The table to read.
@@ -82,14 +88,7 @@ def read_table(con: sqlite3.Connection, table_name: str) -> pd.DataFrame:
     Returns:
         The table contents as a typed ``pd.DataFrame``.
     """
-    query = f'SELECT * FROM "{table_name}"'  # noqa: S608 - trusted test table name
-    # pandas-stubs types read_sql's con union against an unstubbed connection
-    # type, so the member resolves as partially unknown under Pyright strict.
-    # The result is explicitly typed; the ignore is scoped to this read.
-    result: pd.DataFrame = pd.read_sql(  # pyright: ignore[reportUnknownMemberType]
-        query, con
-    )
-    return result
+    return pandas_io_read_table(con, table_name)
 
 
 class PersistentConnection(sqlite3.Connection):
