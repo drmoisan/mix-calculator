@@ -27,10 +27,17 @@ Deliver a single-file Python CLI, `normalize_le.py` (Python 3.10+; dependencies
 `pandas`, `openpyxl`, `numpy`), that:
 
 - Loads the source sheet `LE-8 + 4`, treating Excel row 3 as the header row.
-- Validates the source schema (columns A..Z in an exact documented order) and fails
-  fast with a clear, column-naming error on any mismatch.
-- Rebuilds the `KEY` column from `Customer + SKU# + Type` with Excel-compatible
-  coercion (never trusting the loaded formula/cached value).
+- Resolves the source columns to the expected schema without depending on exact
+  positions (see "Column resolution" below): matches first by position, then by
+  normalized fuzzy match for any columns whose positions do not line up; halts only
+  when a required expected column cannot be matched; logs a warning and continues
+  when all required columns are matched but extra columns remain.
+- Establishes the `KEY` column (see "KEY handling" below): if the source has no
+  `KEY` column, creates it by concatenating `Customer + coerce_sku(SKU #) + Type`;
+  if a `KEY` column is present and its values match that expected pattern, trusts and
+  keeps it; if a `KEY` column is present but its values do not match the pattern,
+  resolves the conflict per `--key-mismatch` (prompt the user when interactive,
+  otherwise fail fast).
 - Collapses all source rows sharing a `KEY` into one normalized row: text columns
   taken from the first matching row; month, `FY`, and quarter columns summed.
 - Drops the `YTD/YTG` column and adds a derived `YTG` column = sum(May..Dec).
@@ -48,21 +55,62 @@ CLI:
 
 ```
 poetry run normalize-le <input.xlsx> --output <path.db> \
-  [--source-sheet "LE-8 + 4"] [--table-name LE]
+  [--source-sheet "LE-8 + 4"] [--table-name LE] \
+  [--key-mismatch {prompt,trust,overwrite}]
 ```
 
-Defaults: `--source-sheet="LE-8 + 4"`, `--table-name=LE`. `--output` is REQUIRED and
-must point at a SQLite database file (e.g. `.db`/`.sqlite`); there is no default
-output path. The input remains an Excel workbook read from `--source-sheet`.
+Defaults: `--source-sheet="LE-8 + 4"`, `--table-name=LE`,
+`--key-mismatch=prompt`. `--output` is REQUIRED and must point at a SQLite database
+file (e.g. `.db`/`.sqlite`); there is no default output path. The input remains an
+Excel workbook read from `--source-sheet`.
+
+### Column resolution (position-independent)
+
+Extraction must not depend on the columns being in their documented positions. The
+expected source columns are resolved as follows:
+
+1. Position pass: for each expected column, if the actual column at the same index
+   has a matching name (compared after normalization — case-folded, with spaces and
+   punctuation removed), bind it.
+2. Fuzzy pass: for each still-unbound expected column, match it against the remaining
+   unbound actual columns by normalized exact match first, then by a similarity score
+   (`difflib.SequenceMatcher` on normalized names) with a threshold of `>= 0.85`.
+3. Missing: if any required expected column remains unmatched after the fuzzy pass,
+   halt with a clear error naming the unmatched expected column(s).
+4. Extras: if every required expected column is matched but unmatched actual columns
+   remain, log a warning naming the extra column(s) and continue.
+
+After resolution the working frame is selected and renamed to the canonical expected
+names, so all downstream logic uses canonical names regardless of source order. The
+`KEY` column is optional in the source and is resolved by name only (no fuzzy match),
+then handled per "KEY handling".
+
+### KEY handling
+
+- If no `KEY` column is present in the source, create it as
+  `Customer + coerce_sku(SKU #) + Type`.
+- If a `KEY` column is present and every value equals that expected pattern
+  (the rebuilt concatenation), trust the existing column and continue.
+- If a `KEY` column is present but one or more values do not match the expected
+  pattern, resolve per `--key-mismatch`:
+  - `trust`: keep the existing `KEY` values; log a warning.
+  - `overwrite`: replace with the rebuilt pattern; log a warning.
+  - `prompt` (default): when stdin is an interactive TTY, ask the user to choose
+    trust or overwrite; when stdin is not interactive (automation/CI), do not block —
+    fail fast with a non-zero exit instructing the caller to pass
+    `--key-mismatch trust|overwrite`.
 
 ### Source schema: sheet `LE-8 + 4`
 
 Two leading non-data rows; Excel row 3 (1-indexed) is the header row; data starts
-on row 4. Expected header row, columns A..Z in this exact order:
+on row 4. The documented header order is below, but it is the canonical reference for
+matching — extraction does not require columns to be in these exact positions (see
+"Column resolution"). `KEY` is optional in the source; every other listed column is
+required.
 
 | Col | Header           | Type    | Notes |
 |-----|------------------|---------|-------|
-| A   | `KEY`            | text    | Excel formula `=C&E&F`; rebuild, do not trust loaded value. |
+| A   | `KEY`            | text    | Optional; Excel formula `=C&E&F`. Created when absent; trusted when its values match the pattern; otherwise resolved per `--key-mismatch`. |
 | B   | `YTD/YTG`        | text    | `"YTD"` or `"YTG"`. Not part of the key. |
 | C   | `Customer`       | text    | |
 | D   | `SKU Descripiton`| text    | Typo intentional; preserve verbatim. |
@@ -99,12 +147,24 @@ not persisted and an existing table of the same name is dropped and rewritten.
 - [x] `src/normalize_le.py` exposes the documented CLI with the listed defaults;
       `--output` is required and must be a SQLite database path; SQLite is the only
       output sink (no Excel or CSV output).
-- [x] Source load uses `header=2`, drops rows with blank `Customer`, and validates
-      the 26 source columns A..Z in exact order, failing with a clear error that
-      names missing/extra columns on mismatch.
-- [x] `KEY` is rebuilt from `Customer + coerce_sku(SKU #) + Type`; whole-number SKUs
-      render as integer strings (no decimals/separators); non-numeric SKU codes
-      (e.g. `RGFBOWLCB`, `NotSKU`) are preserved verbatim.
+- [x] Source load uses `header=2` and drops rows with blank `Customer`.
+- [x] Column resolution does not depend on positions: expected columns are matched
+      first by position (normalized name equality at the same index), then unmatched
+      expected columns are resolved against remaining actual columns by normalized
+      equality and then `difflib` similarity `>= 0.85`. After resolution the frame is
+      renamed to canonical expected names.
+- [x] If any required expected column cannot be matched after the fuzzy pass, the run
+      halts with a clear error naming the unmatched expected column(s).
+- [x] If every required expected column is matched but extra actual columns remain,
+      a warning naming the extra column(s) is logged and the run continues.
+- [x] `coerce_sku` renders whole-number SKUs as integer strings (no
+      decimals/separators) and preserves non-numeric SKU codes (e.g. `RGFBOWLCB`,
+      `NotSKU`) verbatim; the rebuilt pattern is `Customer + coerce_sku(SKU #) + Type`.
+- [x] `KEY` handling: when the source has no `KEY` column it is created from the
+      rebuilt pattern; when present and all values equal the pattern it is trusted;
+      when present and values diverge it is resolved per `--key-mismatch`
+      (`trust`/`overwrite` log a warning; `prompt` asks interactively on a TTY and
+      fails fast with a non-zero exit when stdin is not interactive).
 - [x] Output has 26 columns A..Z in the exact target order, one row per unique KEY,
       in first-appearance order; `YTD/YTG` is absent and a derived `YTG` column is
       present after `Q4` and before `Super Category`.
@@ -131,12 +191,21 @@ not persisted and an existing table of the same name is dropped and rewritten.
   that schema.
 - The `Super Category` <- `PPG` mapping is a deliberate as-built quirk; "correcting"
   it would diverge from the source workbook and is explicitly prohibited.
-- Excel/openpyxl may return the `KEY` formula string, a cached value, or `None`;
-  the script must always rebuild `KEY` rather than trust the loaded value.
+- Excel/openpyxl may return the `KEY` formula string, a cached value, or `None`. The
+  script does not blindly trust a loaded `KEY`: it is created when absent, trusted
+  only when its values match the rebuilt pattern, and otherwise resolved per
+  `--key-mismatch`.
+- Fuzzy matching carries a mis-mapping risk: a similarity threshold that is too low
+  could bind two genuinely different columns. The threshold is fixed at `>= 0.85` and
+  applied to normalized names; the position and normalized-equality passes run first
+  so well-formed inputs never reach the similarity step.
+- The interactive `--key-mismatch prompt` path must never block automation: it prompts
+  only when stdin is an interactive TTY and otherwise fails fast with guidance.
 - Float precision must be preserved (no rounding); tie-outs use a `1e-6` tolerance.
 - New runtime dependencies (`pandas`, `openpyxl`, `numpy`) are introduced; `openpyxl`
-  is the Excel read engine. `sqlite3` is in the Python standard library (no new
-  dependency for the SQLite sink).
+  is the Excel read engine. `sqlite3`, `difflib`, and `logging` are in the Python
+  standard library (no new dependency for the SQLite sink, fuzzy matching, or warning
+  logs).
 - Header typo `SKU Descripiton` must be preserved verbatim. Note: the persisted
   column header `SKU #` and the SQLite table name per `--table-name` must be valid
   identifiers for SQLite; pandas `to_sql` quotes column names, so the literal
@@ -144,20 +213,25 @@ not persisted and an existing table of the same name is dropped and rewritten.
 
 ## Test Conditions
 
-- [ ] Unit coverage areas: `coerce_sku` (int, np.integer, integer-valued float,
-      non-integer float, NaN, string code); KEY rebuild; schema validation
-      (missing column, extra column, out-of-order column); normalize aggregation
-      (singleton KEY, 2-row YTD+YTG pair, 3+ rows per KEY); `YTG` derivation;
-      `Super Category`/`PPG` quirk; tie-out validation pass and failure paths.
-- [ ] Edge cases: trailing blank `Customer` rows dropped; KEY appearing only once
+- [x] Unit coverage areas: `coerce_sku` (int, np.integer, integer-valued float,
+      non-integer float, NaN, string code); KEY rebuild; column resolution
+      (exact-by-position; reordered columns resolved by name; a typo/variant resolved
+      by fuzzy `>= 0.85`; a required column unmatched -> halt; extra columns -> warn
+      and continue); KEY handling (absent -> created; present-and-matching -> trusted;
+      present-and-diverging -> trust/overwrite/prompt resolution; non-TTY prompt ->
+      fail fast); normalize aggregation (singleton KEY, 2-row YTD+YTG pair, 3+ rows
+      per KEY); `YTG` derivation; `Super Category`/`PPG` quirk; tie-out validation
+      pass and failure paths.
+- [x] Edge cases: trailing blank `Customer` rows dropped; KEY appearing only once
       passes through; KEY appearing 3+ times sums all; non-numeric SKU codes
-      preserved; NaN month cells treated as 0; no alphabetical/KEY sorting.
-- [ ] Integration scenarios: round-trip persist to a SQLite database and read the
+      preserved; NaN month cells treated as 0; no alphabetical/KEY sorting; columns
+      supplied in a shuffled order still resolve; a source with no `KEY` column.
+- [x] Integration scenarios: round-trip persist to a SQLite database and read the
       table back to assert columns, order, and row count; re-running against an
       existing table replaces it (no row duplication); schema-mismatch input produces
       a non-zero exit with a descriptive message; missing `--output` produces a
       non-zero exit.
-- [ ] CLI/API examples: invocation with `--output <path.db>`; custom
+- [x] CLI/API examples: invocation with `--output <path.db>`; custom
       `--source-sheet` and `--table-name`.
 
 ## Anti-requirements (must NOT do)

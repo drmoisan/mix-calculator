@@ -23,15 +23,39 @@ Boundaries:
 from __future__ import annotations
 
 import argparse
-import math
+import logging
 import sqlite3
+import sys
 from typing import IO, TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 
+from src.le_columns import normalize_name, resolve_columns
+from src.le_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
+
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable
+
+# Re-export the column resolver and KEY helpers so callers and tests can import
+# them from this module as well as from their home modules. The resolver lives
+# in ``src.le_columns`` and the KEY helpers in ``src.le_key`` so this file stays
+# under the 500-line limit.
+__all__ = [
+    "coerce_sku",
+    "compute_ytg",
+    "decide_key_action",
+    "load_source",
+    "main",
+    "normalize",
+    "print_summary",
+    "rebuild_key",
+    "resolve_columns",
+    "resolve_key",
+    "validate_tieouts",
+    "write_sqlite",
+]
+
+logger = logging.getLogger(__name__)
 
 # Accepted inputs for the Excel read boundary: a filesystem path or a binary
 # file-like buffer (the in-memory test fixtures pass a BytesIO).
@@ -74,6 +98,10 @@ SOURCE_COLUMNS: list[str] = [
     "PPG",
 ]
 
+# Required expected columns for resolution: every source column except the
+# optional "KEY" (which is resolved by name only and handled separately).
+EXPECTED_COLUMNS: list[str] = [c for c in SOURCE_COLUMNS if c != "KEY"]
+
 # Target output header, 26 columns in exact order. "YTD/YTG" is dropped and a
 # derived "YTG" column is inserted after "Q4", before "Super Category".
 TARGET_COLUMNS: list[str] = [
@@ -92,136 +120,46 @@ TARGET_COLUMNS: list[str] = [
 ]
 
 
-def coerce_sku(val: object) -> str:
-    """Render a SKU value the way the source Excel key formula does.
-
-    Excel concatenates the SKU into the KEY without decimal noise: whole-number
-    SKUs render as plain integer strings and non-numeric codes are preserved
-    verbatim. openpyxl may return an ``int``, a ``float`` (whole or fractional),
-    a ``numpy`` scalar, ``NaN`` for an empty cell, or a string code.
-
-    Args:
-        val: The raw SKU cell value loaded from the workbook. May be an ``int``,
-            ``float``, ``numpy`` integer/float, ``NaN``, ``None``, or ``str``.
-
-    Returns:
-        The SKU rendered as a string. ``NaN``/``None`` render as the empty
-        string; integral numeric values render with no decimal point; other
-        floats render via ``str``; any other value renders via ``str``.
-    """
-    # Empty cells arrive as None; the Excel formula yields an empty segment.
-    if val is None:
-        return ""
-
-    # Normalize numpy scalars to their Python equivalents up front so the
-    # remaining branches operate only on built-in int/float/str types. The
-    # numpy ``.item()`` accessor returns a concrete Python scalar.
-    if isinstance(val, np.integer):
-        val = int(val.item())
-    elif isinstance(val, np.floating):
-        val = float(val.item())
-
-    # bool is a subclass of int; treat it as a generic value, not a number.
-    if isinstance(val, bool):
-        return str(val)
-
-    # Branch ordering matters: integer-typed values render directly, while
-    # float values render as an integer only when they have no fractional part
-    # (mirroring how Excel concatenates a whole number without a decimal).
-    if isinstance(val, int):
-        return str(val)
-    if isinstance(val, float):
-        if math.isnan(val):
-            return ""
-        if val.is_integer():
-            return str(int(val))
-        return str(val)
-
-    # Non-numeric codes (e.g. "RGFBOWLCB") are preserved exactly as supplied.
-    return str(val)
-
-
-def rebuild_key(customer: str, sku: object, type_: str) -> str:
-    """Rebuild the business KEY from its component fields.
-
-    The source workbook stores ``KEY`` as the Excel formula ``=C&E&F``
-    (``Customer & SKU # & Type``) with no separator. openpyxl may return the
-    formula text, a stale cached value, or ``None``, so the key is always
-    rebuilt from components rather than trusting the loaded cell.
-
-    Args:
-        customer: The ``Customer`` text segment.
-        sku: The raw ``SKU #`` value; rendered via :func:`coerce_sku`.
-        type_: The ``Type`` text segment.
-
-    Returns:
-        The concatenation ``customer + coerce_sku(sku) + type_`` with no
-        separator between segments.
-    """
-    return f"{customer}{coerce_sku(sku)}{type_}"
-
-
-def validate_schema(columns: Sequence[str]) -> None:
-    """Validate that the loaded source columns match the expected contract.
-
-    Args:
-        columns: The column labels read from the source sheet, in order.
-
-    Returns:
-        ``None`` when the columns equal :data:`SOURCE_COLUMNS` exactly (same
-        names and same order).
-
-    Raises:
-        ValueError: When the columns do not match exactly. The message names
-            missing columns, extra columns, and (when names match but order
-            does not) reports the order mismatch.
-    """
-    actual = list(columns)
-    if actual == SOURCE_COLUMNS:
-        return
-
-    expected_set = set(SOURCE_COLUMNS)
-    actual_set = set(actual)
-    missing = [c for c in SOURCE_COLUMNS if c not in actual_set]
-    extra = [c for c in actual if c not in expected_set]
-
-    # Distinguish a name mismatch (missing/extra) from a pure ordering problem:
-    # when the same names are present but the sequence differs, report order.
-    if missing or extra:
-        raise ValueError(
-            "Source schema mismatch. "
-            f"Missing columns: {missing}. Extra columns: {extra}. "
-            f"Expected order: {SOURCE_COLUMNS}."
-        )
-    raise ValueError(
-        "Source schema column order mismatch. "
-        f"Got: {actual}. Expected: {SOURCE_COLUMNS}."
-    )
-
-
-def load_source(path: ExcelSource, sheet_name: str) -> pd.DataFrame:
+def load_source(
+    path: ExcelSource,
+    sheet_name: str,
+    *,
+    key_mismatch: str = "prompt",
+    is_tty: Callable[[], bool] = sys.stdin.isatty,
+    prompt: Callable[[str], str] = input,
+) -> pd.DataFrame:
     """Load and clean the source sheet (Excel read boundary).
 
     Reads the workbook with openpyxl treating Excel row 3 as the header
-    (``header=2``), validates the column contract, drops rows with a blank
-    ``Customer``, and rebuilds the ``KEY`` column from components so a loaded or
-    cached key value is never trusted.
+    (``header=2``), resolves the source columns to the canonical expected names
+    (position pass then fuzzy pass via :func:`resolve_columns`), renames the
+    frame to those canonical names, drops rows with a blank ``Customer``, and
+    establishes the ``KEY`` column per :func:`resolve_key`.
 
     Args:
         path: Filesystem path or binary file-like buffer accepted by
             ``pd.read_excel`` (see :data:`ExcelSource`).
         sheet_name: Name of the sheet to read (for example ``"LE-8 + 4"``).
+        key_mismatch: The ``--key-mismatch`` policy applied when a present
+            ``KEY`` column diverges from the rebuilt pattern.
+        is_tty: Callable returning whether stdin is interactive (injectable for
+            tests; defaults to ``sys.stdin.isatty``).
+        prompt: Callable used to ask the user on the interactive prompt path
+            (injectable for tests; defaults to the built-in ``input``).
 
     Returns:
-        A DataFrame with the validated source columns, blank-``Customer`` rows
-        removed, and a freshly rebuilt ``KEY`` column.
+        A DataFrame with the canonical expected columns plus an established
+        ``KEY`` column, with blank-``Customer`` rows removed.
 
     Raises:
-        ValueError: When the source schema does not match the contract
-            (propagated from :func:`validate_schema`).
+        ValueError: When a required expected column cannot be resolved
+            (propagated from :func:`resolve_columns`), or when a diverging
+            ``KEY`` cannot be resolved (propagated from :func:`resolve_key`).
 
     Side effects:
-        Reads from the filesystem (or the provided buffer) via openpyxl.
+        Reads from the filesystem (or the provided buffer) via openpyxl and
+        emits ``logging`` warnings for extra source columns and for
+        ``trust``/``overwrite`` KEY resolution.
     """
     # pandas-stubs types read_excel's overload against openpyxl Workbook/Book
     # types, but openpyxl ships no stubs, so the overload member resolves as
@@ -230,7 +168,35 @@ def load_source(path: ExcelSource, sheet_name: str) -> pd.DataFrame:
     frame: pd.DataFrame = pd.read_excel(  # pyright: ignore[reportUnknownMemberType]
         path, sheet_name=sheet_name, header=2, engine="openpyxl"
     )
-    validate_schema(list(frame.columns.astype(str)))
+    actual_columns = list(frame.columns.astype(str))
+
+    # Locate an optional KEY column by normalized name only (no fuzzy match) so
+    # it is neither a required expected column nor reported as an extra.
+    key_actual: str | None = None
+    for column in actual_columns:
+        if normalize_name(column) == "key":
+            key_actual = column
+            break
+
+    # Resolve every required expected column; resolve_columns raises naming any
+    # unmatched required column. Extras exclude the located KEY column below.
+    resolvable = [c for c in actual_columns if c != key_actual]
+    mapping, extras = resolve_columns(resolvable, EXPECTED_COLUMNS)
+
+    # Surface extra source columns as a warning and continue (they are dropped
+    # from the working frame by the canonical selection below).
+    if extras:
+        logger.warning("Ignoring extra source column(s): %s.", extras)
+
+    # Select and rename to canonical expected names so all downstream logic uses
+    # canonical names regardless of source order. Carry the KEY column through
+    # under its canonical name when present.
+    selection = {mapping[expected]: expected for expected in EXPECTED_COLUMNS}
+    columns_to_keep = list(mapping[expected] for expected in EXPECTED_COLUMNS)
+    if key_actual is not None:
+        columns_to_keep.append(key_actual)
+        selection[key_actual] = "KEY"
+    frame = frame[columns_to_keep].rename(columns=selection).copy()
 
     # Drop trailing/interspersed rows with no Customer; these are blank padding
     # rows in the source sheet that carry no business data.
@@ -239,14 +205,14 @@ def load_source(path: ExcelSource, sheet_name: str) -> pd.DataFrame:
     )
     frame = frame.loc[~customer_blank].copy()
 
-    # Always rebuild KEY from components; the loaded cell may hold the formula
-    # text, a stale cached value, or None.
-    frame["KEY"] = [
-        rebuild_key(str(customer), sku, str(type_))
-        for customer, sku, type_ in zip(
-            frame["Customer"], frame["SKU #"], frame["Type"], strict=True
-        )
-    ]
+    # Establish KEY per the documented branches (create/trust/resolve).
+    frame = resolve_key(
+        frame,
+        key_mismatch,
+        has_key_column=key_actual is not None,
+        is_tty=is_tty,
+        prompt=prompt,
+    )
     return frame
 
 
@@ -461,6 +427,15 @@ def _build_parser() -> argparse.ArgumentParser:
         default="LE",
         help='Destination SQLite table name (default: "LE").',
     )
+    parser.add_argument(
+        "--key-mismatch",
+        choices=("prompt", "trust", "overwrite"),
+        default="prompt",
+        help=(
+            "How to resolve a present KEY column that diverges from the rebuilt "
+            "pattern (default: prompt)."
+        ),
+    )
     return parser
 
 
@@ -472,17 +447,27 @@ def main(argv: list[str] | None = None) -> int:
             ``None``, ``argparse`` reads from ``sys.argv``.
 
     Returns:
-        ``0`` on success; ``1`` when a schema or tie-out ``ValueError`` is
-        raised. A missing required ``--output`` causes ``argparse`` to raise
-        ``SystemExit`` with a non-zero code.
+        ``0`` on success; ``1`` when a column-resolution, KEY-resolution, or
+        tie-out ``ValueError`` is raised. A missing required ``--output`` causes
+        ``argparse`` to raise ``SystemExit`` with a non-zero code.
+
+    Side effects:
+        Configures the stdlib ``logging`` module to emit WARNING-level messages
+        to stderr for extra source columns and KEY resolution.
     """
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    # Map schema/tie-out validation failures to a non-zero exit while letting
-    # the descriptive message reach stderr for the operator.
+    # Configure logging once at the entry point so warnings (extra columns, KEY
+    # resolution) reach stderr without library code touching global config.
+    logging.basicConfig(level=logging.WARNING)
+
+    # Map column-resolution, KEY-resolution, and tie-out failures to a non-zero
+    # exit while letting the descriptive message reach the operator on stdout.
     try:
-        source_df = load_source(args.input, args.source_sheet)
+        source_df = load_source(
+            args.input, args.source_sheet, key_mismatch=args.key_mismatch
+        )
         output_df = normalize(source_df)
         validate_tieouts(source_df, output_df)
     except ValueError as error:

@@ -27,6 +27,8 @@ from src.normalize_le import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pytest
 
 
@@ -130,18 +132,41 @@ def patch_connect(monkeypatch: pytest.MonkeyPatch) -> PersistentConnection:
 def patch_load_source(
     monkeypatch: pytest.MonkeyPatch,
     buffer: io.BytesIO,
+    *,
+    is_tty: bool = False,
+    prompt: Callable[[str], str] | None = None,
 ) -> None:
     """Patch ``src.normalize_le.load_source`` to read the in-memory workbook.
+
+    Forwards the ``key_mismatch`` policy and injects deterministic interactivity
+    seams (``is_tty``/``prompt``) so the CLI path never touches real stdin.
 
     Args:
         monkeypatch: The pytest monkeypatch fixture.
         buffer: The in-memory ``.xlsx`` buffer to load instead of a path.
+        is_tty: The interactive-TTY flag injected into ``load_source``.
+        prompt: Optional prompt callable injected into ``load_source``; when
+            ``None`` a callable that raises is used so an unexpected prompt
+            surfaces loudly instead of blocking.
     """
 
-    def _fake_load_source(_path: str, sheet: str) -> pd.DataFrame:
+    def _raising_prompt(_message: str) -> str:
+        raise AssertionError("prompt should not be invoked in this test path")
+
+    chosen_prompt = prompt if prompt is not None else _raising_prompt
+
+    def _fake_load_source(
+        _path: str, sheet: str, *, key_mismatch: str = "prompt"
+    ) -> pd.DataFrame:
         # Rewind so repeated reads of the shared buffer succeed.
         buffer.seek(0)
-        return load_source(buffer, sheet)
+        return load_source(
+            buffer,
+            sheet,
+            key_mismatch=key_mismatch,
+            is_tty=lambda: is_tty,
+            prompt=chosen_prompt,
+        )
 
     monkeypatch.setattr("src.normalize_le.load_source", _fake_load_source)
 
@@ -157,7 +182,7 @@ def make_row(
     super_category: str = "SOURCE_SUPER_SHOULD_BE_IGNORED",
     description: str = "Some Description",
     gtn: str = "RollUp",
-    key: str = "STALE_KEY_VALUE",
+    key: str | None = None,
 ) -> dict[str, object]:
     """Build a single source-row dict keyed by :data:`SOURCE_COLUMNS`.
 
@@ -171,7 +196,11 @@ def make_row(
         super_category: Source Super Category (must be ignored by the quirk).
         description: SKU Descripiton text (typo intentional).
         gtn: GtN Mapping text.
-        key: A stale KEY cell value that must be ignored and rebuilt.
+        key: Optional ``KEY`` cell value. ``None`` (the default) means the row
+            carries no KEY cell; the default workbook header therefore omits the
+            ``KEY`` column so KEY is created from the rebuilt pattern. A present
+            ``KEY`` is exercised by passing an explicit value together with a
+            ``header`` that includes ``"KEY"``.
 
     Returns:
         A dict mapping every source column to a cell value.
@@ -206,17 +235,24 @@ def build_workbook(
     """Build an in-memory ``.xlsx`` matching the source layout.
 
     The sheet has two leading non-data rows, the header on Excel row 3, and the
-    data rows beginning on row 4.
+    data rows beginning on row 4. The data cells are written in the order of the
+    chosen header so a reordered or pruned header produces a correspondingly
+    reordered/pruned workbook (used by the column-resolution tests).
+
+    The default header omits the optional ``KEY`` column (so the absent-KEY
+    branch is the baseline used across the suite). Pass an explicit ``header``
+    that includes ``"KEY"`` to exercise the present-KEY branches.
 
     Args:
         rows: Source-row dicts (see :func:`make_row`).
         sheet_name: Name of the worksheet to create.
-        header: Optional explicit header row; defaults to :data:`SOURCE_COLUMNS`.
+        header: Optional explicit header row; defaults to the source columns with
+            the ``KEY`` column removed. Cells are emitted in this header's order.
 
     Returns:
         A ``BytesIO`` positioned at offset 0 containing the workbook bytes.
     """
-    columns = header if header is not None else SOURCE_COLUMNS
+    columns = header if header is not None else source_header_without_key()
     workbook = Workbook()
     worksheet = workbook.active
     assert worksheet is not None
@@ -227,9 +263,10 @@ def build_workbook(
     worksheet.append(["leading note row 2"])
     worksheet.append(columns)
 
-    # Append each data row in source-column order.
+    # Append each data row in the chosen header's column order so the on-sheet
+    # layout matches the (possibly reordered/pruned) header exactly.
     for record in rows:
-        worksheet.append([record.get(column) for column in SOURCE_COLUMNS])
+        worksheet.append([record.get(column) for column in columns])
 
     buffer = io.BytesIO()
     workbook.save(buffer)
@@ -237,14 +274,29 @@ def build_workbook(
     return buffer
 
 
+def source_header_without_key() -> list[str]:
+    """Return the source header with the optional ``KEY`` column removed.
+
+    Returns:
+        A copy of :data:`SOURCE_COLUMNS` excluding ``"KEY"``, preserving order.
+    """
+    return [column for column in SOURCE_COLUMNS if column != "KEY"]
+
+
 def loaded_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
-    """Build a workbook from rows and return the loaded (validated) frame.
+    """Build a workbook from rows and return the loaded (resolved) frame.
 
     Args:
         rows: Source-row dicts (see :func:`make_row`).
 
     Returns:
-        The validated source DataFrame as produced by ``load_source``.
+        The resolved source DataFrame as produced by ``load_source`` (canonical
+        column names with an established ``KEY``).
+
+    Notes:
+        The default workbook omits the optional ``KEY`` column, so KEY is created
+        from the rebuilt pattern (the absent-KEY branch) without consulting the
+        ``--key-mismatch`` policy or stdin.
     """
     return load_source(build_workbook(rows), "LE-8 + 4")
 

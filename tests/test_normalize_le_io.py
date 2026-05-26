@@ -221,12 +221,12 @@ def test_main_missing_output_exits_nonzero() -> None:
     assert exc_info.value.code != 0
 
 
-def test_main_schema_mismatch_exits_nonzero(
+def test_main_unmatched_required_column_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A schema-mismatch workbook yields a non-zero return naming the column."""
-    # Arrange: drop the PPG column from the header to force a mismatch.
+    """A workbook missing a required column yields a non-zero return naming it."""
+    # Arrange: drop the PPG column from the header so resolution cannot bind it.
     bad_header = [c for c in SOURCE_COLUMNS if c != "PPG"]
     buffer = build_workbook(
         [make_row(customer="A", sku=1, type_="T", ppg="P", months=[1.0] * 12)],
@@ -241,6 +241,69 @@ def test_main_schema_mismatch_exits_nonzero(
     # Assert
     assert exit_code != 0
     assert "PPG" in captured.out
+
+
+def test_main_diverging_key_prompt_non_tty_exits_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A diverging KEY under default 'prompt' on non-TTY stdin exits non-zero."""
+    # Arrange: a KEY-bearing workbook whose KEY diverges from the rebuilt pattern.
+    buffer = build_workbook(
+        [
+            make_row(
+                customer="A",
+                sku=1,
+                type_="T",
+                ppg="P",
+                months=[1.0] * 12,
+                key="DIVERGENT_KEY",
+            )
+        ],
+        header=SOURCE_COLUMNS,
+    )
+    patch_load_source(monkeypatch, buffer, is_tty=False)
+
+    # Act: default --key-mismatch is prompt; non-TTY must fail fast.
+    exit_code = main(["input.xlsx", "--output", "out.db"])
+    captured = capsys.readouterr()
+
+    # Assert
+    assert exit_code != 0
+    assert "--key-mismatch" in captured.out
+
+
+def test_main_diverging_key_overwrite_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A diverging KEY under --key-mismatch overwrite persists the rebuilt key."""
+    # Arrange
+    buffer = build_workbook(
+        [
+            make_row(
+                customer="A",
+                sku=1,
+                type_="T",
+                ppg="P",
+                months=[1.0] * 12,
+                key="DIVERGENT_KEY",
+            )
+        ],
+        header=SOURCE_COLUMNS,
+    )
+    patch_load_source(monkeypatch, buffer, is_tty=False)
+    con = patch_connect(monkeypatch)
+
+    # Act
+    exit_code = main(
+        ["input.xlsx", "--output", "out.db", "--key-mismatch", "overwrite"]
+    )
+    read_back = read_table(con, "LE")
+    con.real_close()
+
+    # Assert: the persisted KEY is the rebuilt pattern, not the divergent value.
+    assert exit_code == 0
+    assert read_back.iloc[0]["KEY"] == "A1T"
 
 
 def test_main_custom_sheet_and_table_name(

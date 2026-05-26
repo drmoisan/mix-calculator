@@ -44,14 +44,20 @@ corrected.
   - what triggered the action? A new monthly LE workbook is ready for normalization.
   - what steps do they take? They run `poetry run normalize-le LE.xlsx --output le.db`.
     The script loads `LE-8 + 4` (header on Excel row 3), drops blank-`Customer` rows,
-    rebuilds `KEY`, collapses rows by key (first-row text, summed numerics), derives
-    `YTG = sum(May..Dec)`, validates tie-outs, and persists the normalized table to the
-    SQLite database at `--output` (table named per `--table-name`, replacing it if it
-    already exists).
+    resolves the source columns to the expected schema (so the analyst's workbook columns
+    can be reordered or renamed slightly and still resolve), establishes `KEY`, collapses
+    rows by key (first-row text, summed numerics), derives `YTG = sum(May..Dec)`,
+    validates tie-outs, and persists the normalized table to the SQLite database at
+    `--output` (table named per `--table-name`, replacing it if it already exists).
   - what obstacles or decisions occur? If `--output` is omitted, the script exits
-    non-zero (there is no default output path). If the source columns are missing, extra,
-    or out-of-order, the script names the offending columns and exits non-zero. If any
-    per-column tie-out exceeds `1e-6` or `FY != sum(months)`, it raises and exits non-zero.
+    non-zero (there is no default output path). If a required column cannot be resolved
+    by position or fuzzy match, the script names the unmatched expected column(s) and
+    exits non-zero; if extra columns remain after all required columns are matched, it
+    logs a warning and continues. If the workbook already has a `KEY` column whose values
+    diverge from the expected pattern, the script prompts the analyst to trust or
+    overwrite when run interactively; in automation (non-interactive stdin) it fails fast
+    and instructs the caller to pass `--key-mismatch trust|overwrite`. If any per-column
+    tie-out exceeds `1e-6` or `FY != sum(months)`, it raises and exits non-zero.
   - what outcome do they expect? A SQLite table with one row per unique key in
     first-appearance order, a stdout tie-out summary they can spot-check (source rows,
     unique keys, output rows, per-month/FY/quarter tie-outs, first/middle/last rows), and a
@@ -62,25 +68,37 @@ corrected.
 - [x] `src/normalize_le.py` exposes the documented CLI with the listed defaults;
       `--output` is required and must be a SQLite database path; SQLite is the only
       output sink (no Excel or CSV output).
-- [x] Source load uses `header=2`, drops rows with blank `Customer`, and validates the 26
-      source columns A..Z in exact order, failing with a clear error that names
-      missing/extra columns on mismatch.
-- [x] `KEY` is rebuilt from `Customer + coerce_sku(SKU #) + Type`; whole-number SKUs render
-      as integer strings (no decimals/separators); non-numeric SKU codes (e.g. `RGFBOWLCB`,
-      `NotSKU`) are preserved verbatim.
-- [x] Output has 26 columns A..Z in the exact target order, one row per unique KEY, in
-      first-appearance order; `YTD/YTG` is absent and a derived `YTG` column is present
-      after `Q4` and before `Super Category`.
-- [x] Text columns are taken from the first source row per KEY; `Jan..Dec`, `FY`, `Q1..Q4`
-      are summed across all rows sharing a KEY (blanks treated as 0).
+- [x] Source load uses `header=2` and drops rows with blank `Customer`.
+- [ ] Column resolution does not depend on positions: expected columns are matched
+      first by position (normalized name equality at the same index), then unmatched
+      expected columns are resolved against remaining actual columns by normalized
+      equality and then `difflib` similarity `>= 0.85`. After resolution the frame is
+      renamed to canonical expected names.
+- [ ] If any required expected column cannot be matched after the fuzzy pass, the run
+      halts with a clear error naming the unmatched expected column(s).
+- [ ] If every required expected column is matched but extra actual columns remain,
+      a warning naming the extra column(s) is logged and the run continues.
+- [ ] `coerce_sku` renders whole-number SKUs as integer strings (no
+      decimals/separators) and preserves non-numeric SKU codes (e.g. `RGFBOWLCB`,
+      `NotSKU`) verbatim; the rebuilt pattern is `Customer + coerce_sku(SKU #) + Type`.
+- [ ] `KEY` handling: when the source has no `KEY` column it is created from the
+      rebuilt pattern; when present and all values equal the pattern it is trusted;
+      when present and values diverge it is resolved per `--key-mismatch`
+      (`trust`/`overwrite` log a warning; `prompt` asks interactively on a TTY and
+      fails fast with a non-zero exit when stdin is not interactive).
+- [x] Output has 26 columns A..Z in the exact target order, one row per unique KEY,
+      in first-appearance order; `YTD/YTG` is absent and a derived `YTG` column is
+      present after `Q4` and before `Super Category`.
+- [x] Text columns are taken from the first source row per KEY; `Jan..Dec`, `FY`,
+      `Q1..Q4` are summed across all rows sharing a KEY (blanks treated as 0).
 - [x] `YTG` = sum(May..Dec) computed on the output row, not from source.
-- [x] `Super Category` and `PPG` are both populated from the source `PPG` column (the
-      as-built quirk) and are identical per row.
+- [x] `Super Category` and `PPG` are both populated from the source `PPG` column
+      (the as-built quirk) and are identical per row.
 - [x] Validation enforces output-row-count == unique keys, per-column source/output
-      tie-outs within `1e-6`, and `FY == sum(months)` per row; failures raise and exit
-      non-zero.
-- [x] stdout prints source rows, unique keys, output rows, per-month/FY/quarter tie-outs,
-      and first/middle/last output rows for spot-checking.
+      tie-outs within `1e-6`, and `FY == sum(months)` per row; failures raise and
+      exit non-zero.
+- [x] stdout prints source rows, unique keys, output rows, per-month/FY/quarter
+      tie-outs, and first/middle/last output rows for spot-checking.
 - [x] The normalized DataFrame is persisted to the SQLite database at `--output`
       via `to_sql(table, conn, if_exists="replace", index=False)`; an existing table
       of the same name is dropped and rewritten; the row index is not persisted; the
@@ -96,3 +114,8 @@ corrected.
 - Do not round numeric values; preserve float64 precision.
 - Do not change the `SKU Descripiton` header typo.
 - No Excel/CSV output sink — SQLite only.
+- Do not bind two genuinely different columns via an over-loose fuzzy threshold; the
+  similarity threshold is fixed at `>= 0.85` and the position/normalized-equality passes
+  run first.
+- Do not block automation on the interactive prompt; a non-interactive `--key-mismatch
+  prompt` fails fast rather than waiting on input.

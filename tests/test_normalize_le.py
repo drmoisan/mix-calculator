@@ -1,9 +1,10 @@
 """Pure-transform tests for :mod:`src.normalize_le`.
 
-Covers ``coerce_sku``, ``rebuild_key``, ``validate_schema``, ``load_source``,
-``compute_ytg``, and ``normalize``. I/O, persistence, and CLI tests live in
-``test_normalize_le_io.py``. Shared in-memory fixtures live in
-``le_fixtures.py``; no temporary files are created on disk.
+Covers ``coerce_sku``, ``rebuild_key``, ``decide_key_action``, ``resolve_key``,
+``load_source``, ``compute_ytg``, and ``normalize``. I/O, persistence, and CLI
+tests live in ``test_normalize_le_io.py``; column-resolution tests live in
+``test_le_columns.py``. Shared in-memory fixtures live in ``le_fixtures.py``; no
+temporary files are created on disk.
 """
 
 from __future__ import annotations
@@ -23,9 +24,14 @@ from src.normalize_le import (
     load_source,
     normalize,
     rebuild_key,
-    validate_schema,
 )
-from tests.le_fixtures import as_float, build_workbook, close, loaded_frame, make_row
+from tests.le_fixtures import (
+    as_float,
+    build_workbook,
+    close,
+    loaded_frame,
+    make_row,
+)
 
 # ---------------------------------------------------------------------------
 # coerce_sku
@@ -94,48 +100,6 @@ def test_rebuild_key_property(customer: str, sku: int, type_: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# validate_schema
-# ---------------------------------------------------------------------------
-
-
-def test_validate_schema_exact_match_returns_none() -> None:
-    """An exact column match returns None without raising."""
-    # Act / Assert
-    assert validate_schema(list(SOURCE_COLUMNS)) is None
-
-
-def test_validate_schema_missing_column() -> None:
-    """A missing column raises ValueError naming the missing column."""
-    # Arrange
-    columns = [c for c in SOURCE_COLUMNS if c != "PPG"]
-
-    # Act / Assert
-    with pytest.raises(ValueError, match="PPG"):
-        validate_schema(columns)
-
-
-def test_validate_schema_extra_column() -> None:
-    """An extra column raises ValueError naming the extra column."""
-    # Arrange
-    columns = [*SOURCE_COLUMNS, "ExtraColumn"]
-
-    # Act / Assert
-    with pytest.raises(ValueError, match="ExtraColumn"):
-        validate_schema(columns)
-
-
-def test_validate_schema_out_of_order_column() -> None:
-    """Correct names in the wrong order raise a column-order ValueError."""
-    # Arrange: swap the first two columns.
-    columns = list(SOURCE_COLUMNS)
-    columns[0], columns[1] = columns[1], columns[0]
-
-    # Act / Assert
-    with pytest.raises(ValueError, match="order"):
-        validate_schema(columns)
-
-
-# ---------------------------------------------------------------------------
 # load_source
 # ---------------------------------------------------------------------------
 
@@ -157,8 +121,9 @@ def test_load_source_header_and_columns() -> None:
     # Act
     frame = load_source(buffer, "LE-8 + 4")
 
-    # Assert
-    assert list(frame.columns) == SOURCE_COLUMNS
+    # Assert: every canonical source column is present (KEY established last);
+    # the "YTD/YTG" column is retained here and dropped later in normalize.
+    assert set(frame.columns) == set(SOURCE_COLUMNS)
 
 
 def test_load_source_drops_blank_customer_rows() -> None:
@@ -190,9 +155,9 @@ def test_load_source_drops_blank_customer_rows() -> None:
     assert frame.iloc[0]["Customer"] == "CustA"
 
 
-def test_load_source_rebuilds_key_ignoring_loaded_value() -> None:
-    """KEY is rebuilt from components, ignoring the stale loaded cell value."""
-    # Arrange
+def test_load_source_overwrite_rebuilds_key_ignoring_loaded_value() -> None:
+    """Under overwrite, a present diverging KEY is rebuilt from components."""
+    # Arrange: include the optional KEY column with a stale, diverging value.
     rows = [
         make_row(
             customer="CustA",
@@ -203,10 +168,10 @@ def test_load_source_rebuilds_key_ignoring_loaded_value() -> None:
             key="THIS_SHOULD_BE_IGNORED",
         )
     ]
-    buffer = build_workbook(rows)
+    buffer = build_workbook(rows, header=SOURCE_COLUMNS)
 
     # Act
-    frame = load_source(buffer, "LE-8 + 4")
+    frame = load_source(buffer, "LE-8 + 4", key_mismatch="overwrite")
 
     # Assert
     assert frame.iloc[0]["KEY"] == "CustA5Gross Sales"
