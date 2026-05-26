@@ -24,6 +24,50 @@ poetry run normalize-le <input.xlsx> --output <path.db> \
 See [docs/features/active/2026-05-25-etl-le-topline-input-2/](docs/features/active/2026-05-25-etl-le-topline-input-2/)
 for the full specification and acceptance criteria (issue #2).
 
+## AOP load (`load_aop`)
+
+`src/load_aop.py` is a sibling ETL over the `AOP1` sheet. It reads the sheet into
+a pandas DataFrame, resolves the schema position-independently (position pass then
+fuzzy match ≥ 0.85), reconciles the `(Customer, SKU #, Type)` `KEY` via the shared
+policy, validates the per-row total identities (`YTD`, `Q1`..`Q4`, `YTG` against
+their constituent months), optionally applies a caller-supplied transform, and
+persists the result to a SQLite table with lookup indexes. Unlike `normalize_le`,
+it does not collapse rows by `KEY`.
+
+```sh
+poetry run load-aop <input.xlsx> --output <path.db> \
+  [--source-sheet "AOP1"] [--table-name aop] \
+  [--key-mismatch {prompt,trust,overwrite}] \
+  [--if-exists {replace,append,fail}] [--snake-case]
+```
+
+- `--output` is required and must point at a SQLite database file. `--source-sheet`
+  defaults to `"AOP1"`; `--table-name` defaults to `aop`.
+- `--key-mismatch` (default `prompt`) selects how a present `KEY` column that
+  diverges from the rebuilt pattern is resolved; `--if-exists` (default `replace`)
+  is passed through to the SQLite write boundary.
+- `--snake-case` renames columns to snake_case before writing; by default the
+  original headers (including the intentional `SKU Descripiton` typo) are preserved.
+- A load summary is printed to stdout; the command exits non-zero on any
+  column-resolution, `KEY`-resolution, or validation failure.
+
+An importable API is also available:
+
+```python
+from src.load_aop import load_aop, persist_aop
+
+df = load_aop("path/to/workbook.xlsx", sheet="AOP1")
+persist_aop(df, db_path="aop.db", table="aop", if_exists="replace")
+```
+
+Both ETLs share domain-agnostic leaf modules — `src/etl_columns.py`,
+`src/etl_key.py`, `src/etl_totals.py`, and `src/pandas_io.py` — so column
+resolution, `KEY` reconciliation, blank-total filling, total/months validation,
+and the pandas read/write boundary are defined once.
+
+See [docs/features/active/2026-05-26-load-aop-sheet-7/](docs/features/active/2026-05-26-load-aop-sheet-7/)
+for the full specification and acceptance criteria (issue #7).
+
 ## Development
 
 This project uses [Poetry](https://python-poetry.org/) with an in-project
