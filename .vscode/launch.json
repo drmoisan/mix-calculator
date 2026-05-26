@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: normalize-le Input Files.xlsx",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.normalize_le",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "args": [
+                "artifacts\\Input Files.xlsx",
+                "--output",
+                "artifacts\\le-norm.db"
+            ]
+        }
+    ]
+}
