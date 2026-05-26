@@ -104,6 +104,25 @@ poetry run pyright --version
 poetry run pytest --version
 
 # -----------------------------------------------------------------------------
+# Claude Code tooling (MCP server + CLI).
+# -----------------------------------------------------------------------------
+# The drm-copilot MCP server is declared in .mcp.json (npx @danmoisan/drm-copilot-mcp)
+# and the mcp__drm-copilot__* tools are granted in .claude/settings.json. Pre-install
+# it globally so it is available offline and npx does not download it on first use.
+# The Claude Code CLI is the client that launches the MCP server, so it is installed
+# alongside it.
+echo ""
+echo "Installing Claude Code tooling (MCP server + CLI)..."
+if command -v npm >/dev/null 2>&1; then
+  npm install -g @danmoisan/drm-copilot-mcp @anthropic-ai/claude-code
+  echo "Installed global npm packages:"
+  npm ls -g --depth=0 @danmoisan/drm-copilot-mcp @anthropic-ai/claude-code || true
+else
+  echo "Warning: npm not found; cannot pre-install the drm-copilot MCP server or Claude Code CLI."
+  echo "  The node devcontainer feature should provide npm; rebuild the container if it is missing."
+fi
+
+# -----------------------------------------------------------------------------
 # PowerShell tooling verification.
 # -----------------------------------------------------------------------------
 echo ""

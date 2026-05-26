@@ -1,5 +1,4 @@
 {
-  "$schema": "https://containers.dev/schemas/devcontainer.schema.json",
   "name": "mix-calculator (Codespaces)",
   "build": {
     "context": "../..",
@@ -40,11 +39,17 @@
         "eamodio.gitlens",
         "mhutchie.git-graph",
         "github.vscode-pull-request-github",
+        "github.vscode-github-actions",
         "ryanluker.vscode-coverage-gutters",
+        "tenninebt.vscode-koverage",
         "editorconfig.editorconfig",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
         "bierner.markdown-preview-github-styles",
         "bierner.markdown-mermaid",
-        "bierner.markdown-checkbox"
+        "bierner.markdown-checkbox",
+        "powerquery.vscode-powerquery",
+        "anthropic.claude-code"
       ],
       "settings": {
         "[python]": {

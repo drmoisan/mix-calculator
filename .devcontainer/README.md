@@ -38,12 +38,24 @@ Codespaces present a picker so you explicitly choose the local or Codespaces con
 - **Python 3.12** with **Poetry** (in-project `.venv`).
 - **PowerShell 7** with **PSScriptAnalyzer** and **Pester** — used by
   `scripts/dev-tools/*.ps1` and the `.claude/hooks/*.ps1` hooks.
-- **Node (LTS)** — required to launch the `drm-copilot` MCP server via `npx`
-  (see `.mcp.json`).
+- **Node (LTS)** — runtime for the Claude Code tooling below.
 - **build-essential** and **patchelf** — the C toolchain Nuitka needs for builds.
 - **Qt6 runtime libraries** and **Xvfb** — so the PySide6 GUI can run and be
   tested without a physical display.
 - **git** and **GitHub CLI** (`gh`).
+- **Claude Code CLI** (`@anthropic-ai/claude-code`) and the **`drm-copilot` MCP
+  server** (`@danmoisan/drm-copilot-mcp`), installed globally by `post-create.sh`.
+  The server is declared in `.mcp.json` and its `mcp__drm-copilot__*` tools are
+  granted in `.claude/settings.json`; pre-installing it means `npx` does not need
+  to download it on first use.
+
+VS Code extensions are installed automatically from each `devcontainer.json`:
+the Python stack (Python, Pylance, Black, Ruff, Poetry, debugpy), PowerShell and
+Pester, GitLens / Git Graph / GitHub Pull Requests / GitHub Actions, coverage
+viewers, EditorConfig, TOML and YAML support, the Markdown preview set, the Power
+Query / M language extension (used by `.vscode/settings.json`), and the Claude
+Code extension. The local configuration additionally includes the Dev Containers
+and Docker extensions.
 
 The container defaults to the PowerShell shell. Bash is available from the
 terminal profile dropdown.
