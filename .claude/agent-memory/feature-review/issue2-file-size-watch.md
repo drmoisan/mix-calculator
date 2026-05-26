@@ -29,9 +29,17 @@ count unchanged (77), coverage unchanged (100% line/branch), zero suppressions,
 confidentiality clean, full toolchain green (reviewer-run). Verdict: **PASS / GO**,
 zero blocking findings — no remediation-inputs produced.
 
-**How to apply:** When re-auditing issue #2 after any test addition, always run
-`wc -l tests/*.py src/*.py` — the normalize-le test files cluster near 500 and the
-500-line limit is a recurring trip hazard here, distinct from the
-suppression-authorization concern in [[pyright-ignore-authorization-scope]]. The
-merge-base for this branch is `03eb801` per `git merge-base main HEAD` (a caller
-may supply the stale bootstrap SHA `2d86e83`; scope is identical either way).
+**Still under limit under issue #7 (2026-05-26T14-40 audit, head `5329c9f`):**
+The load-aop feature renamed the LE leaf modules to `etl_*` and touched
+`tests/test_normalize_le.py` (+13 net lines, now 446) and `src/normalize_le.py`
+(now 495). Every changed src/test file remains < 500; largest are
+`normalize_le.py` at 495 and `test_normalize_le.py` at 446. Verdict PASS, zero
+blocking findings.
+
+**How to apply:** When re-auditing the normalize-le / etl module family after any
+test addition (issue #2 or any sibling ETL like issue #7), always run
+`wc -l tests/*.py src/*.py` — these files cluster near 500 and the 500-line limit
+is a recurring trip hazard here, distinct from the suppression-authorization
+concern in [[pyright-ignore-authorization-scope]]. `src/normalize_le.py` sits at
+495 lines and has essentially no headroom; any further growth needs extraction.
+The issue #7 merge-base is `c586ac07` (resolved base `main`).
