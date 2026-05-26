@@ -1,0 +1,51 @@
+# Continuous integration orchestrator.
+#
+# Runs on every pull request targeting main, every push to main, and on demand
+# (workflow_dispatch). This workflow contains no inline steps: it composes the
+# repository's reusable CI gates (`_*.yml`) per the orchestration convention in
+# .github/workflows/README.md.
+#
+# Gates:
+#   - python-quality   full Python toolchain (Black -> Ruff -> Pyright -> Pytest+coverage)
+#   - actionlint       workflow YAML schema/static lint
+#   - codeql           Python SAST (security-extended)
+#   - dependency-review vulnerable/disallowed-license dependency scan (pull requests only)
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs for the same ref to avoid wasting runner minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege default; jobs that need more (CodeQL) raise it explicitly.
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    name: Python quality
+    uses: ./.github/workflows/_python-quality.yml
+
+  actionlint:
+    name: Workflow lint
+    uses: ./.github/workflows/_actionlint.yml
+
+  codeql:
+    name: CodeQL SAST
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/_codeql.yml
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/_dependency-review.yml

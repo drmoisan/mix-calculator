@@ -1,0 +1,44 @@
+# Reusable CodeQL static application security testing (SAST) gate for Python.
+#
+# Initializes the CodeQL database for the `python` language and runs the
+# default + security-extended query suite. Python is interpreted, so no
+# build step is required.
+#
+# The calling job MUST grant `security-events: write` (and `actions: read`)
+# because reusable workflows cannot request more token scope than the caller.
+#
+# Callable via `uses: ./.github/workflows/_codeql.yml` or directly (workflow_dispatch).
+name: _codeql
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL analyze (python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

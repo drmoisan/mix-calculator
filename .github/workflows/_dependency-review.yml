@@ -1,0 +1,33 @@
+# Reusable dependency-review gate.
+#
+# Scans dependency manifest changes in a pull request for known-vulnerable or
+# disallowed-license packages. The action requires pull_request event context
+# (it diffs the PR base against the head), so the orchestrator only calls this
+# workflow on pull_request events.
+#
+# Callable via `uses: ./.github/workflows/_dependency-review.yml` or directly
+# (workflow_dispatch, which performs a no-op outside a pull request).
+name: _dependency-review
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Review dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high

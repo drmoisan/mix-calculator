@@ -1,0 +1,80 @@
+# Reusable Python quality gate.
+#
+# Runs the repository's mandatory Python toolchain in order:
+#   1. Black (format check)   2. Ruff (lint)   3. Pyright (type check)   4. Pytest (+ coverage)
+# Coverage is gated at >= 85% line per .claude/rules/quality-tiers.md.
+#
+# Callable via `uses: ./.github/workflows/_python-quality.yml` from an orchestrator
+# workflow, or directly via the Actions tab (workflow_dispatch).
+name: _python-quality
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    name: Python toolchain (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      # poetry.toml pins an in-project .venv; cache it on the lock file so
+      # unchanged dependency sets skip reinstallation.
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-py${{ matrix.python-version }}-venv-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-py${{ matrix.python-version }}-venv-
+
+      # Install the root package too: tests import `src.calculator`, which
+      # requires the project installed (editable) on sys.path.
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Format check (Black)
+        run: poetry run black --check .
+
+      - name: Lint (Ruff)
+        run: poetry run ruff check --no-fix .
+
+      - name: Type check (Pyright)
+        run: poetry run pyright
+
+      - name: Test with coverage (Pytest)
+        run: >-
+          poetry run pytest
+          --cov=src
+          --cov-branch
+          --cov-report=term-missing
+          --cov-fail-under=85
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: artifacts/python/lcov.info
+          if-no-files-found: ignore
+          retention-days: 7
