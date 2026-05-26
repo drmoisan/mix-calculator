@@ -1,4 +1,4 @@
-"""Tests for position-independent column resolution (:mod:`src.le_columns`).
+"""Tests for position-independent column resolution (:mod:`src.etl_columns`).
 
 Covers ``normalize_name`` and the pure ``resolve_columns`` resolver
 (exact-by-position, reordered-by-name, fuzzy >= 0.85, missing-required halt, and
@@ -13,7 +13,7 @@ import logging
 
 import pytest
 
-from src.le_columns import normalize_name, resolve_columns
+from src.etl_columns import normalize_name, resolve_columns
 from src.normalize_le import EXPECTED_COLUMNS, SOURCE_COLUMNS, load_source
 from tests.le_fixtures import build_workbook, make_row, source_header_without_key
 

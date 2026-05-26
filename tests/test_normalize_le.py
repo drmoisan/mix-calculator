@@ -4,7 +4,7 @@ Covers ``coerce_sku``, ``rebuild_key``, ``decide_key_action``, ``resolve_key``,
 ``load_source``, ``compute_ytg``, and ``normalize``. The ``load_source``
 blank-total fill cases live in ``test_normalize_le_totals.py``; I/O, persistence,
 and CLI tests live in ``test_normalize_le_io.py``; column-resolution tests live
-in ``test_le_columns.py``. Shared in-memory fixtures live in ``le_fixtures.py``;
+in ``test_etl_columns.py``. Shared in-memory fixtures live in ``le_fixtures.py``;
 no temporary files are created on disk.
 """
 
@@ -198,7 +198,17 @@ def test_compute_ytg_sums_may_through_dec() -> None:
 
 @given(
     months=st.lists(
-        st.floats(allow_nan=False, allow_infinity=False, width=32),
+        # Bound the magnitude (matching the sibling normalize property test) so
+        # the row-wise float sum stays comparable within tolerance; unbounded
+        # float32 operands up to ~3.4e38 make any absolute tolerance
+        # unsatisfiable through catastrophic cancellation.
+        st.floats(
+            allow_nan=False,
+            allow_infinity=False,
+            min_value=-1e6,
+            max_value=1e6,
+            width=32,
+        ),
         min_size=12,
         max_size=12,
     )
@@ -212,7 +222,7 @@ def test_compute_ytg_property(months: list[float]) -> None:
     result = as_float(compute_ytg(frame).iloc[0])
 
     # Assert
-    assert close(result, sum(months[4:]), tol=1e-9)
+    assert close(result, sum(months[4:]), tol=1e-6)
 
 
 # ---------------------------------------------------------------------------
