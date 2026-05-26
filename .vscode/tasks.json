@@ -5,31 +5,53 @@
             "label": "QC: 1 Black: format",
             "type": "shell",
             "command": "poetry",
-            "args": ["run", "black", "."]
+            "args": [
+                "run",
+                "black",
+                "."
+            ],
+            "problemMatcher": []
         },
         {
             "label": "QC: 2 Ruff: lint",
             "type": "shell",
             "command": "poetry",
-            "args": ["run", "ruff", "check"]
+            "args": [
+                "run",
+                "ruff",
+                "check"
+            ],
+            "problemMatcher": []
         },
         {
             "label": "QC: 2 Ruff: fix",
             "type": "shell",
             "command": "poetry",
-            "args": ["run", "ruff", "check", "--fix"]
+            "args": [
+                "run",
+                "ruff",
+                "check",
+                "--fix"
+            ]
         },
         {
             "label": "QC: 3 Pyright: type-check",
             "type": "shell",
             "command": "poetry",
-            "args": ["run", "pyright"]
+            "args": [
+                "run",
+                "pyright"
+            ],
+            "problemMatcher": []
         },
         {
             "label": "QC: 4 Pytest: run tests",
             "type": "shell",
             "command": "poetry",
-            "args": ["run", "pytest"]
+            "args": [
+                "run",
+                "pytest"
+            ]
         },
         {
             "label": "QC: 4 Pytest: run tests with coverage",
@@ -41,7 +63,8 @@
                 "--cov=src",
                 "--cov-report=term-missing",
                 "--cov-report=lcov:artifacts/python/lcov.info"
-            ]
+            ],
+            "problemMatcher": []
         }
     ]
 }
