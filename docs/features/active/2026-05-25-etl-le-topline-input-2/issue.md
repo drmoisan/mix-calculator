@@ -178,7 +178,7 @@ not persisted and an existing table of the same name is dropped and rewritten.
 - [x] `YTG` = sum(May..Dec) computed on the output row, not from source.
 - [x] `Super Category` and `PPG` are both populated from the source `PPG` column
       (the as-built quirk) and are identical per row.
-- [ ] Blank `FY`/`Q1..Q4` cells in the source are filled from their monthly
+- [x] Blank `FY`/`Q1..Q4` cells in the source are filled from their monthly
       components before collapsing (`FY <- sum(Jan..Dec)`, `Qn <- sum(its months)`);
       populated totals are left unchanged and NaN months count as 0.
 - [x] Validation enforces output-row-count == unique keys, per-column source/output
