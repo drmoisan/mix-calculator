@@ -1,0 +1,1 @@
+- [MCP gate is runnable](feedback_mcp_gate_is_runnable.md) — don't declare the PoshQC/MCP gate or lifecycle unrunnable from tool absence; attempt it, escalate to orchestrator if needed

@@ -2,3 +2,4 @@
 - [pyright:ignore authorization scope](pyright-ignore-authorization-scope.md) — when the caller brief lists `# pyright: ignore` as in-scope, gate it like noqa/type:ignore even though the repo rule text is narrower
 - [issue #2 file-size watch](issue2-file-size-watch.md) — normalize-le test files cluster near the 500-line limit; defect-fix coverage pushed test_normalize_le.py to 532 (FAIL); merge-base is 03eb801
 - [Evidence validator script absent](evidence-validator-script-absent.md) — scripts/validate_evidence_locations.py missing; use a git-diff scan instead; only the PowerShell hook exists
+- [PowerShell coverage artifact scope](powershell-coverage-artifact-scope.md) — artifacts/pester/powershell-coverage.xml often covers only .claude/hooks; grep for the changed file before accepting a coverage claim
