@@ -68,6 +68,51 @@ and the pandas read/write boundary are defined once.
 See [docs/features/active/2026-05-26-load-aop-sheet-7/](docs/features/active/2026-05-26-load-aop-sheet-7/)
 for the full specification and acceptance criteria (issue #7).
 
+## Mix decomposition pipeline (`mix-pipeline`)
+
+`src/mix_pipeline.py` runs the LE-versus-AOP gross-to-net mix and rate
+decomposition end-to-end. It reuses the `normalize_le`, `load_aop`, and
+`load_skulu` loaders to import the `LE`, `aop`, and `sku_lu` tables, then runs a
+chain of pure pandas transforms (`src/mix_transforms.py`, `src/mix_lookups.py`,
+`src/mix_rate_impacts.py`, `src/mix_rollups.py`, `src/mix_q1.py`) in topological
+order and persists every derived table into the same SQLite database. The
+orchestrator performs all I/O through `src/pandas_io.py`; the transform modules
+are pure.
+
+```sh
+poetry run python -m src.mix_pipeline --input <workbook.xlsx> --output <database.db> \
+  [--le-sheet "LE-8 + 4"] [--aop-sheet "AOP1"] \
+  [--skulu-input <workbook.xlsx>] [--skulu-sheet "SKU_LU"]
+```
+
+- `--input` and `--output` are required. `--input` supplies the `AOP1` and
+  `LE-8 + 4` sheets; the decomp workbook also contains `SKU_LU`, so a single
+  `--input` can run the whole pipeline end-to-end.
+- `--le-sheet` defaults to `"LE-8 + 4"`; `--aop-sheet` defaults to `"AOP1"`.
+- `--skulu-input` defaults to the value of `--input`; `--skulu-sheet` defaults to
+  `"SKU_LU"`. The `SKU_LU` load renames `International` to `Country` and maps the
+  `0`/`1` codes to `US`/`Canada`.
+- A summary of the tables written and their row counts is printed to stdout; the
+  command exits `0` on success and `1` on a loader column/`KEY`/validation
+  failure.
+
+The pipeline writes the two import tables (`aop`, `LE`) plus nineteen derived
+tables: `le_wide`, `aop_wide`, `customer_lu`, `sku_lu`, `aop_norm`, `le_norm`,
+`aop_vs_le`, `mix_base`, `rate_impacts`, `mix_rollup_1`, `mix_1_sku`,
+`mix_rollup_2`, `mix_2_category`, `mix_rollup_3`, `mix_3_customer`,
+`mix_rollup_4` (a single-row scalar table), `mix_4_country`, `mix_0_detail`, and
+`q1_results_by_sku`.
+
+Confidentiality: the source workbooks (for example
+`artifacts/LE v AOP Gross to Net Decomp.xlsx`, `artifacts/Input Files.xlsx`) and
+the output `.db` are gitignored and must remain untracked. `SKU Description` and
+`Category` values from `SKU_LU` are confidential and never appear in tests,
+fixtures, or docs; only fabricated examples (for example `SKU-001`, `Widget A`,
+`Category X`) are used. The `US`/`Canada` country values are not secret.
+
+See [docs/features/active/2026-05-26-mix-decomp-transforms-9/](docs/features/active/2026-05-26-mix-decomp-transforms-9/)
+for the full specification and acceptance criteria (issue #9).
+
 ## Development
 
 This project uses [Poetry](https://python-poetry.org/) with an in-project

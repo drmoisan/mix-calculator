@@ -25,6 +25,22 @@ projects:
   src/_load_aop_helpers.py: T2
   src/calculator.py: T2
 
+  # Mix-decomp gross-to-net transform pipeline (issue #9) — pure transforms,
+  # loaders, and orchestration (T2-Core). Same rationale as the existing ETL
+  # modules: bugs cause feature regressions, not silent data loss; per-row and
+  # cross-table tie-outs are the correctness gate. The _*_helpers and
+  # mix_pipeline_run modules hold split-out logic kept under the 500-line limit.
+  src/load_skulu.py: T2
+  src/mix_transforms.py: T2
+  src/_mix_transforms_helpers.py: T2
+  src/mix_lookups.py: T2
+  src/mix_rate_impacts.py: T2
+  src/mix_rollups.py: T2
+  src/_mix_rollups_helpers.py: T2
+  src/mix_q1.py: T2
+  src/mix_pipeline.py: T2
+  src/mix_pipeline_run.py: T2
+
   # I/O adapter boundary around pandas/openpyxl/SQLite (T3-Adapters).
   src/pandas_io.py: T3
 
