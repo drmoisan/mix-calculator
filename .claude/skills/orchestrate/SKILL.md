@@ -163,17 +163,56 @@ When S9 records `step9_status: "failed_remediation_required"` (a failed required
 4. The `remediation_pass` counter is shared with local-finding passes; the cap is 3.
 5. On the third CI-failure pass without resolution, the orchestrator records `step9_status: "blocked_ci_loop_limit"`, does not write DONE, and halts. No further automation is attempted.
 
+## PR Authoring (pr-author Handoff)
+
+The orchestrator MUST NOT author a PR body itself or pass an ad-hoc body to
+`gh`. The PR body is produced exclusively by the `pr-author` skill, and the
+`enforce-pr-author-skill.ps1` PreToolUse hook blocks any `gh pr create` /
+`gh pr edit --body-file` that bypasses this handoff. The required sequence is:
+
+1. Refresh the PR context bundle: `mcp__drm-copilot__collect_pr_context --base <base>`,
+   which writes `artifacts/pr_context.summary.txt` and `artifacts/pr_context.appendix.txt`.
+2. Invoke the `pr-author` skill. It reads only the context bundle and returns
+   the GitHub-ready PR body **as its message** (per `.claude/skills/pr-author/SKILL.md`).
+   Do not hand-write or paraphrase the body; use the returned text verbatim.
+3. Write the returned body to the canonical path `artifacts/pr_body_<N>.md`
+   (`<N>` = PR or canonical issue number), then write a sibling provenance
+   receipt `artifacts/pr_body_<N>.receipt.json` with the shape:
+
+   ```jsonc
+   {
+     "skill": "pr-author",
+     "pr_body_path": "artifacts/pr_body_<N>.md",
+     "number": <N>,
+     "sha256": "<lowercase hex sha256 of the pr_body file bytes>",
+     "context_summary_path": "artifacts/pr_context.summary.txt",
+     "created_at": "<ISO-8601 UTC, must be newer than pr_context.summary.txt>"
+   }
+   ```
+
+   The `sha256` is computed over the bytes of the body file exactly as written.
+4. Create the PR with `gh pr create --body-file artifacts/pr_body_<N>.md`
+   (or update an existing PR with `gh pr edit <N> --body-file artifacts/pr_body_<N>.md`).
+
+The hook rejects, with a specific reason, any of: an inline `--body`; no body
+flag; a `--body-file` path that is not `artifacts/pr_body_<N>.md`; a missing or
+stale receipt; a receipt whose `number` does not match the filename; or a
+receipt whose `sha256` does not match the body file on disk. Record
+`pr_author_receipt: "artifacts/pr_body_<N>.receipt.json"` in the checkpoint once
+the PR is created.
+
 ## PR Creation Gate
 
-The orchestrator must not create a PR, push a branch for PR purposes, or report work complete until all five conditions are simultaneously true:
+The orchestrator must not create a PR, push a branch for PR purposes, or report work complete until all six conditions are simultaneously true:
 
 1. `blocking_findings_resolved: true` — the most recent `feature-review` produced zero blocking findings.
 2. The AC verification artifact (`p14-acceptance-criteria-checkoff.md` or equivalent) confirms all acceptance criteria pass.
 3. The mandatory toolchain passed in its most recent run on the branch (no linting/type-check/test failures).
 4. The checkpoint `next_step` is `S8_create_pr` (precondition to entering S9).
-5. `ci_gate.conclusion == "success"` AND `ci_gate.head_sha == current head SHA of the PR branch`. DONE is not written while either sub-condition is false.
+5. The PR body was produced via the **PR Authoring (pr-author Handoff)** above: `artifacts/pr_body_<N>.md` exists with a matching `artifacts/pr_body_<N>.receipt.json`, and the PR was created with `--body-file` pointing at that file.
+6. `ci_gate.conclusion == "success"` AND `ci_gate.head_sha == current head SHA of the PR branch`. DONE is not written while either sub-condition is false.
 
-This gate is non-negotiable. Each condition is independently verified before PR creation proceeds. Conditions 1-4 are unchanged from the prior contract; condition 5 is additive.
+This gate is non-negotiable. Each condition is independently verified before PR creation proceeds. Conditions 1-4 are unchanged from the prior contract; conditions 5 (pr-author handoff) and 6 (CI green) are additive.
 
 ## Step 6 Delegation — Prohibited Prompt Language
 
