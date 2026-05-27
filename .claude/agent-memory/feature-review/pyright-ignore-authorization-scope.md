@@ -28,8 +28,7 @@ match or recorded approval. Reporting PASS would have ignored the caller's state
 code-correctness defect) when the code is safe but unauthorized. Route to remediation with
 three resolution options: record explicit approval, add a pre-authorized pattern with the
 required comment format, or refactor to remove the directive. See
-[[mcp-template-tools-unavailable]] and [[poetry-virtualenv-quirk]] for the other recurring
-issue #2 review constraints.
+[[poetry-virtualenv-quirk]] for another recurring issue #2 review constraint.
 
 **Resolution (2026-05-26 re-audit at head c97da58):** all four suppressions were
 eliminated via Option 3 (refactor). A new typed boundary module `src/pandas_io.py` wraps
