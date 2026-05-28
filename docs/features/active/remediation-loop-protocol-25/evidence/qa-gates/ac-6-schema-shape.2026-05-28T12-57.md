@@ -32,3 +32,15 @@ Repo-local enforcement of these constraints lives in `.claude/hooks/validate-orc
 The schema file is valid JSON (parsed cleanly via `Get-Content -Raw | ConvertFrom-Json`).
 
 Status: PASS.
+
+## Enforcement Channel
+
+Appended: 2026-05-28T17-31 (issue #25 cycle 1, remediation Finding 2).
+
+Enforcement realized via repo-local artifacts:
+
+- `.claude/schemas/orchestrator-state.schema.json` declares the `remediation_loop` shape (required fields, enums, and the conditional `allOf` rules).
+- `.claude/hooks/validate-orchestrator-output.ps1::Test-RemediationLoopShape` enforces the same constraints at orchestrator-subagent termination time.
+
+AC#6 enforcement is realized via `.claude/schemas/orchestrator-state.schema.json` + `.claude/hooks/validate-orchestrator-output.ps1::Test-RemediationLoopShape`. The MCP tool `mcp__drm-copilot__validate_orchestration_artifacts` retains its upstream-owned built-in schema unchanged; the repo-local schema and hook are the channel that enforces the `remediation_loop` constraints on this branch.
+

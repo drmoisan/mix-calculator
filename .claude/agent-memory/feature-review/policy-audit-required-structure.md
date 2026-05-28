@@ -8,7 +8,8 @@ metadata:
 `validate_orchestration_artifacts` for `policy-audit` enforces several structural
 items that are easy to drop when trimming the template:
 
-- The heading `## Appendix A: Test Inventory` must be present (not just Appendix B).
+- Both heading `## Appendix A: Test Inventory` AND `## Appendix B: Toolchain Commands Reference` must be present (verified again 2026-05-28 on issue #25 review — first write had only Appendix A naming and failed with both missing-heading errors).
+- The PowerShell row's "Baseline Coverage" cell in the Coverage Metrics by Language table must contain a numeric value (e.g. `0.00% lines`) when PowerShell files are in scope. Prose like "LINE covered=0 missed=141" without an explicit percentage triggers `missing numeric baseline coverage for PowerShell`.
 - The Coverage Evidence Checklist must keep all four lines verbatim even when those
   languages are out of scope: `TypeScript baseline coverage artifact:`,
   `TypeScript post-change coverage artifact:`, `PowerShell baseline coverage artifact:`,

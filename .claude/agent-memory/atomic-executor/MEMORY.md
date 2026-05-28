@@ -2,3 +2,4 @@
 - [Hypothesis float magnitude bounds](hypothesis-float-magnitude-bounds.md) — bound st.floats magnitude in sum+abs-tolerance property tests or they become unsatisfiable; green baseline doesn't prove soundness
 - [NRR-summary mix-total spec gap](nrr-summary-mix-total-spec-gap.md) — issue #15 NRR_Summary is correct; its Check surfaced an upstream Category/Customer mix tie-out defect, now tracked as bug #20
 - [Mix builder signature now takes mix_base](mix-builder-signature-mix-base.md) — #20 changed coarser mix builders to take mix_base first; stale callers fail with "No group keys passed"
+- [PowerShell new files need UTF-8 BOM](powershell-bom-required.md) — PSScriptAnalyzer enforces PSUseBOMForUnicodeEncodedFile; prepend BOM after Write or restart the format loop
