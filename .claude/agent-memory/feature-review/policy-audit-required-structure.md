@@ -18,6 +18,11 @@ items that are easy to drop when trimming the template:
   (the validator looks for `Baseline:`/`Post-change:`/`Disposition:` tokens with numbers).
   Phrasing like "100% line / 100% branch" passes as long as numerals are present in
   the Baseline/Post-change segments.
+- The validator's `_extract_policy_audit_comparison_lines` keeps reading `- ` bullets after
+  the `### 1.2.1` heading until it hits the NEXT `### ` heading. Any later
+  `- Python: ...` bullet (e.g. under `**Language-specific policies evaluated:**`)
+  OVERWRITES the comparison-line entry and breaks validation. Fix: put a `### 1.2.2`
+  heading immediately after the three comparison bullets so the scan terminates.
 
 **Why:** Verified 2026-05-27 on issue #18 review — first write failed with all of the
 above as missing-heading / missing-checklist-line / missing-numeric errors.
