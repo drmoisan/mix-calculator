@@ -9,6 +9,8 @@
 - Issue: #20
 - Issue URL: https://github.com/drmoisan/mix-calculator/issues/20
 - Last Updated: 2026-05-28
+- Work Mode: full-bug
+
 ## Summary
 
 The mix-decomposition pipeline's `mix_2_category["Category Mix"]` and
@@ -69,27 +71,36 @@ faithfully reports the discrepancy.
 
 ## Suspected Cause / Notes
 
-The category and customer mix layers (`src/mix_rollups.py::build_mix_2_category`,
-`build_mix_3_customer`) compute the mix column via a reshape +
-`join_rollup_mix` cascade, and the customer/country layers additionally apply
-`_apply_fill_zero_and_recompute` (`fill_zero_with_avg`). The resulting per-row
-mix magnitudes do not reproduce the workbook's bottoms-up Category/Customer mix
-methodology (the workbook's TopDown mix columns are hardcoded value snapshots
-pasted from the BottomsUp tabs `3-Category-Mix-BottomsUp` /
-`4-Customer-Mix-BottomsUp`). Files to inspect: `src/mix_rollups.py`,
-`src/_mix_rollups_helpers.py`, `src/mix_transforms.py` (`fill_zero_with_avg`),
-and the workbook BottomsUp tabs for the intended methodology.
+CONFIRMED root cause (see `spec.md` for the full analysis). The coarser mix
+layers re-aggregate the **filtered, reshaped prior layer** instead of the
+unfiltered detail: `build_mix_2_category` builds its stage from
+`unstack_to_long(mix_1_sku, …)`, and so on for the customer and country layers.
+`build_mix_stage` drops lines failing the nonzero-Lbs filter
+(`Lbs - AOP != 0 & Lbs - LE != 0`), including single-scenario lines (for example
+a SKU new in LE). Re-aggregating the already-filtered prior layer therefore
+understates the coarser layers' LE-side `Lbs` and `Net-Revenue $`, corrupting the
+recomputed `Calc Net Price Impact` and the mix. Verified: aggregating the
+unfiltered `mix_base` at the layer granularity reproduces the workbook
+category-level volume/revenue and `Calc Net Price Impact` exactly, while the
+filtered `mix_1_sku` aggregation understates the LE side. The SKU layer is
+correct (it aggregates `mix_base` directly); the Country layer ties out (mix 0).
+
+Fix direction: aggregate each coarser layer from `mix_base` at its own
+granularity; keep the rollup-subtraction target as the sum of the prior finer
+layer's `Calc Net Price Impact`. Files: `src/mix_rollups.py`,
+`src/_mix_rollups_helpers.py` (`unstack_to_long` likely removable),
+`src/mix_pipeline_run.py`. The full acceptance criteria are in `spec.md`.
 
 ## Proposed Fix / Validation Ideas
 
-- [ ] Unit coverage areas: per-layer mix-column derivation for the category and
-  customer levels with fabricated inputs that reproduce the bottoms-up method.
-- [ ] Integration scenario to retest: end-to-end run where the `NRR_Summary`
-  `Check` resolves to `"CHECK"` once the two layers tie out.
-- [ ] Manual verification notes: compare each layer's mix-column total to the
+- [x] Unit coverage areas: single-scenario line retention in the coarser-layer
+  aggregates, and the NPI-minus-rollup identity per layer, with fabricated inputs.
+- [x] Integration scenario to retest: end-to-end run where the `NRR_Summary`
+  `Check` resolves to `"CHECK"` once the layers tie out.
+- [x] Manual verification notes: compare each layer's mix-column total to the
   corresponding workbook TopDown total (SKU and Country already match).
 
 ## Next Step
 
-- [ ] Promote to GitHub issue (bug-report template)
-- [ ] Move to active fix folder / branch
+- [x] Promote to GitHub issue (bug-report template)
+- [x] Move to active fix folder / branch

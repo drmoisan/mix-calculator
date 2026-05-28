@@ -5,3 +5,4 @@
 - [PowerShell coverage artifact scope](powershell-coverage-artifact-scope.md) — artifacts/pester/powershell-coverage.xml often covers only .claude/hooks; grep for the changed file before accepting a coverage claim
 - [feature-audit check-off heading case](feature-audit-checkoff-heading-case.md) — validator needs `## Acceptance Criteria Check-off` (lowercase off); template ships `Check-Off` and fails
 - [policy-audit required structure](policy-audit-required-structure.md) — validator needs Appendix A heading, all 4 TS/PS coverage checklist lines, and a numeric Baseline/Post-change/Disposition comparison line
+- [code-review findings table header](code-review-findings-table-header.md) — code-review validator requires the exact 7-column `| Severity | File | Location | Finding | Recommendation | Rationale | Evidence |` header
