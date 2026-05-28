@@ -218,8 +218,8 @@ Seeded from issue:
   coverage regression on changed lines.
 - [x] AC6: The Python toolchain passes in one clean pass (Black, Ruff, Pyright,
   Pytest).
-- [ ] AC7: End-to-end: `poetry run python -m src.mix_pipeline --input "artifacts/LE v AOP Gross to Net Decomp.xlsx" --output artifacts/mix.db` writes the mix tables and the appended `nrr_summary` table, and the `nrr_summary` internal `Check` resolves to `"CHECK"`. Evidence recorded without exposing confidential source values (report `Check`, table presence/row counts, and per-layer tie-out pass/fail only).
-- [ ] AC8: Each of `mix_2_category["Category Mix"]`, `mix_3_customer["Customer Mix"]`,
+- [x] AC7: End-to-end: `poetry run python -m src.mix_pipeline --input "artifacts/LE v AOP Gross to Net Decomp.xlsx" --output artifacts/mix.db` writes the mix tables and the appended `nrr_summary` table, and the `nrr_summary` internal `Check` resolves to `"CHECK"`. Evidence recorded without exposing confidential source values (report `Check`, table presence/row counts, and per-layer tie-out pass/fail only).
+- [x] AC8: Each of `mix_2_category["Category Mix"]`, `mix_3_customer["Customer Mix"]`,
   `mix_1_sku["SKU Mix"]`, and `mix_4_country["Country Mix"]` column totals ties out
   to the corresponding workbook TopDown table total (verified during the
   end-to-end check; pass/fail recorded without disclosing the figures).

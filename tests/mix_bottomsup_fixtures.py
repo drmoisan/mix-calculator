@@ -280,9 +280,11 @@ def build_chain() -> dict[str, pd.DataFrame]:
     rollup_1 = build_mix_rollup_1(rate_impacts_fixture())
     mix_1_sku = build_mix_1_sku(mix_base, rollup_1)
     rollup_2 = build_mix_rollup_2(mix_1_sku)
-    mix_2_category = build_mix_2_category(mix_1_sku, rollup_2)
+    # The coarser layers aggregate the unfiltered mix_base at their own
+    # granularity (issue #20); the rollup targets remain the prior finer layer.
+    mix_2_category = build_mix_2_category(mix_base, rollup_2)
     rollup_3 = build_mix_rollup_3(mix_2_category)
-    mix_3_customer = build_mix_3_customer(mix_2_category, rollup_3)
+    mix_3_customer = build_mix_3_customer(mix_base, rollup_3)
     mix_0_detail = build_mix_0_detail(mix_base)
     return {
         "mix_base": mix_base,
