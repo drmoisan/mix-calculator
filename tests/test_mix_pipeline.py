@@ -3,7 +3,7 @@
 Builds a fabricated in-memory workbook supplying the ``AOP1``, ``LE-8 + 4``, and
 ``SKU_LU`` sheets, runs ``mix_pipeline.main`` against a shared in-memory SQLite
 database, and asserts that ``main`` returns ``0``, that the two import tables and
-all nineteen derived tables exist, and that the customer-layer rollup ties out to
+all twenty-two derived tables exist, and that the customer-layer rollup ties out to
 the scalar ``mix_rollup_4``. No runtime temp files are used; the workbook is a
 ``BytesIO`` and the database is ``sqlite3.connect(":memory:")``. Fabricated data
 only; no confidential values appear.
@@ -192,6 +192,9 @@ _DERIVED_TABLES = [
     "mix_rollup_4",
     "mix_4_country",
     "mix_0_detail",
+    "mix_2_sku_bottomsup",
+    "mix_3_category_bottomsup",
+    "mix_4_customer_bottomsup",
     "q1_results_by_sku",
 ]
 

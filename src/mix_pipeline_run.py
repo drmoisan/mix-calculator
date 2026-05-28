@@ -15,6 +15,11 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.mix_bottomsup import (
+    build_mix_2_sku_bottomsup,
+    build_mix_3_category_bottomsup,
+    build_mix_4_customer_bottomsup,
+)
 from src.mix_nrr_summary import build_nrr_summary
 from src.mix_q1 import build_q1_results_by_sku
 from src.mix_rate_impacts import build_rate_impacts
@@ -59,8 +64,10 @@ def run_transforms(
         evaluation order, covering ``rate_impacts``, ``mix_rollup_1``,
         ``mix_1_sku``, ``mix_rollup_2``, ``mix_2_category``, ``mix_rollup_3``,
         ``mix_3_customer``, ``mix_rollup_4`` (single-row), ``mix_4_country``,
-        ``mix_0_detail``, ``q1_results_by_sku``, and ``nrr_summary`` (the final
-        derived summary table, issue #15).
+        ``mix_0_detail``, the three BottomsUp tables (``mix_2_sku_bottomsup``,
+        ``mix_3_category_bottomsup``, ``mix_4_customer_bottomsup``),
+        ``q1_results_by_sku``, and ``nrr_summary`` (the final derived summary
+        table, issue #15).
     """
     # Step 9: rate impacts for the normal lines.
     rate_impacts = build_rate_impacts(aop_vs_le, sku_lu)
@@ -77,6 +84,18 @@ def run_transforms(
 
     # Step 18: the row-level detail table (depends on mix_base, not the chain).
     mix_0_detail = build_mix_0_detail(mix_base)
+
+    # Step 18b: the three BottomsUp tables, derived from the detail row set plus the
+    # already-computed rollup chain. The SKU table also needs mix_base to recover
+    # Classification (dropped from mix_0_detail upstream); the category/customer
+    # tables re-derive Classification from their aggregated Lbs.
+    mix_2_sku_bottomsup = build_mix_2_sku_bottomsup(mix_0_detail, mix_base, mix_1_sku)
+    mix_3_category_bottomsup = build_mix_3_category_bottomsup(
+        mix_0_detail, mix_2_category
+    )
+    mix_4_customer_bottomsup = build_mix_4_customer_bottomsup(
+        mix_0_detail, mix_3_customer
+    )
 
     # Step 19: the Q1 results-by-SKU table (separate path over the raw LE months).
     q1_results = build_q1_results_by_sku(le_raw)
@@ -107,6 +126,9 @@ def run_transforms(
         "mix_rollup_4": mix_rollup_4_table,
         "mix_4_country": mix_4_country,
         "mix_0_detail": mix_0_detail,
+        "mix_2_sku_bottomsup": mix_2_sku_bottomsup,
+        "mix_3_category_bottomsup": mix_3_category_bottomsup,
+        "mix_4_customer_bottomsup": mix_4_customer_bottomsup,
         "q1_results_by_sku": q1_results,
         "nrr_summary": nrr_summary,
     }
