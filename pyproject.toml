@@ -28,10 +28,12 @@ pyright = ">=1.1.407"
 nuitka = "^4.1.1"
 hypothesis = ">=6.100,<7.0"
 pandas-stubs = ">=2.2,<4.0"
+pytest-qt = ">=4.4"
 
 [tool.poetry.scripts]
 normalize-le = "src.normalize_le:main"
 load-aop = "src.load_aop:main"
+mix-pipeline-gui = "src.gui.app:main"
 
 [tool.black]
 line-length = 88
@@ -83,6 +85,8 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "@abstractmethod",
     "@abc.abstractmethod",
+    "@(typing\\.)?overload",
+    "^\\s*\\.\\.\\.\\s*$",
 ]
 
 [tool.pyright]

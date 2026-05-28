@@ -60,3 +60,24 @@ projects:
 
   # Empty package marker / scaffolding (T4).
   src/__init__.py: T4
+
+  # PySide6 desktop GUI (issue #19). MVP passive-view structure over the existing
+  # pipeline. Tier rationale per .claude/rules/quality-tiers.md:
+  #   T2 (Core) — the PipelineService seam, view Protocols, exporter base/registry,
+  #     and the plain-Python presenters that hold the presentation logic.
+  #   T3 (Adapters & UI) — Qt widgets/dialogs, the workbook/db I/O services, the
+  #     concrete exporters, the worker, and the main window shell.
+  #   T4 (Scaffolding) — empty package markers and the app composition root.
+  src/gui/__init__.py: T4
+  src/gui/protocols.py: T2
+  src/gui/pipeline_service.py: T2
+  src/gui/services/__init__.py: T4
+  src/gui/services/workbook_reader.py: T3
+  src/gui/services/db_service.py: T3
+  src/gui/exporters/__init__.py: T4
+  src/gui/exporters/base.py: T2
+  src/gui/exporters/registry.py: T2
+  src/gui/exporters/excel_exporter.py: T3
+  src/gui/exporters/csv_exporter.py: T3
+  src/gui/presenters/__init__.py: T4
+  src/gui/presenters/source_selection_presenter.py: T2
