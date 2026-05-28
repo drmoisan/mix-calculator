@@ -81,3 +81,12 @@ projects:
   src/gui/exporters/csv_exporter.py: T3
   src/gui/presenters/__init__.py: T4
   src/gui/presenters/source_selection_presenter.py: T2
+  src/gui/presenters/pipeline_presenter.py: T2
+  src/gui/presenters/export_presenter.py: T2
+  src/gui/workers/__init__.py: T4
+  src/gui/workers/pipeline_worker.py: T3
+  src/gui/widgets/__init__.py: T4
+  src/gui/widgets/source_input_widget.py: T3
+  src/gui/widgets/preview_widget.py: T3
+  src/gui/widgets/export_dialog.py: T3
+  src/gui/widgets/progress_dialog.py: T3

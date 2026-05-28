@@ -48,7 +48,9 @@ class FakeWorkbookReader:
         self.raise_on_preview: Exception | None = None
         self.preview_calls: list[tuple[str, str, int]] = []
 
-    def get_sheet_names(self, path: str) -> list[str]:  # noqa: ARG002 - match WorkbookReaderProtocol API
+    def get_sheet_names(
+        self, path: str
+    ) -> list[str]:  # noqa: ARG002 - match WorkbookReaderProtocol API
         """Return the configured sheet names or raise the configured error.
 
         Args:
@@ -119,21 +121,32 @@ class FakePipelineService:
         self.raise_on_run: Exception | None = None
         self.raise_on_save: Exception | None = None
         self.raise_on_open: Exception | None = None
+        self.raise_on_import: Exception | None = None
         self.saved: list[tuple[list[str], str]] = []
         self.run_calls: list[list[str]] = []
+        self.import_calls: list[tuple[str, str, str]] = []
 
-    def import_sources(self, spec: ImportSpec) -> dict[str, pd.DataFrame]:  # noqa: ARG002 - match PipelineServiceProtocol API
-        """Return the configured import frames.
+    def import_sources(
+        self, spec: ImportSpec
+    ) -> dict[str, pd.DataFrame]:  # noqa: ARG002 - match PipelineServiceProtocol API
+        """Return the configured import frames or raise the configured error.
 
         Args:
             spec: Ignored by the fake (signature matches the Protocol).
 
         Returns:
             The configured import result.
+
+        Raises:
+            Exception: The configured ``raise_on_import`` error, when set.
         """
+        if self.raise_on_import is not None:
+            raise self.raise_on_import
         return dict(self.import_result)
 
-    def import_le(self, path: str, sheet: str) -> pd.DataFrame:  # noqa: ARG002 - match PipelineServiceProtocol API
+    def import_le(
+        self, path: str, sheet: str
+    ) -> pd.DataFrame:  # noqa: ARG002 - match PipelineServiceProtocol API
         """Return the LE frame from the configured import result.
 
         Args:
@@ -142,10 +155,17 @@ class FakePipelineService:
 
         Returns:
             The ``"LE"`` frame from the import result.
+
+        Raises:
+            Exception: The configured ``raise_on_import`` error, when set.
         """
+        if self.raise_on_import is not None:
+            raise self.raise_on_import
         return self.import_result["LE"]
 
-    def import_aop(self, path: str, sheet: str) -> pd.DataFrame:  # noqa: ARG002 - match PipelineServiceProtocol API
+    def import_aop(
+        self, path: str, sheet: str
+    ) -> pd.DataFrame:  # noqa: ARG002 - match PipelineServiceProtocol API
         """Return the AOP frame from the configured import result.
 
         Args:
@@ -157,16 +177,18 @@ class FakePipelineService:
         """
         return self.import_result["aop"]
 
-    def import_skulu(self, path: str, sheet: str) -> pd.DataFrame:  # noqa: ARG002 - match PipelineServiceProtocol API
-        """Return the SKU_LU frame from the configured import result.
+    def import_skulu(self, path: str, sheet: str) -> pd.DataFrame:
+        """Return the SKU_LU frame, recording the resolved path and sheet.
 
         Args:
-            path: Ignored by the fake.
-            sheet: Ignored by the fake.
+            path: The SKU_LU workbook path (recorded so the default can be
+                asserted).
+            sheet: The SKU_LU worksheet name (recorded).
 
         Returns:
             The ``"sku_lu"`` frame from the import result.
         """
+        self.import_calls.append(("sku_lu", path, sheet))
         return self.import_result["sku_lu"]
 
     def run_pipeline(self, tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
@@ -203,7 +225,9 @@ class FakePipelineService:
             raise self.raise_on_save
         self.saved.append((list(tables), db_path))
 
-    def open_db(self, db_path: str) -> dict[str, pd.DataFrame]:  # noqa: ARG002 - match PipelineServiceProtocol API
+    def open_db(
+        self, db_path: str
+    ) -> dict[str, pd.DataFrame]:  # noqa: ARG002 - match PipelineServiceProtocol API
         """Return the configured open result or raise the configured error.
 
         Args:
@@ -249,7 +273,9 @@ class FakeDbService:
         """
         self.saved.append((list(tables), db_path))
 
-    def open_tables(self, db_path: str) -> dict[str, pd.DataFrame]:  # noqa: ARG002 - match DbService API
+    def open_tables(
+        self, db_path: str
+    ) -> dict[str, pd.DataFrame]:  # noqa: ARG002 - match DbService API
         """Return the configured open result.
 
         Args:
