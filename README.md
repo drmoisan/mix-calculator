@@ -96,12 +96,16 @@ poetry run python -m src.mix_pipeline --input <workbook.xlsx> --output <database
   command exits `0` on success and `1` on a loader column/`KEY`/validation
   failure.
 
-The pipeline writes the two import tables (`aop`, `LE`) plus twenty derived
+The pipeline writes the two import tables (`aop`, `LE`) plus twenty-three derived
 tables: `le_wide`, `aop_wide`, `customer_lu`, `sku_lu`, `aop_norm`, `le_norm`,
 `aop_vs_le`, `mix_base`, `rate_impacts`, `mix_rollup_1`, `mix_1_sku`,
 `mix_rollup_2`, `mix_2_category`, `mix_rollup_3`, `mix_3_customer`,
 `mix_rollup_4` (a single-row scalar table), `mix_4_country`, `mix_0_detail`,
+`mix_2_sku_bottomsup`, `mix_3_category_bottomsup`, `mix_4_customer_bottomsup`,
 `q1_results_by_sku`, and `nrr_summary` (the appended final summary table).
+
+The three `*_bottomsup` tables (issue #18) decompose the gross-to-net mix shift
+at the SKU, category, and customer grains.
 
 `nrr_summary` (issue #15) replicates the workbook's `NRR_Summary` tab as a tidy
 long table built purely from the frames above (`aop_vs_le`, `rate_impacts`, and
