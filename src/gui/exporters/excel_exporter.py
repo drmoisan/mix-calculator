@@ -19,6 +19,7 @@ from typing import IO, TYPE_CHECKING, cast
 import pandas as pd
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import TracebackType
     from typing import Protocol
 
@@ -63,14 +64,11 @@ if TYPE_CHECKING:
             """Write the frame to a worksheet in the open writer."""
             ...
 
-    class _PandasExcelWriters(Protocol):
-        """Typed view of the ``pandas`` module's ``ExcelWriter`` factory."""
-
-        def ExcelWriter(  # noqa: N802 - mirrors the pandas API member name
-            self, path: ExcelTarget, *, engine: str
-        ) -> _ExcelWriter:
-            """Construct an ``ExcelWriter`` for the target and engine."""
-            ...
+    # Typed callable view of the ``pandas.ExcelWriter`` factory. Using a callable
+    # alias rather than a Protocol with a member named ``ExcelWriter`` avoids
+    # the otherwise-required PascalCase method declaration (and the noqa: N802
+    # suppression that would carry).
+    _ExcelWriterFactory = Callable[..., _ExcelWriter]
 
 
 __all__ = ["ExcelExporter"]
@@ -127,10 +125,12 @@ class ExcelExporter:
         Side effects:
             Writes one ``.xlsx`` workbook to ``destination_path``.
         """
-        # Access ExcelWriter through a typed Protocol view of the pandas module
-        # so the openpyxl engine's unknown member types do not surface here.
-        writers = cast("_PandasExcelWriters", pd)
-        with writers.ExcelWriter(destination_path, engine="openpyxl") as writer:
+        # Cast pd.ExcelWriter to a typed callable view so the openpyxl engine's
+        # unknown member types do not surface here. The callable alias accepts
+        # any positional/keyword arguments, which keeps the ``engine`` keyword
+        # typecheck-clean without declaring a PascalCase Protocol member.
+        writer_factory = cast("_ExcelWriterFactory", pd.ExcelWriter)
+        with writer_factory(destination_path, engine="openpyxl") as writer:
             # Write each selected table as its own worksheet, truncating the
             # sheet name to the Excel 31-character limit.
             for name in selected_names:

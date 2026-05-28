@@ -16,14 +16,15 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from src.gui.exporters.csv_exporter import CsvExporter
 from src.gui.exporters.excel_exporter import ExcelExporter
 from src.gui.exporters.registry import ExporterRegistry
 from src.gui.main_window import MainWindow
-from src.gui.pipeline_service import PipelineService
+from src.gui.pipeline_service import ImportSpec, PipelineService
 from src.gui.presenters.export_presenter import ExportPresenter
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
@@ -31,7 +32,23 @@ from src.gui.services.db_service import DbService
 from src.gui.services.workbook_reader import WorkbookReader
 from src.gui.widgets.export_dialog import ExportDialog
 
-__all__ = ["MainWindowPipelineView", "WiredApplication", "build_application", "main"]
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+__all__ = [
+    "MainWindowPipelineView",
+    "WiredApplication",
+    "build_application",
+    "default_export_runner",
+    "default_open_chooser",
+    "default_save_chooser",
+    "main",
+    "wire_control_signals",
+]
+
+# SQLite filter used by the Save/Open file dialogs so the chooser narrows the
+# user's view to ``.db`` files (matching the pipeline's SQLite output format).
+_SQLITE_FILTER = "SQLite Databases (*.db)"
 
 
 @dataclass
@@ -68,6 +85,182 @@ def _build_registry() -> ExporterRegistry:
     registry.register(ExcelExporter())
     registry.register(CsvExporter())
     return registry
+
+
+def _current_import_spec(window: MainWindow) -> ImportSpec:
+    """Read the user's per-input file/sheet selection from the main window.
+
+    Args:
+        window: The shell exposing the three source input widgets.
+
+    Returns:
+        An :class:`ImportSpec` populated from the live widget state.
+    """
+    # Read each widget's path/sheet directly so the spec always reflects the
+    # current user selection at the moment the signal fires.
+    return ImportSpec(
+        le_path=window.le_widget.current_path(),
+        le_sheet=window.le_widget.current_sheet(),
+        aop_path=window.aop_widget.current_path(),
+        aop_sheet=window.aop_widget.current_sheet(),
+        skulu_path=window.skulu_widget.current_path(),
+        skulu_sheet=window.skulu_widget.current_sheet(),
+    )
+
+
+def default_save_chooser() -> str | None:
+    """Production save-path chooser backed by ``QFileDialog.getSaveFileName``.
+
+    Returns:
+        The chosen ``.db`` path, or ``None`` when the user cancels.
+    """
+    # QFileDialog returns (path, selected_filter); the filter element is not
+    # used. An empty path indicates the user cancelled the dialog.
+    path, _ = QFileDialog.getSaveFileName(None, "Save Database", "", _SQLITE_FILTER)
+    return path or None
+
+
+def default_open_chooser() -> str | None:
+    """Production open-path chooser backed by ``QFileDialog.getOpenFileName``.
+
+    Returns:
+        The chosen ``.db`` path, or ``None`` when the user cancels.
+    """
+    # An empty path indicates the user cancelled the file dialog.
+    path, _ = QFileDialog.getOpenFileName(None, "Open Database", "", _SQLITE_FILTER)
+    return path or None
+
+
+def default_export_runner(dialog: ExportDialog) -> tuple[str, str] | None:
+    """Production export-dialog runner backed by ``dialog.exec`` + Save dialog.
+
+    Shows the modal export dialog. On accept, reads the chosen format and asks
+    the user for a destination path through ``QFileDialog.getSaveFileName``.
+    Returns ``None`` when the user cancels either step.
+
+    Args:
+        dialog: The export dialog to show modally.
+
+    Returns:
+        A ``(format_name, destination_path)`` tuple on accept, or ``None``.
+    """
+    accepted = dialog.exec()
+    # ``exec`` returns truthy on accept and falsy on reject; an explicit truthy
+    # check avoids depending on the Qt-specific QDialog.DialogCode integer.
+    if not accepted:
+        return None
+    format_name = dialog.selected_format()
+    destination_path, _ = QFileDialog.getSaveFileName(
+        dialog, "Export Destination", "", ""
+    )
+    if not destination_path:
+        return None
+    return format_name, destination_path
+
+
+def wire_control_signals(
+    window: MainWindow,
+    pipeline_presenter: PipelinePresenter,
+    export_presenter: ExportPresenter,
+    export_dialog: ExportDialog,
+    *,
+    save_path_chooser: Callable[[], str | None],
+    open_path_chooser: Callable[[], str | None],
+    export_dialog_runner: Callable[[ExportDialog], tuple[str, str] | None],
+) -> None:
+    """Connect the six main-window control signals to their presenter handlers.
+
+    The wiring is factored into this helper so tests can inject fake choosers
+    and a fake export-dialog runner without monkeypatching ``QFileDialog``
+    static methods.
+
+    Args:
+        window: The shell whose control signals are being wired.
+        pipeline_presenter: Handler for import/run/save/open requests.
+        export_presenter: Handler for the export request.
+        export_dialog: The modal dialog driven for export.
+        save_path_chooser: Returns the chosen ``.db`` path for Save, or
+            ``None`` when the user cancels.
+        open_path_chooser: Returns the chosen ``.db`` path for Open, or
+            ``None`` when the user cancels.
+        export_dialog_runner: Shows ``export_dialog`` and returns
+            ``(format_name, destination_path)`` on accept, or ``None`` on
+            cancel.
+
+    Returns:
+        ``None``.
+
+    Side effects:
+        Connects Qt signals on ``window`` to closures that route through the
+        presenters.
+    """
+
+    def _handle_import_one(name: str) -> None:
+        """Route a per-input import request through the pipeline presenter."""
+        pipeline_presenter.on_import_one(name, _current_import_spec(window))
+
+    def _handle_import_all() -> None:
+        """Route the import-all request through the pipeline presenter."""
+        pipeline_presenter.on_import_all(_current_import_spec(window))
+
+    def _handle_run() -> None:
+        """Route the run request through the pipeline presenter."""
+        pipeline_presenter.on_run()
+
+    def _handle_save() -> None:
+        """Prompt for a destination path and route the save through the presenter.
+
+        A cancelled file dialog (empty path) is a no-op; no save is attempted.
+        """
+        path = save_path_chooser()
+        # Skip the presenter call when the user cancelled the file dialog so no
+        # save is attempted against a missing destination.
+        if not path:
+            return
+        pipeline_presenter.on_save(path)
+
+    def _handle_open_db() -> None:
+        """Prompt for a source path and route the open through the presenter.
+
+        A cancelled file dialog (empty path) is a no-op; no open is attempted.
+        """
+        path = open_path_chooser()
+        if not path:
+            return
+        pipeline_presenter.on_open_db(path)
+
+    def _handle_export() -> None:
+        """Drive the export dialog and route the result through the export presenter.
+
+        Uses the derived tables when a run has completed; otherwise the
+        imported tables (so an export after a bare import still works). A
+        cancelled dialog (runner returns ``None``) is a no-op.
+        """
+        # Show the modal dialog (or its test fake) and read the chosen format
+        # plus destination path. A None return means the user cancelled.
+        result = export_dialog_runner(export_dialog)
+        if result is None:
+            return
+        format_name, destination_path = result
+        # Prefer the derived tables (they include the rollups) when a run has
+        # completed; otherwise fall back to the imports so a save-after-import
+        # path is still exportable.
+        tables = (
+            pipeline_presenter.derived_tables
+            if pipeline_presenter.derived_tables
+            else pipeline_presenter.imported_tables
+        )
+        export_presenter.set_available_tables(list(tables))
+        export_presenter.on_export(tables, format_name, destination_path)
+
+    # Connect each control-button signal to its handler closure. The closures
+    # bind the presenters and choosers without exposing them on the window.
+    window.import_one_requested.connect(_handle_import_one)
+    window.import_all_requested.connect(_handle_import_all)
+    window.run_requested.connect(_handle_run)
+    window.save_requested.connect(_handle_save)
+    window.open_db_requested.connect(_handle_open_db)
+    window.export_requested.connect(_handle_export)
 
 
 def build_application(qt_app: QApplication | None = None) -> WiredApplication:
@@ -122,6 +315,20 @@ def build_application(qt_app: QApplication | None = None) -> WiredApplication:
     # Export dialog + presenter using the registry's formats.
     export_dialog = ExportDialog(registry.available_formats())
     export_presenter = ExportPresenter(export_dialog, registry)
+
+    # Wire the six main-window control signals to their presenter handlers,
+    # using the production QFileDialog-backed choosers and the production
+    # export-dialog runner. Tests build their own application without going
+    # through build_application and inject fakes.
+    wire_control_signals(
+        window,
+        pipeline_presenter,
+        export_presenter,
+        export_dialog,
+        save_path_chooser=default_save_chooser,
+        open_path_chooser=default_open_chooser,
+        export_dialog_runner=default_export_runner,
+    )
 
     return WiredApplication(
         qt_app=application,
