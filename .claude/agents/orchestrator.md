@@ -88,6 +88,12 @@ Update `artifacts/orchestration/orchestrator-state.json` after every completed s
   - `delegation_receipts.promotion.feature_folder`
 - Each `delegation_receipts.promotion.*` field stores the raw MCP receipt payload from the matching promotion operation.
 
+### Remediation Loop Checkpoint Shape
+
+While inside a remediation cycle (see `## Remediation Loop Protocol`), the checkpoint MUST include a `remediation_loop` object whose canonical contract is defined in `.claude/schemas/orchestrator-state.schema.json`. The object shape carries `current_cycle` (integer) and a `cycles` array, where each cycle records `entry_timestamp`, `inputs_path`, `plan_path`, a `preflight` sub-object (`iterations`, `final_status`), `execution_status`, `audit_paths`, `blocking_count`, and `exit_condition_met`. Malformed cycles (missing `plan_path`, `exit_condition_met: true` paired with `blocking_count != 0`, or any execution-state set without a cleared preflight) are rejected by the schema and by `.claude/hooks/validate-orchestrator-output.ps1`.
+
+While in the loop, the orchestrator MUST set `next_step` to cycle-aware names of the form `remediation.cycle_N.{plan,preflight,execute,reaudit,exit_check}`. The cycle index `N` matches `remediation_loop.current_cycle`.
+
 ## Completion Requirements
 
 Do not report completion until:
@@ -96,3 +102,56 @@ Do not report completion until:
 2. All validation gates (toolchain, acceptance criteria, audit artifacts) have passed.
 3. The checkpoint file reflects the completed state.
 4. Acceptance criteria in AC source files have been checked off per the `acceptance-criteria-tracking` skill.
+
+### CI Monitoring and Post-PR Remediation
+
+After the pull request is open, monitor required CI checks. A failed required check after the PR is open transitions the orchestrator into the remediation loop as `remediation.cycle_N+1.inputs` and runs the full loop defined in `## Remediation Loop Protocol`. Workflow-file changes are implemented through the loop and trigger the `modified-workflow-needs-green-run` rule defined in `.claude/skills/feature-review-workflow/SKILL.md`. The orchestrator must not commit workflow-file changes outside the remediation loop.
+
+## Remediation Loop Protocol
+
+A remediation cycle begins when an audit produces FAIL or material PARTIAL findings, when required toolchain checks fail, when acceptance criteria are unmet, or when a required CI check fails after the pull request is open. While inside a remediation cycle the only allowed delegates are exactly three subagents:
+
+- `atomic-planner` — authors and revises `remediation-plan.<entry-ts>.md`.
+- `atomic-executor` — clears preflight, then executes the plan task-by-task.
+- `feature-review` — produces the three reaudit artifacts at the end of the cycle.
+
+### Prohibited Delegations During a Remediation Cycle
+
+Direct invocation of the typed-engineer worker subagents is prohibited inside a remediation cycle. Specifically, the orchestrator must not call `python-typed-engineer`, `typescript-engineer`, `csharp-typed-engineer`, or `powershell-typed-engineer` directly while a cycle is active. Workers are invoked by `atomic-executor` only, as a consequence of executing the approved plan. The orchestrator must not bypass `atomic-planner` or `atomic-executor` by passing a free-form fix prompt to a worker.
+
+### Required Artifacts Per Cycle
+
+Each remediation cycle produces exactly five artifacts under the active feature folder:
+
+1. `remediation-inputs.<entry-ts>.md` — orchestrator authors at cycle entry.
+2. `remediation-plan.<entry-ts>.md` — `atomic-planner` authors at cycle entry.
+3. `code-review.<exit-ts>.md` — `feature-review` authors at cycle exit.
+4. `feature-audit.<exit-ts>.md` — `feature-review` authors at cycle exit.
+5. `policy-audit.<exit-ts>.md` — `feature-review` authors at cycle exit.
+
+The entry timestamp (`<entry-ts>`) applies to the inputs and plan artifacts and is the timestamp at which the cycle started. The exit timestamp (`<exit-ts>`) applies to the three reaudit artifacts and is the timestamp at which `feature-review` ran. A cycle with fewer than five artifacts is malformed.
+
+### Preflight Sub-State Semantics
+
+The preflight handoff between `atomic-planner` and `atomic-executor` is a sub-state of the cycle, not a separate cycle. The preflight outcome is recorded as `preflight.final_status in {clear, changes_requested, pending}`:
+
+- `clear` — `atomic-executor` returned `PREFLIGHT: ALL CLEAR` and the plan proceeds to execution.
+- `changes_requested` — `atomic-executor` returned `PREFLIGHT: REVISIONS REQUIRED` with a precise plan delta. The cycle routes back to `atomic-planner` to revise the plan. The orchestrator must not route the change request to execution and must not act on the delta itself. The revised plan returns to `atomic-executor` for another preflight pass. The sub-loop repeats until `final_status` becomes `clear`.
+- `pending` — preflight has not yet been requested or completed.
+
+The cycle counter `preflight.iterations` records how many preflight passes ran for that cycle. A cycle whose `execution_status` is `in_progress`, `complete`, or `failed` while `preflight.final_status != "clear"` is malformed.
+
+### Scope-change Rule
+
+Any new finding surfaced during execution (for example an unauthorized suppression, a file-size cap violation, a CI-only failure mode) must trigger a new cycle with a follow-up `remediation-inputs.<new-ts>.md`. The orchestrator does not re-prompt the same worker with additional instructions and does not extend the active plan with new findings. The active cycle completes (or is marked failed), then a new cycle begins.
+
+### Exit Gate
+
+At the end of a cycle, the orchestrator reads the latest cycle's three reaudit artifacts. It computes `blocking_count` as the total number of FAIL or blocking PARTIAL findings across `code-review`, `feature-audit`, and `policy-audit`. Only when `blocking_count == 0` does the orchestrator set `exit_condition_met = true` on the current cycle and mark the remediation loop complete. When `blocking_count > 0`, the orchestrator begins cycle N+1 with a new `remediation-inputs.<new-ts>.md` and runs the full loop again.
+
+### Citations
+
+- Skill reference: `.claude/skills/remediation-handoff-atomic-planner/SKILL.md` — the full chain orchestrator -> atomic-planner -> atomic-executor (preflight) -> atomic-planner (revise loop) -> atomic-executor (execute) -> feature-review, the five required artifacts, and the citation of `atomic-plan-contract` for the plan shape.
+- Memory reference: `.claude/agent-memory/orchestrator/remediation-loop-strict-handoff.md` — strict delegation chain feedback memory surfaced at orchestrator startup.
+
+Footnote (naming decision for policy-audit reviewer): the third reaudit artifact is named `feature-audit.<exit-ts>.md` (not `feature-review.<exit-ts>.md`). This is the verified repository convention under `docs/features/active/**`. The policy-audit reviewer must confirm this name during the end-of-cycle `feature-review`.

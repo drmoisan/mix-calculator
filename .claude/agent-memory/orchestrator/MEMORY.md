@@ -9,3 +9,4 @@
 - [Subagents cannot open .xlsx](subagents-cannot-open-xlsx.md) — orchestrator must extract Excel logic via openpyxl and transcribe (value-free) into issue.md for planner/executor
 - [Derived aggregates are confidential](derived-aggregates-are-confidential.md) — computed workbook figures (mix totals, sums) must not land in committed files; describe qualitatively, scan before commit
 - [S9 CI-gate parser fallback](s9-ci-gate-parser-fallback.md) — Invoke-CiGateParser.ps1 is absent; derive ci_gate from gh pr checks JSON, use gh run watch to wait
+- [Remediation loop strict handoff](remediation-loop-strict-handoff.md) — remediation cycles must run atomic-planner -> atomic-executor -> feature-review only; no direct typed-engineer worker calls; five required artifacts per cycle

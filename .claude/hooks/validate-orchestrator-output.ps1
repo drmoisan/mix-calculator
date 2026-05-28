@@ -57,6 +57,79 @@ function Get-CheckpointFileContent {
     return @{ Exists = $true; Content = $content }
 }
 
+function Test-RemediationLoopShape {
+    <#
+    .SYNOPSIS
+        Validates the optional remediation_loop sub-object against the schema
+        at .claude/schemas/orchestrator-state.schema.json.
+    .DESCRIPTION
+        Returns a hashtable with keys:
+          - Ok:      $true if the field is absent or every cycle is well-formed.
+          - Message: rejection message naming the first malformed cycle; $null on success.
+        Rejection conditions, in order:
+          - cycles array missing or non-array.
+          - any cycle missing required field plan_path (or plan_path empty).
+          - any cycle where exit_condition_met == true and blocking_count != 0.
+          - any cycle where execution_status in {in_progress, complete, failed}
+            while preflight.final_status != 'clear'.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        $RemediationLoop
+    )
+
+    if ($null -eq $RemediationLoop) {
+        return @{ Ok = $true; Message = $null }
+    }
+
+    $loopProps = @($RemediationLoop.PSObject.Properties.Name)
+    if ($loopProps -notcontains 'cycles') {
+        return @{ Ok = $false; Message = "orchestrator hook: 'remediation_loop' is present but 'cycles' array is missing." }
+    }
+
+    $cycles = @($RemediationLoop.cycles)
+    $executionInProgress = @('in_progress', 'complete', 'failed')
+
+    for ($i = 0; $i -lt $cycles.Count; $i++) {
+        $cycle = $cycles[$i]
+        $cycleProps = @($cycle.PSObject.Properties.Name)
+
+        if ($cycleProps -notcontains 'plan_path' -or [string]::IsNullOrWhiteSpace([string]$cycle.plan_path)) {
+            return @{ Ok = $false; Message = "orchestrator hook: 'remediation_loop.cycles[$i]' is missing required field 'plan_path'." }
+        }
+
+        $exitMet = $null
+        if ($cycleProps -contains 'exit_condition_met') { $exitMet = $cycle.exit_condition_met }
+        $blockingCount = $null
+        if ($cycleProps -contains 'blocking_count') { $blockingCount = $cycle.blocking_count }
+
+        if ($exitMet -eq $true -and $blockingCount -ne 0) {
+            return @{ Ok = $false; Message = "orchestrator hook: 'remediation_loop.cycles[$i]' is malformed: 'exit_condition_met' is true but 'blocking_count' is '$blockingCount' (must be 0)." }
+        }
+
+        $execStatus = $null
+        if ($cycleProps -contains 'execution_status') { $execStatus = [string]$cycle.execution_status }
+
+        if ($executionInProgress -contains $execStatus) {
+            $preflight = $null
+            if ($cycleProps -contains 'preflight') { $preflight = $cycle.preflight }
+            $finalStatus = $null
+            if ($null -ne $preflight) {
+                $preflightProps = @($preflight.PSObject.Properties.Name)
+                if ($preflightProps -contains 'final_status') { $finalStatus = [string]$preflight.final_status }
+            }
+            if ($finalStatus -ne 'clear') {
+                return @{ Ok = $false; Message = "orchestrator hook: 'remediation_loop.cycles[$i]' is malformed: 'execution_status' is '$execStatus' but 'preflight.final_status' is '$finalStatus' (must be 'clear')." }
+            }
+        }
+    }
+
+    return @{ Ok = $true; Message = $null }
+}
+
 function Invoke-OrchestratorOutputValidation {
     <#
     .SYNOPSIS
@@ -122,6 +195,15 @@ function Invoke-OrchestratorOutputValidation {
 
     if ([string]::IsNullOrWhiteSpace([string]$checkpoint.objective)) {
         return @{ Ok = $false; Message = "orchestrator hook: checkpoint file '$CheckpointPath' has an empty 'objective' field; orchestrator must record the active objective." }
+    }
+
+    $remediationLoop = $null
+    if ($checkpointProps -contains 'remediation_loop') {
+        $remediationLoop = $checkpoint.remediation_loop
+    }
+    $loopResult = Test-RemediationLoopShape -RemediationLoop $remediationLoop
+    if (-not $loopResult.Ok) {
+        return @{ Ok = $false; Message = $loopResult.Message }
     }
 
     return @{ Ok = $true; Message = $null }
