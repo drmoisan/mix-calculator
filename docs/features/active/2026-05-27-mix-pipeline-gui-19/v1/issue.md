@@ -1,13 +1,13 @@
 # mix-pipeline-gui (Issue #19)
 
-- Date captured: 2026-05-27
-- Author: Dan Moisan
-- Status: Promoted -> docs/features/active/mix-pipeline-gui/ (Issue #19)
-
-- Issue: #19
-- Issue URL: https://github.com/drmoisan/mix-calculator/issues/19
-- Last Updated: 2026-05-28
-- Work Mode: full-feature
+- **Date captured:** 2026-05-27
+- **Author:** Dan Moisan
+- **Status:** Promoted -> docs/features/active/mix-pipeline-gui/ (Issue #19)
+- **Issue:** #19
+- **Issue URL:** https://github.com/drmoisan/mix-calculator/issues/19
+- **Last Updated:** 2026-05-28
+- **Work Mode:** full-feature
+- **Version:** 1.0
 
 ## Problem / Why
 

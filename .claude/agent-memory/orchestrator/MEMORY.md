@@ -9,3 +9,5 @@
 - [Subagents cannot open .xlsx](subagents-cannot-open-xlsx.md) — orchestrator must extract Excel logic via openpyxl and transcribe (value-free) into issue.md for planner/executor
 - [Derived aggregates are confidential](derived-aggregates-are-confidential.md) — computed workbook figures (mix totals, sums) must not land in committed files; describe qualitatively, scan before commit
 - [S9 CI-gate parser fallback](s9-ci-gate-parser-fallback.md) — Invoke-CiGateParser.ps1 is absent; derive ci_gate from gh pr checks JSON, use gh run watch to wait
+- [PySide6 CI system libs](pyside6-ci-system-libs.md) — Ubuntu runner needs libegl1/libgl1/libxkbcommon0/libdbus-1-3/libfontconfig1 plus QT_QPA_PLATFORM=offscreen for pytest-qt to collect
+- [Remediation-loop strict handoff](remediation-loop-strict-handoff.md) — every remediation cycle must run inputs → atomic-planner (plan) → atomic-executor (preflight + execute) → feature-review (3 audits); orchestrator must NOT call typed-engineer workers directly during remediation
