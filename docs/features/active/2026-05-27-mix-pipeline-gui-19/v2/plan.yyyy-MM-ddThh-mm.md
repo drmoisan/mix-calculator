@@ -1,15 +1,14 @@
 # Atomic Implementation Plan — mix-pipeline-gui (Issue #19)
 
 - **Issue:** #19
-- **Version:** 1.0
-- **Status:** Superceded by 2.0
+- **Version:** 2.0
+- **Status:** Draft
 
 - **Feature folder:** `docs/features/active/2026-05-27-mix-pipeline-gui-19/`
 - **Work Mode:** full-feature (resolved from `issue.md` metadata marker `- Work Mode: full-feature`)
 - **Plan generated:** 2026-05-27T20-59
 - **Requirements sources:** `spec.md`, `user-story.md`, `issue.md`, `artifacts/research/mix-pipeline-gui-architecture.2026-05-27T00-00.md`
-- **Implementing worker:** `python-typed-engineer`
-- **Per-batch budget (hard):** at most 3 production files AND 3 test files per phase
+- **Implementing worker:** `atomic-executor`
 - **Language in scope:** Python (Black -> Ruff -> Pyright strict -> Pytest with coverage)
 - **Coverage gate:** line >= 85%, branch >= 75%, no regression on changed lines
 

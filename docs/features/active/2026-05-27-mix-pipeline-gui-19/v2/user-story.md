@@ -3,7 +3,7 @@
 - **Issue:** #19
 - **Owner:** drmoisan
 - **Status:** Superceded by 2.0
-- **Version:** 1.0
+- **Version:** 2.0
 - **Last Updated:** 2026-05-27T20-59
 
 ## Story Statement
