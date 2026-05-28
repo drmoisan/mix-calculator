@@ -43,3 +43,16 @@ is a recurring trip hazard here, distinct from the suppression-authorization
 concern in [[pyright-ignore-authorization-scope]]. `src/normalize_le.py` sits at
 495 lines and has essentially no headroom; any further growth needs extraction.
 The issue #7 merge-base is `c586ac07` (resolved base `main`).
+
+**Recurred on issue #20 (2026-05-27T22-34 audit, head `98399b6b`):** The mix
+tie-out fix added three regression/identity tests plus a `_single_scenario_mix_base_fixture`
+helper to `tests/test_mix_rollups.py`, which grew from **338 -> 562 lines** (62 over
+limit). Same trip hazard, different module family. Functional fix and toolchain were
+otherwise clean: 100% line/branch on all 3 changed src files, 220 tests pass,
+Black/Ruff/Pyright clean, end-to-end `nrr_summary` `Check = "CHECK"` (reviewer-reproduced),
+9/9 ACs PASS. Verdict: NEEDS REVISION on the file-size finding only. Remediation
+path is the same Option B as #2: extract shared fixtures (`_mix_base_rows`,
+`_mix_base_fixture`, `_single_scenario_mix_base_fixture`, `_unfiltered_group_lbs_le`,
+`_f`) to `tests/_mix_rollups_fixtures.py` and move the three issue #20 regression tests
+to a sibling `tests/test_mix_rollups_tieout.py`. Lesson: the `wc -l tests/*.py` watch
+applies feature-wide, not just to the normalize-le family.

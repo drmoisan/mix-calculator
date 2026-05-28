@@ -3,96 +3,137 @@
 - **Issue:** #20
 - **Parent (optional):** none
 - **Owner:** drmoisan
-- **Last Updated:** 2026-05-27T21-54
-- **Status:** Draft
-- **Version:** 1.0
-- **Work Mode:** full-bug (spec.md required; user-story.md absent by design)
+- **Work Mode:** full-bug (remediation cycle)
+- **Plan Timestamp (remediation):** 2026-05-27T22-40
+- **Scope:** Remediate a single Blocking general-code-change finding by splitting `tests/test_mix_rollups.py` (562 lines) into cohesive sub-modules so every file is at or under 500 lines, with no change to test semantics, names, fixtures, assertions, or coverage. No production code change.
+- **Source of remediation requirement:** `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/remediation-inputs.2026-05-27T22-34.md` (Finding 1, Blocking).
 
-**AC source:** `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/spec.md` `## Acceptance Criteria` AC1-AC9.
+## Cohesive split design
 
-**Fail-closed evidence rule:** This plan includes explicit Phase 0 baseline artifact tasks, a final QA-gate artifact set, and a coverage-comparison task for Python (the only in-scope language; coverage is mandatory per `.claude/rules/general-unit-test.md` and `.claude/rules/quality-tiers.md`). If any required baseline artifact, QA artifact, or coverage-comparison artifact is missing or carries placeholder values, the audit verdict must be BLOCKED or INCOMPLETE, never PASS.
+Line counts are measured by `wc -l` semantics (equivalent to `(Get-Content $path).Count` in PowerShell), matching the upstream remediation-inputs Finding 1 measurement.
 
-**Evidence accounting rule:** Each evidence-producing task records its exact canonical artifact path. Do not mark evidence-backed work complete without the artifact on disk with all required fields (`Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`).
+Option B from `remediation-inputs.2026-05-27T22-34.md` is selected because the six fixture helpers in the offending file are shared by tests landing on both sides of the split. Duplicating the helpers would violate the no-copy-paste principle in `.claude/rules/general-code-change.md` and would also push individual files closer to the 500-line limit again.
 
-**Canonical evidence location:** All evidence is written under `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/<kind>/` per `.claude/skills/evidence-and-timestamp-conventions/SKILL.md`. Non-canonical paths (e.g., `artifacts/baselines/`, `artifacts/qa/`, `artifacts/coverage/`) are forbidden and must be rejected.
+- `tests/_mix_rollups_fixtures.py` (new shared helper module, underscore-prefixed so pytest does not treat it as a test module). Contains exactly these helpers, copied byte-for-byte from `tests/test_mix_rollups.py` (lines 31-233 in the pre-split file):
+  - `_f`
+  - `_mix_base_rows`
+  - `_mix_base_fixture`
+  - `_rate_impacts_fixture`
+  - `_single_scenario_mix_base_fixture`
+  - `_unfiltered_group_lbs_le`
+  Plus the necessary imports (`from __future__ import annotations`, `from typing import cast`, `import pandas as pd`).
 
-**Confidentiality:** Tests use fabricated values only. No real source numbers, SKU descriptions, or category names. End-to-end evidence records only `Check` resolution, table presence/row counts, and per-layer tie-out pass/fail — never confidential derived figures.
+- `tests/test_mix_rollups.py` (modified in place, no rename). Retains the rollup/layer/stage tests (no semantic change):
+  - `test_build_mix_rollup_1_groups_by_customer_country_category`
+  - `test_build_mix_rollup_4_returns_scalar_sum`
+  - `test_build_mix_1_sku_produces_sku_mix_column`
+  - `test_full_mix_chain_columns_and_fill_zero`
+  - `test_mix_4_country_subtracts_scalar_rollup_4`
+  - `test_build_mix_0_detail_composite_keys`
+  - `test_build_mix_stage_keeps_only_nonzero_lbs_lines`
+  - `test_rollup_tie_out_customer_layer_sum_matches_scalar`
+  Imports `_f`, `_mix_base_fixture`, `_rate_impacts_fixture` from `tests._mix_rollups_fixtures`. The module docstring is retained, narrowed to describe only the layer/rollup/stage scope.
 
-**Production-file budget (locked):** `src/mix_rollups.py`, `src/_mix_rollups_helpers.py`, `src/mix_pipeline_run.py`. Tests: `tests/test_mix_rollups.py`. Docstring-only touch permitted in the same three production files. No other production files may change.
+- `tests/test_mix_rollups_tieout.py` (new). Contains the AC8 four-layer tie-out / issue #20 regression tests (no semantic change). This file preserves the AC8 verification path:
+  - `test_category_layer_retains_single_scenario_volume`
+  - `test_customer_layer_retains_single_scenario_volume`
+  - `test_layer_mix_equals_full_aggregation_minus_rollup`
+  Imports `_f`, `_single_scenario_mix_base_fixture`, `_unfiltered_group_lbs_le` from `tests._mix_rollups_fixtures`, and the relevant builder symbols from `src.mix_rollups` / `src._mix_rollups_helpers`. Carries the original block comment that documents the single-scenario volume retention intent.
 
----
+Estimated post-split line counts (each well under 500):
 
-### Phase 0 — Baseline Capture & Policy Reading
+- `tests/_mix_rollups_fixtures.py`: approximately 210 lines.
+- `tests/test_mix_rollups.py`: approximately 225 lines.
+- `tests/test_mix_rollups_tieout.py`: approximately 155 lines.
 
-- [x] [P0-T1] Read repository policy files in the required order and record them in a Phase 0 evidence artifact. Files to read: `CLAUDE.md`; `.claude/rules/general-code-change.md`; `.claude/rules/general-unit-test.md`; `.claude/rules/python.md`; `.claude/rules/python-suppressions.md`; `.claude/rules/quality-tiers.md`; `.claude/rules/self-explanatory-code-commenting.md`; `.claude/rules/tonality.md`. Write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/baseline/phase0-instructions-read.md` containing `Timestamp:`, `Policy Order:`, and the explicit list of files read. Verification: the artifact exists and lists every file above.
-- [x] [P0-T2] Capture the git baseline (branch + HEAD commit SHA + `git status --short`) into `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/baseline/git-baseline.<ISO8601>.md` with fields `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. Verification: artifact present with a resolved 40-char SHA.
-- [x] [P0-T3] Capture the baseline Black state. Run `poetry run black --check .` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/baseline/black-baseline.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. Verification: artifact records the exit code and pass/fail summary.
-- [x] [P0-T4] Capture the baseline Ruff state. Run `poetry run ruff check .` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/baseline/ruff-baseline.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. Verification: artifact records exit code and error count.
-- [x] [P0-T5] Capture the baseline Pyright state. Run `poetry run pyright` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/baseline/pyright-baseline.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. Verification: artifact records exit code and error/warning counts.
-- [x] [P0-T6] Capture the baseline Pytest + coverage state. Run `poetry run pytest --cov --cov-branch --cov-report=term-missing` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/baseline/pytest-baseline.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. The `Output Summary:` MUST record numeric baseline values: total passed/failed count, overall line-coverage percent, overall branch-coverage percent, and the per-module line/branch coverage for `src/mix_rollups.py` and `src/_mix_rollups_helpers.py`. Verification: artifact present with numeric coverage headline values (no placeholders).
+No production code, spec, issue.md, audit, or policy file is touched. No test is deselected, skipped, weakened, renamed, or has any assertion changed. No new dependency is added. The cross-feature `tests/mix_bottomsup_fixtures.py` is not touched.
 
-### Phase 1 — Regression Test (must fail first) [AC4]
+## Evidence locations (canonical)
 
-- [x] [P1-T1] [expect-fail] In `tests/test_mix_rollups.py`, add a fabricated fixture builder that produces a `mix_base` containing a single-scenario line where AOP Lbs is zero and LE Lbs is nonzero (a SKU new in LE), and a second single-scenario line where LE Lbs is zero and AOP Lbs is nonzero (a SKU dropped in LE), within an existing customer/country group that also has a normal two-scenario line. Use fabricated customer/category/SKU/country labels only. Verification: the fixture function exists and returns a DataFrame carrying the six measure rows per line in the same long `{Customer, SKU #, SKU Description, Category, Country, Attribute, AOP, LE, Diff, Classification}` shape as `_mix_base_fixture`.
-- [x] [P1-T2] [expect-fail] In `tests/test_mix_rollups.py`, add `test_category_layer_retains_single_scenario_volume` asserting that `build_mix_2_category` aggregated from the single-scenario fixture includes the LE-side `Lbs - LE` and `Net-Revenue $ - LE` contribution of the AOP-zero/LE-nonzero line in the `{Customer, Country}` group total (i.e., the coarser-layer LE volume equals the unfiltered `mix_base` sum at `{Customer, Country}`, not the filtered prior layer). Use Arrange-Act-Assert; fabricated values only; no temp files; no network. Verification: assertion compares the layer's group `Lbs - LE` against the directly computed unfiltered `mix_base` group sum.
-- [x] [P1-T3] [expect-fail] In `tests/test_mix_rollups.py`, add `test_customer_layer_retains_single_scenario_volume` asserting the analogous retention for `build_mix_3_customer` at `{Country}` granularity (the LE-nonzero single-scenario line's volume reaches the customer-layer aggregate). Use Arrange-Act-Assert; fabricated values only. Verification: assertion compares the layer's group `Lbs - LE` against the unfiltered `mix_base` `{Country}` group sum.
-- [x] [P1-T4] [expect-fail] In `tests/test_mix_rollups.py`, add `test_layer_mix_equals_full_aggregation_minus_rollup` asserting, for the category and customer layers, that the mix column equals each layer's recomputed `Calc Net Price Impact` minus the sum of the prior finer layer's `Calc Net Price Impact` (the NPI-minus-rollup identity per AC2). Use Arrange-Act-Assert; fabricated values only. Verification: assertion reproduces `(layer NPI) - (group_net_price_impact of prior layer)` and compares to the layer's mix column within 1e-9.
-- [x] [P1-T5] [expect-fail] Run only the new tests: `poetry run pytest tests/test_mix_rollups.py -k "single_scenario or full_aggregation_minus_rollup" -p no:randomly`. Confirm they FAIL against current (unfixed) code, and write a fail-before artifact `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/regression-testing/fail-before.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:` (non-zero), and `Output Summary:` naming the failing tests. Verification: the artifact records a non-zero exit and at least the three new behavioral tests failing.
-- [x] [P1-T6] Run the full Python toolchain loop on the test-only change and restart on any file change or failure: (1) `poetry run black .`, (2) `poetry run ruff check .`, (3) `poetry run pyright`, (4) `poetry run pytest -k "not (single_scenario or full_aggregation_minus_rollup)"` to confirm the existing suite is unaffected by the new fixture code. Verification: stages 1-3 pass; stage 4 passes; the new expect-fail tests remain the only failing tests (recorded in P1-T5). Note: this is the standard mandatory toolchain order from `.claude/rules/python.md`; the expect-fail tests are excluded here only because the fix is not yet applied.
+All evidence for this remediation cycle is written under:
 
-### Phase 2 — Fix the coarser-layer aggregation source [AC1, AC2, AC3]
+- Baselines: `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/remediation-baseline/`
+- Final QA gates: `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/qa-gates/`
+- Regression-testing (if any AC re-verification artifact is needed): `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/regression-testing/`
 
-- [x] [P2-T1] In `src/mix_rollups.py`, change `build_mix_2_category` to build its stage directly from the unfiltered `mix_base` grouped by `{Customer, Country}` instead of `unstack_to_long(mix_1_sku, ...)`. New signature: `build_mix_2_category(mix_base: pd.DataFrame, mix_rollup_2: pd.DataFrame) -> pd.DataFrame`; body calls `build_mix_stage(mix_base, ["Customer", "Country"])` then `join_rollup_mix(stage, mix_rollup_2, ["Customer", "Country"], "Category Mix")`. Keep no zero-fill at this layer (per spec invariant). Update the docstring to state the aggregation now sources `mix_base` at `{Customer, Country}` granularity. Verification: the function no longer calls `unstack_to_long`; signature takes `mix_base`; `Category Mix` column name unchanged.
-- [x] [P2-T2] In `src/mix_rollups.py`, change `build_mix_3_customer` to build its stage from `mix_base` grouped by `{Country}` instead of `unstack_to_long(mix_2_category, ...)`. New signature: `build_mix_3_customer(mix_base: pd.DataFrame, mix_rollup_3: pd.DataFrame) -> pd.DataFrame`; body calls `build_mix_stage(mix_base, ["Country"])`, then preserves `_apply_fill_zero_and_recompute(stage)`, then `join_rollup_mix(stage, mix_rollup_3, ["Country"], "Customer Mix")`. Preserve the `Customer Mix` column name (the deliberate issue #9 rename). Update the docstring. Verification: the function sources `mix_base` at `{Country}`; `fill_zero_with_avg` step retained; `Customer Mix` column name unchanged.
-- [x] [P2-T3] In `src/mix_rollups.py`, change `build_mix_4_country` to build its stage from `mix_base` collapsed to a single all-rows group instead of `unstack_to_long(mix_3_customer, ...)`. New signature: `build_mix_4_country(mix_base: pd.DataFrame, mix_rollup_4: float) -> pd.DataFrame`; body adds a constant `_all` key on a copy of `mix_base`, calls `build_mix_stage(<base_with_all>, ["_all"])`, preserves `_apply_fill_zero_and_recompute`, drops `_all`, then subtracts the broadcast scalar `mix_rollup_4` to produce `Country Mix`. Preserve the single-row shape. Update the docstring. Verification: the function sources `mix_base`; output is a single row; `Country Mix` computed by scalar subtraction.
-- [x] [P2-T4] In `src/_mix_rollups_helpers.py`, remove `unstack_to_long` (and the `_STAGE_ATTRIBUTES`/`_STAGE_SCENARIOS` constants only if they become unused after removal; retain any constant still referenced by `build_mix_stage`). Remove `unstack_to_long` from the module's exported surface and from the import in `src/mix_rollups.py`. Verification: `poetry run ruff check .` reports no unused-import/undefined-name errors and a repository-wide search for `unstack_to_long` returns only removed references. If any other module still imports `unstack_to_long`, do not remove it; instead record the blocker and stop. (Confirmed at plan time: only `src/mix_rollups.py` and `tests/test_mix_rollups.py` reference it.)
-- [x] [P2-T5] In `tests/test_mix_rollups.py`, remove `test_unstack_to_long_fills_absent_scenario_with_zero` and the `unstack_to_long` import, since the helper is removed. Verification: no remaining reference to `unstack_to_long` in the test file; the file still imports `build_mix_stage`.
-- [x] [P2-T6] In `src/mix_pipeline_run.py`, update `run_transforms` wiring so the three changed builders receive `mix_base`: `mix_2_category = build_mix_2_category(mix_base, mix_rollup_2)`; `mix_3_customer = build_mix_3_customer(mix_base, mix_rollup_3)`; `mix_4_country = build_mix_4_country(mix_base, mix_rollup_4_value)`. Keep the rollup-target lines unchanged (`build_mix_rollup_2(mix_1_sku)`, `build_mix_rollup_3(mix_2_category)`, `build_mix_rollup_4(mix_3_customer)`) so the rollup-subtraction target remains the prior finer layer. Update the inline comment to reflect that coarser layers source `mix_base`. Verification: the three builder calls pass `mix_base`; rollup-target calls unchanged; the returned table mapping is unchanged.
-- [x] [P2-T7] Confirm `mix_1_sku` is untouched in `src/mix_rollups.py` and `src/mix_pipeline_run.py` (no change to `build_mix_1_sku`, `build_mix_rollup_1`, or its wiring). Verification: a diff of both files shows no edits inside `build_mix_1_sku`/`build_mix_rollup_1` and the `mix_1_sku` wiring line is unchanged. [AC3]
-- [x] [P2-T8] Confirm each changed production file remains under the 500-line limit and that `main` remains the only I/O boundary (no I/O introduced in the builders or runner). Verification: line counts for `src/mix_rollups.py` and `src/_mix_rollups_helpers.py` are < 500; no file/network/DB calls added to the three production files. [AC1]
-- [x] [P2-T9] Run the full Python toolchain loop and restart from step 1 on any file change or failure: (1) `poetry run black .`, (2) `poetry run ruff check .`, (3) `poetry run pyright`, (4) `poetry run pytest --cov --cov-branch --cov-report=term-missing`. Verification: all four stages pass in a single clean pass; the Phase 1 expect-fail tests now PASS; record outcome in `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/regression-testing/pass-after.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:` (0), and `Output Summary:` naming the now-passing tests. [AC2, AC4, AC6]
-
-### Phase 3 — Documentation alignment [AC9]
-
-- [x] [P3-T1] Update the module docstring in `src/mix_rollups.py` (and any builder docstring not already corrected in Phase 2) so the described data flow states that the category/customer/country layers aggregate the unfiltered `mix_base` at their own granularity while the rollup-subtraction target remains the prior finer layer's summed `Calc Net Price Impact`. No behavior change. Verification: docstrings no longer describe the prior-layer reshape as the volume source; no code lines outside docstrings change in this task.
-- [x] [P3-T2] Check `README.md` for any description of the mix-layer aggregation that the fix invalidates; update only if such a description exists. Verification: either a minimal README edit reflecting the corrected aggregation, or a recorded note that README contains no such description and no edit is required. [AC9]
-
-### Phase 4 — Final QA Loop & Coverage Gate [AC5, AC6]
-
-- [x] [P4-T1] Final formatting gate. Run `poetry run black --check .` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/qa-gates/black-final.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. If this changes files, restart the loop at P4-T1. Verification: exit code 0 recorded.
-- [x] [P4-T2] Final lint gate. Run `poetry run ruff check .` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/qa-gates/ruff-final.<ISO8601>.md` with the required fields. Verification: exit code 0, zero lint errors recorded.
-- [x] [P4-T3] Final type-check gate. Run `poetry run pyright` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/qa-gates/pyright-final.<ISO8601>.md` with the required fields. Verification: exit code 0, zero errors recorded.
-- [x] [P4-T4] Final test + coverage gate. Run `poetry run pytest --cov --cov-branch --cov-report=term-missing` and write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/qa-gates/pytest-final.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:`. The `Output Summary:` MUST record numeric post-change values: total passed/failed, overall line-coverage percent, overall branch-coverage percent, and the per-module line/branch coverage for `src/mix_rollups.py` and `src/_mix_rollups_helpers.py`. Verification: exit code 0; numeric coverage values present (no placeholders). If any prior step in this phase changed files, restart at P4-T1.
-- [x] [P4-T5] Coverage delta verification [AC5]. Compare the Phase 0 baseline coverage (P0-T6) against the Phase 4 post-change coverage (P4-T4) and the coverage of the changed lines in `src/mix_rollups.py`, `src/_mix_rollups_helpers.py`, and `src/mix_pipeline_run.py`. Write `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/qa-gates/coverage-delta.<ISO8601>.md` reporting baseline line/branch percent, post-change line/branch percent, and changed-code coverage. Verification: changed-code line coverage >= 85%, branch coverage >= 75%, and no coverage regression on changed lines; if any threshold is unmet the outcome is remediation-required (not PASS).
-
-### Phase 5 — End-to-End Tie-Out Verification [AC7, AC8]
-
-- [x] [P5-T1] Run the pipeline end-to-end: `poetry run python -m src.mix_pipeline --input "artifacts/LE v AOP Gross to Net Decomp.xlsx" --output artifacts/mix.db`. Confirm the run completes with exit code 0 and that `mix_1_sku`, `mix_2_category`, `mix_3_customer`, `mix_4_country`, and `nrr_summary` tables are written. Verification recorded in `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/regression-testing/e2e-run.<ISO8601>.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` listing table presence and row counts only (no confidential values). If the confidential workbook is unavailable in the execution environment, record a `POSTING BLOCKED`-style note with the reason and mark this task remediation-required rather than PASS. [AC7]
-- [x] [P5-T2] From `artifacts/mix.db`, confirm the `nrr_summary` internal `Check` resolves to the string `"CHECK"`. Append the result to the P5-T1 e2e artifact (or a sibling `nrr-check.<ISO8601>.md`) recording only the `Check` string value, not the underlying figures. Verification: artifact records `Check == "CHECK"`; a value of `"ERROR"` is a FAIL. [AC7]
-- [x] [P5-T3] Confirm each of `mix_1_sku["SKU Mix"]`, `mix_2_category["Category Mix"]`, `mix_3_customer["Customer Mix"]`, and `mix_4_country["Country Mix"]` column totals ties out to the corresponding workbook TopDown table total (`2-SKU-Mix-TopDown`, `3-Category-Mix-TopDown`, `4-Customer-Mix-TopDown`, `5-Country-Mix`). Record per-layer pass/fail only (no figures) in `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/regression-testing/tieout.<ISO8601>.md`. Verification: all four layers recorded as tie-out PASS; any FAIL is remediation-required. [AC8]
-
-### Phase 6 — Issue Update & Handoff
-
-- [x] [P6-T1] Mirror the issue #20 update locally at `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/evidence/issue-updates/issue-20.<ISO8601>.md` with `Timestamp:`, the exact update text (outcome, the four-layer tie-out result, the `Check` resolution, and any scope deviations), and `PostedAs:`. Verification: artifact present; if posted to GitHub, the comment/issue URL is recorded; if not posted, a `POSTING BLOCKED` header with the reason is recorded.
+Any non-canonical evidence path supplied by a caller (for example `artifacts/baselines/`, `artifacts/qa/`, `artifacts/coverage/`, `artifacts/evidence/`) is rejected and replaced with the canonical path defined in `.claude/skills/evidence-and-timestamp-conventions/SKILL.md`. The override is recorded as `EVIDENCE_LOCATION_OVERRIDE_REJECTED:` in the affected artifact.
 
 ---
 
-## Acceptance-Criteria Traceability
+### Phase 0 — Policy read and remediation baseline capture
 
-| AC | Description | Covered by tasks |
-|---|---|---|
-| AC1 | Coarser layers aggregate unfiltered `mix_base` at own granularity; builders pure; < 500 lines | P2-T1, P2-T2, P2-T3, P2-T8 |
-| AC2 | Mix column = layer recomputed NPI minus sum of prior finer layer NPI | P2-T1, P2-T2, P2-T3, P2-T6, P1-T4, P2-T9 |
-| AC3 | `mix_1_sku` unchanged; `Customer Mix` name and `mix_4_country` single-row shape preserved | P2-T2, P2-T3, P2-T7 |
-| AC4 | Deterministic Pytest proves single-scenario retention + NPI-minus-rollup identity; no temp files/network | P1-T1, P1-T2, P1-T3, P1-T4, P1-T5 |
-| AC5 | Changed-code line >= 85% / branch >= 75%; no regression on changed lines | P0-T6, P4-T4, P4-T5 |
-| AC6 | Python toolchain passes in one clean pass | P1-T6, P2-T9, P4-T1, P4-T2, P4-T3, P4-T4 |
-| AC7 | E2E run writes tables + `nrr_summary`; `Check == "CHECK"` | P5-T1, P5-T2 |
-| AC8 | All four mix-layer totals tie out to workbook TopDown totals | P5-T3 |
-| AC9 | README/docstrings updated only as needed; no out-of-scope behavior change | P3-T1, P3-T2, P2-T8 |
+- [x] [P0-T1] Read `.claude/rules/general-code-change.md` (full file). Record under `evidence/remediation-baseline/phase0-instructions-read.2026-05-27T22-40.md` with `Timestamp:`, `Policy Order:` (1. CLAUDE.md, 2. general-code-change.md, 3. general-unit-test.md, 4. python.md, 5. python-suppressions.md, 6. self-explanatory-code-commenting.md, 7. quality-tiers.md, 8. tonality.md, 9. benchmark-baselines.md, 10. ci-workflows.md), and an explicit `Files Read:` list. Acceptance: the artifact exists with all three required fields and a literal quotation of the File Size Limit clause.
 
-## Preflight
+- [x] [P0-T2] Read `.claude/rules/general-unit-test.md`, `.claude/rules/python.md`, `.claude/rules/python-suppressions.md`, `.claude/rules/self-explanatory-code-commenting.md`, `.claude/rules/quality-tiers.md`, `.claude/rules/tonality.md`. Append the file list and any rule excerpts that constrain test-module placement (for example: "Organize tests to mirror code structure") to the same `evidence/remediation-baseline/phase0-instructions-read.2026-05-27T22-40.md`. Acceptance: every file path appears under `Files Read:`.
 
-- Target plan path (reused in place across all revisions): `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/plan.2026-05-27T21-54.md`
-- Validate via `atomic-executor` with `DIRECTIVE: PREFLIGHT VALIDATION ONLY`; required signal: `PREFLIGHT: ALL CLEAR` or `PREFLIGHT: REVISIONS REQUIRED`.
-- Validate via `mcp__drm-copilot__validate_orchestration_artifacts` with `artifact_type: "plan"`, `artifact_path: <this file>` before treating as approved.
+- [x] [P0-T3] Capture the pre-remediation file size of the offending file using `wc -l` semantics (so the measurement matches the upstream remediation-inputs Finding 1 value of 562 lines). Command: `pwsh -NoProfile -Command "(Get-Content tests/test_mix_rollups.py).Count"`. Write the output to `evidence/remediation-baseline/file-size-baseline.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (must record the integer line count and the policy threshold 500). Acceptance: artifact present with all four fields; `Output Summary:` records 562 as the current line count.
+
+- [x] [P0-T4] Capture baseline Black status. Command: `env -u VIRTUAL_ENV poetry run black --check tests/test_mix_rollups.py`. Write to `evidence/remediation-baseline/black-baseline.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:` (state pass/fail and any reformat candidates). Acceptance: artifact present with all four fields.
+
+- [x] [P0-T5] Capture baseline Ruff status. Command: `env -u VIRTUAL_ENV poetry run ruff check tests/test_mix_rollups.py`. Write to `evidence/remediation-baseline/ruff-baseline.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:` (state error count). Acceptance: artifact present with all four fields.
+
+- [x] [P0-T6] Capture baseline Pyright status against the same file. Command: `env -u VIRTUAL_ENV poetry run pyright tests/test_mix_rollups.py`. Write to `evidence/remediation-baseline/pyright-baseline.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, `Output Summary:` (state error/warning count). Acceptance: artifact present with all four fields.
+
+- [x] [P0-T7] Capture baseline Pytest pass/coverage state with coverage enabled. Command: `env -u VIRTUAL_ENV poetry run pytest --cov=src --cov-branch --cov-report=term-missing`. Write to `evidence/remediation-baseline/pytest-baseline.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` recording: total tests collected, passed count (must equal 220 per remediation-inputs), `tests/test_mix_rollups.py` test count, headline TOTAL line and branch coverage, and per-file line+branch coverage for `src/mix_rollups.py`, `src/_mix_rollups_helpers.py`, and `src/mix_pipeline_run.py`. Acceptance: artifact present with all four fields and the four required coverage numbers (TOTAL line, TOTAL branch, three per-file rows).
+
+- [x] [P0-T8] Capture an enumeration of every test function in `tests/test_mix_rollups.py` for post-split parity. Command: `pwsh -NoProfile -Command "Select-String -Path tests/test_mix_rollups.py -Pattern '^def (test_[A-Za-z0-9_]+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }"`. Write to `evidence/remediation-baseline/test-inventory-baseline.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (the literal list of 11 test function names). Acceptance: artifact present; the list contains exactly the 11 `test_*` names enumerated in the cohesive split design above.
+
+---
+
+### Phase 1 — Cohesive test-file split
+
+- [x] [P1-T1] Create `tests/_mix_rollups_fixtures.py` containing the six shared helpers (`_f`, `_mix_base_rows`, `_mix_base_fixture`, `_rate_impacts_fixture`, `_single_scenario_mix_base_fixture`, `_unfiltered_group_lbs_le`) copied byte-for-byte from `tests/test_mix_rollups.py` lines 31-233. Module docstring states purpose: "Shared Mix_Base / rate-impacts fixture helpers for the mix-rollup test suite. Imported by `tests/test_mix_rollups.py` and `tests/test_mix_rollups_tieout.py`; not itself a pytest module." Required imports: `from __future__ import annotations`, `from typing import cast`, `import pandas as pd`. Acceptance: file exists; `pwsh -NoProfile -Command "(Get-Content tests/_mix_rollups_fixtures.py).Count"` returns a value <= 500 (using `wc -l` semantics); every helper name listed above is present and its function body is identical to the original (verified by diff).
+
+- [x] [P1-T2] Create `tests/test_mix_rollups_tieout.py` containing exactly three test functions copied byte-for-byte from `tests/test_mix_rollups.py` lines 423-562: `test_category_layer_retains_single_scenario_volume`, `test_customer_layer_retains_single_scenario_volume`, `test_layer_mix_equals_full_aggregation_minus_rollup`. Module docstring states purpose: "AC8 four-layer tie-out and issue #20 single-scenario-volume regression tests. Verifies the corrected coarser layers aggregate the unfiltered Mix_Base at their own granularity." Imports: `from __future__ import annotations`; `import pandas as pd`; `from src._mix_rollups_helpers import build_mix_stage`; `from src.mix_rollups import build_mix_2_category, build_mix_3_customer`; `from tests._mix_rollups_fixtures import _f, _single_scenario_mix_base_fixture, _unfiltered_group_lbs_le`. The original explanatory block comment about single-scenario volume retention is carried over verbatim above the first test. Acceptance: file exists; `(Get-Content tests/test_mix_rollups_tieout.py).Count` returns a value <= 500 (using `wc -l` semantics); each test function body matches the original byte-for-byte (verified by diff against pre-split snapshot).
+
+- [x] [P1-T3] Update `tests/test_mix_rollups.py` in place to remove the six shared helper definitions and the three tie-out tests, leaving only the rollup/layer/stage tests (`test_build_mix_rollup_1_groups_by_customer_country_category`, `test_build_mix_rollup_4_returns_scalar_sum`, `test_build_mix_1_sku_produces_sku_mix_column`, `test_full_mix_chain_columns_and_fill_zero`, `test_mix_4_country_subtracts_scalar_rollup_4`, `test_build_mix_0_detail_composite_keys`, `test_build_mix_stage_keeps_only_nonzero_lbs_lines`, `test_rollup_tie_out_customer_layer_sum_matches_scalar`). Replace the helper definitions with `from tests._mix_rollups_fixtures import _f, _mix_base_fixture, _rate_impacts_fixture`. Retain `from src._mix_rollups_helpers import build_mix_stage` and the `from src.mix_rollups import ...` block (drop unused symbols only if Ruff F401 flags them). Narrow the module docstring to describe only the layer/rollup/stage scope; do not change any test function name, signature, or assertion. Acceptance: `(Get-Content tests/test_mix_rollups.py).Count` returns a value <= 500 (using `wc -l` semantics); `pwsh -NoProfile -Command "Select-String -Path tests/test_mix_rollups.py -Pattern '^def (test_[A-Za-z0-9_]+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }"` lists exactly the eight test names enumerated for this file.
+
+- [x] [P1-T4] Verify post-split test inventory parity. Command: `pwsh -NoProfile -Command "Select-String -Path tests/test_mix_rollups.py,tests/test_mix_rollups_tieout.py -Pattern '^def (test_[A-Za-z0-9_]+)' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Sort-Object"`. Write to `evidence/qa-gates/test-inventory-postsplit.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (the literal sorted list of 11 test names). Acceptance: the sorted post-split list is set-equal to the baseline list captured in P0-T8 (no test added, removed, or renamed).
+
+- [x] [P1-T5] Verify the three resulting files all sit at or under the 500-line policy threshold using `wc -l` semantics. Command: `pwsh -NoProfile -Command "Get-ChildItem tests/test_mix_rollups.py,tests/test_mix_rollups_tieout.py,tests/_mix_rollups_fixtures.py | ForEach-Object { [pscustomobject]@{ Path=$_.FullName; Lines=(Get-Content $_.FullName).Count } }"`. Write to `evidence/qa-gates/file-size-postsplit.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (three rows: file path + line count, plus a `Threshold: 500` line and a pass/fail verdict). Acceptance: every recorded line count is <= 500.
+
+---
+
+### Phase 2 — Mandatory Python toolchain loop (restart on any file change)
+
+The loop runs in the fixed order Black -> Ruff -> Pyright -> Pytest. If any step fails or modifies files, restart from P2-T1. The loop terminates only when all four steps complete in a single clean pass. Final-QC tasks below are unconditional: each command MUST be executed and recorded; `EXIT_CODE: SKIPPED` is not a valid completion.
+
+- [x] [P2-T1] Run Black formatter check across the three affected files. Command: `env -u VIRTUAL_ENV poetry run black --check tests/test_mix_rollups.py tests/test_mix_rollups_tieout.py tests/_mix_rollups_fixtures.py`. Write to `evidence/qa-gates/black-final.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (must include the literal "3 files would be left unchanged" or equivalent). Acceptance: `EXIT_CODE: 0`. If `EXIT_CODE` is nonzero or Black reports `would reformat`, run `env -u VIRTUAL_ENV poetry run black tests/test_mix_rollups.py tests/test_mix_rollups_tieout.py tests/_mix_rollups_fixtures.py` to apply formatting and then restart the loop from P2-T1.
+
+- [x] [P2-T2] Run Ruff linter across the three affected files plus the whole `tests/` tree for cross-import sanity. Command: `env -u VIRTUAL_ENV poetry run ruff check tests/test_mix_rollups.py tests/test_mix_rollups_tieout.py tests/_mix_rollups_fixtures.py`. Write to `evidence/qa-gates/ruff-final.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (must state "All checks passed!" or list specific findings). Acceptance: `EXIT_CODE: 0` and zero findings. No new `# noqa` suppression may be introduced; if any Ruff finding requires a code change, restart the loop from P2-T1. Suppressions are bounded by `.claude/rules/python-suppressions.md` and require an unused-imports/structural fix instead.
+
+- [x] [P2-T3] Run Pyright type checker across the three affected files. Command: `env -u VIRTUAL_ENV poetry run pyright tests/test_mix_rollups.py tests/test_mix_rollups_tieout.py tests/_mix_rollups_fixtures.py`. Write to `evidence/qa-gates/pyright-final.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (must record "0 errors, 0 warnings, 0 informations" or the specific counts). Acceptance: zero errors and zero warnings against the changed files. If any new diagnostic appears, restart the loop from P2-T1.
+
+- [x] [P2-T4] Run the full Pytest suite with coverage on `src/`. Command: `env -u VIRTUAL_ENV poetry run pytest --cov=src --cov-branch --cov-report=term-missing`. Write to `evidence/qa-gates/pytest-final.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (must record total tests collected, passed/failed/skipped counts, and TOTAL line and branch coverage percentages). Acceptance: `EXIT_CODE: 0`; total passed == 220 (matching the baseline in `remediation-inputs.2026-05-27T22-34.md`); zero failed; zero deselected; zero skipped beyond what the baseline already reported.
+
+- [x] [P2-T5] Verify coverage on the three production files most relevant to issue #20 is preserved (>= 85% line / >= 75% branch per `.claude/rules/quality-tiers.md`, and matches the baseline 100/100 reported in `remediation-inputs.2026-05-27T22-34.md`). Source: the term-missing coverage block in `evidence/qa-gates/pytest-final.2026-05-27T22-40.md`. Write to `evidence/qa-gates/coverage-delta.2026-05-27T22-40.md` with `Timestamp:`, `Command:` (the same `pytest --cov=...` invocation), `EXIT_CODE:` (mirroring P2-T4), and `Output Summary:` listing for each of `src/mix_rollups.py`, `src/_mix_rollups_helpers.py`, `src/mix_pipeline_run.py`: baseline line%/branch% (from P0-T7), post-split line%/branch% (from P2-T4), and a `Delta:` row stating "no regression on changed lines" (no `src/**` lines changed in this remediation). Acceptance: every post-split coverage value is >= the baseline value captured in P0-T7; the artifact records the explicit no-regression statement and the policy thresholds.
+
+- [x] [P2-T6] Re-verify the file-size policy compliance after the toolchain loop terminates clean (formatters may have shifted line counts) using `wc -l` semantics. Command: `pwsh -NoProfile -Command "Get-ChildItem tests/test_mix_rollups.py,tests/test_mix_rollups_tieout.py,tests/_mix_rollups_fixtures.py | ForEach-Object { [pscustomobject]@{ Path=$_.FullName; Lines=(Get-Content $_.FullName).Count } }"`. Append to `evidence/qa-gates/file-size-postsplit.2026-05-27T22-40.md` under a `## Post-Toolchain Verification` section, or write a sibling `evidence/qa-gates/file-size-final.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (three rows). Acceptance: every recorded line count remains <= 500.
+
+- [x] [P2-T7] Verify no production code (`src/**`), no spec, no issue.md, and no `.claude/rules/**` file was touched in this remediation. Command: `pwsh -NoProfile -Command "git diff --name-only main...HEAD"`. Write to `evidence/qa-gates/scope-guard.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (the changed-files list). Acceptance: every changed path is one of `tests/test_mix_rollups.py`, `tests/test_mix_rollups_tieout.py`, `tests/_mix_rollups_fixtures.py`, `docs/features/active/2026-05-27-mix-category-customer-mix-tieout-20/**`; no `src/**`, no `spec.md`, no `issue.md`, and no `.claude/rules/**` appears in the list.
+
+- [x] [P2-T8] Confirm the AC8 four-layer tie-out verification path is preserved by re-running only the tie-out module under coverage. Command: `env -u VIRTUAL_ENV poetry run pytest tests/test_mix_rollups_tieout.py -v`. Write to `evidence/regression-testing/ac8-tieout-postsplit.2026-05-27T22-40.md` with `Timestamp:`, `Command:`, `EXIT_CODE:`, and `Output Summary:` (must list the three tie-out test names as `PASSED`). Acceptance: `EXIT_CODE: 0`; all three tests pass; no test is deselected, marked xfail, or skipped.
+
+---
+
+## Out-of-scope (explicit)
+
+The following are explicitly out of scope for this remediation cycle and MUST NOT be changed:
+
+- Any file under `src/**`.
+- `spec.md`, `issue.md`, `user-story.md` (if present), any audit document.
+- Any policy document under `.claude/rules/**` or `.github/instructions/**`.
+- The cross-feature fixture file `tests/mix_bottomsup_fixtures.py`.
+- Any other test module in `tests/**` besides the three files enumerated in Phase 1.
+- Any dependency addition or removal.
+
+## Completion criteria
+
+Remediation is complete when:
+
+1. `tests/test_mix_rollups.py`, `tests/test_mix_rollups_tieout.py`, and `tests/_mix_rollups_fixtures.py` are each at or under 500 lines.
+2. The post-split test inventory is set-equal to the pre-split inventory (no test added, removed, renamed, deselected, or skipped).
+3. Black, Ruff, and Pyright produce zero findings against the three affected files in a single clean toolchain pass.
+4. Pytest reports 220 passed, 0 failed, 0 skipped, with TOTAL line >= 85% and branch >= 75% and the three issue-#20 production files at >= their baseline coverage.
+5. No `src/**`, spec, issue.md, or policy file is modified.
+6. Every Phase 0, Phase 1, and Phase 2 task artifact exists at the canonical evidence path with all required schema fields populated.
