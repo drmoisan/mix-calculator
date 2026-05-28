@@ -434,31 +434,31 @@ project fails the tier-classification stage.
 Each acceptance criterion maps to its verifying test(s) per the research's
 AC → module/test traceability table.
 
-- [ ] **Per-input (LE, AOP, SKU_LU) select Excel file and pick worksheet tab** —
+- [x] **Per-input (LE, AOP, SKU_LU) select Excel file and pick worksheet tab** —
   verified by `test_source_selection_presenter.py`, `test_source_input_widget.py`,
   `test_workbook_reader.py`.
-- [ ] **Selecting a file populates the tab dropdown** — verified by
+- [x] **Selecting a file populates the tab dropdown** — verified by
   `test_source_selection_presenter.py` (FakeWorkbookReader returns sheet names).
-- [ ] **Optional per-input "render tab" checkbox shows a preview** — verified by
+- [x] **Optional per-input "render tab" checkbox shows a preview** — verified by
   `test_source_selection_presenter.py` and `test_preview_widget.py`.
-- [ ] **Import one or all selected files** — verified by
+- [x] **Import one or all selected files** — verified by
   `test_pipeline_presenter.py` and `test_pipeline_service.py`.
-- [ ] **Run button executes the pipeline and reports success/failure** — verified
+- [x] **Run button executes the pipeline and reports success/failure** — verified
   by `test_pipeline_presenter.py`, `test_pipeline_worker.py`, and
   `test_pipeline_service.py`.
-- [ ] **Save button persists to a SQLite `.db`** — verified by
+- [x] **Save button persists to a SQLite `.db`** — verified by
   `test_pipeline_presenter.py` and `test_pipeline_service.py`.
-- [ ] **Open button loads tables from an existing `.db`** — verified by
+- [x] **Open button loads tables from an existing `.db`** — verified by
   `test_pipeline_presenter.py` (and `db_service` coverage).
-- [ ] **Export: per-table checklist, export-all, Excel + CSV, extensible** —
+- [x] **Export: per-table checklist, export-all, Excel + CSV, extensible** —
   verified by `test_export_presenter.py`, `test_exporter_registry.py`,
   `test_excel_exporter.py`, `test_csv_exporter.py`, and `test_export_dialog.py`.
-- [ ] **Presentation logic testable without a live Qt event loop** — verified by
+- [x] **Presentation logic testable without a live Qt event loop** — verified by
   all `test_*_presenter.py` running with no `QApplication`.
-- [ ] **Qt widgets tested with the Qt test facility** — verified by
+- [x] **Qt widgets tested with the Qt test facility** — verified by
   `test_*_widget.py`, `test_export_dialog.py`, and `test_pipeline_worker.py`
   using `pytest-qt` / `qtbot` under `QT_QPA_PLATFORM=offscreen`.
-- [ ] **Full toolchain passes** (Black, Ruff, Pyright strict, Pytest) and coverage
+- [x] **Full toolchain passes** (Black, Ruff, Pyright strict, Pytest) and coverage
   meets repository thresholds (>= 85% line, >= 75% branch), with no coverage
   regression on changed lines.
 

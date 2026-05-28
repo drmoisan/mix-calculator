@@ -90,3 +90,5 @@ projects:
   src/gui/widgets/preview_widget.py: T3
   src/gui/widgets/export_dialog.py: T3
   src/gui/widgets/progress_dialog.py: T3
+  src/gui/main_window.py: T3
+  src/gui/app.py: T4

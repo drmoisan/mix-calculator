@@ -1,0 +1,169 @@
+"""Composition-root smoke test for :mod:`src.gui.app`.
+
+Runs under ``QT_QPA_PLATFORM=offscreen``. Calls :func:`build_application` (a
+thin composition helper that constructs and wires every collaborator without
+entering the blocking event loop) and asserts the ``MainWindow`` constructs
+with the real collaborators and the ``ExporterRegistry`` reports
+``["Excel", "CSV"]``. Event-driven (no waits).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
+
+from src.gui.app import build_application
+
+if TYPE_CHECKING:
+    import pytest
+    from pytestqt.qtbot import QtBot
+
+    from src.gui.services.db_service import DbService
+
+
+def test_build_application_wires_real_collaborators(qtbot: QtBot) -> None:
+    """build_application constructs MainWindow with the real services and exporters."""
+    # Arrange / Act: build the wired application without entering the event loop.
+    wired = build_application()
+    qtbot.addWidget(wired.window)
+
+    # Assert: the registry holds both concrete exporters in registration order.
+    assert wired.registry.available_formats() == ["Excel", "CSV"]
+
+    # Assert: the main window exposes the three per-input source widgets and the
+    # preview, and the export dialog lists the same formats.
+    assert wired.window.le_widget is not None
+    assert wired.window.aop_widget is not None
+    assert wired.window.skulu_widget is not None
+    assert wired.window.preview_widget is not None
+    assert wired.export_dialog.available_formats() == ["Excel", "CSV"]
+
+    # Assert: the presenters are wired (constructed without raising).
+    assert wired.le_presenter is not None
+    assert wired.aop_presenter is not None
+    assert wired.skulu_presenter is not None
+    assert wired.pipeline_presenter is not None
+    assert wired.export_presenter is not None
+
+
+def test_pipeline_presenter_uses_status_bar_via_adapter(qtbot: QtBot) -> None:
+    """The MainWindowPipelineView adapter routes pipeline outcomes to the bar.
+
+    Exercises the adapter's set_running, show_result, and show_error paths
+    directly through a fresh PipelinePresenter wired over the adapter.
+    """
+    import pandas as pd
+
+    from src.gui.app import MainWindowPipelineView
+    from src.gui.main_window import MainWindow
+    from src.gui.pipeline_service import PipelineService
+    from tests.gui.fakes.fake_services import FakeDbService, FakePipelineService
+
+    # Arrange: a fresh window, the public adapter, and a fake pipeline service
+    # with a successful run result so on_run can set/clear the running flag.
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+    service = FakePipelineService(
+        import_result={
+            "LE": pd.DataFrame({"KEY": ["k1"]}),
+            "aop": pd.DataFrame({"KEY": ["k1"]}),
+            "sku_lu": pd.DataFrame({"SKU": ["SKU-001"]}),
+        },
+        run_result={"mix_rollup_4": pd.DataFrame({"value": [1.0]})},
+    )
+    presenter_view = adapter
+    from src.gui.presenters.pipeline_presenter import PipelinePresenter
+
+    presenter = PipelinePresenter(presenter_view, service)
+
+    # Act 1 — guarded Run with no imports reports an error via show_error.
+    presenter.on_run()
+
+    # Assert 1
+    assert "Run is unavailable" in window.statusBar().currentMessage()
+
+    # Act 2 — import then run; the adapter must set_running(True) then (False)
+    # and finally show_result via the success summary.
+    from src.gui.pipeline_service import ImportSpec
+
+    presenter.on_import_all(
+        ImportSpec(
+            le_path="le.xlsx",
+            le_sheet="LE-8 + 4",
+            aop_path="aop.xlsx",
+            aop_sheet="AOP1",
+            skulu_path="sku.xlsx",
+            skulu_sheet="SKU_LU",
+        )
+    )
+    presenter.on_run()
+
+    # Assert 2: show_result routed a success summary to the status bar.
+    assert "Run complete" in window.statusBar().currentMessage()
+
+    # Act 3 — drive on_save with a FakeDbService so the adapter's show_result
+    # branch is exercised for save too (FakePipelineService doesn't call DbService).
+    # FakeDbService is structurally compatible with DbService (save_tables,
+    # open_tables); cast at the injection point since DbService isn't a Protocol.
+    # The `DbService` name is referenced only in the cast's string form, so it
+    # lives in the TYPE_CHECKING import block.
+    presenter_with_db = PipelinePresenter(
+        adapter, PipelineService(db_service=cast("DbService", FakeDbService()))
+    )
+    presenter_with_db.on_save("results.db")
+
+    # Assert 3: save success summary surfaced via the adapter.
+    assert "Saved" in window.statusBar().currentMessage()
+    # Keep references to silence type checks that complain about unused names.
+    del service
+
+
+def test_main_window_set_status_updates_status_bar(qtbot: QtBot) -> None:
+    """set_status updates the QStatusBar message text directly."""
+    # Arrange
+    wired = build_application()
+    qtbot.addWidget(wired.window)
+
+    # Act
+    wired.window.set_status("Ready")
+
+    # Assert
+    assert wired.window.statusBar().currentMessage() == "Ready"
+
+
+def test_main_entry_point_runs_event_loop(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """main() bootstraps Qt and enters the event loop, returning its exit code.
+
+    Exercises the ``main`` entry without actually blocking by patching the
+    Qt ``QApplication.exec`` to return immediately and reusing the pytest-qt
+    managed application instance.
+    """
+    # Arrange: the qtbot fixture ensures a QApplication exists; patch exec on it
+    # to return immediately, and patch QApplication construction in main to
+    # return that same instance instead of creating a second one.
+    del qtbot  # qtbot ensures QApplication exists for pytest-qt
+
+    from PySide6.QtWidgets import QApplication
+
+    from src.gui import app as app_module
+
+    raw_instance = QApplication.instance()
+    assert raw_instance is not None
+    instance = cast("QApplication", raw_instance)
+
+    def _instant_exec(_self: QApplication) -> int:
+        return 0
+
+    def _existing_qapp(_args: list[str]) -> QApplication:
+        return instance
+
+    monkeypatch.setattr(QApplication, "exec", _instant_exec)
+    monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
+
+    # Act
+    exit_code = app_module.main([])
+
+    # Assert
+    assert exit_code == 0

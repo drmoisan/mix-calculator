@@ -53,25 +53,25 @@ established in `src/`. High-level capabilities:
 
 ## Acceptance Criteria (early draft)
 
-- [ ] For each input table (LE, AOP, SKU_LU) the user can select an Excel file
+- [x] For each input table (LE, AOP, SKU_LU) the user can select an Excel file
       and pick the worksheet tab for that input.
-- [ ] Selecting an Excel file populates a dropdown of that workbook's worksheet
+- [x] Selecting an Excel file populates a dropdown of that workbook's worksheet
       tabs.
-- [ ] An optional per-input "render tab" checkbox shows a preview image of the
+- [x] An optional per-input "render tab" checkbox shows a preview image of the
       selected worksheet's contents when checked.
-- [ ] The user can import one selected file or all selected files.
-- [ ] After import, a Run button executes the mix pipeline against the imported
+- [x] The user can import one selected file or all selected files.
+- [x] After import, a Run button executes the mix pipeline against the imported
       inputs and reports success/failure.
-- [ ] A Save button persists the working data to a SQLite `.db` file.
-- [ ] An Open button loads tables from an existing `.db` file.
-- [ ] An Export action exports selected tables to Excel and CSV, with a
+- [x] A Save button persists the working data to a SQLite `.db` file.
+- [x] An Open button loads tables from an existing `.db` file.
+- [x] An Export action exports selected tables to Excel and CSV, with a
       per-table checklist and an "export all" control; the export format set is
       extensible.
-- [ ] Presentation logic is separated from Qt widgets and services are injected,
+- [x] Presentation logic is separated from Qt widgets and services are injected,
       so view-models/controllers are unit-testable without a live Qt event loop
       where practical, and Qt widgets are tested with the project's Qt test
       facility.
-- [ ] The full toolchain (Black, Ruff, Pyright strict, Pytest with coverage
+- [x] The full toolchain (Black, Ruff, Pyright strict, Pytest with coverage
       thresholds) passes, and coverage meets the repository thresholds
       (>= 85% line, >= 75% branch).
 

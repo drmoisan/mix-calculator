@@ -134,6 +134,59 @@ fixtures, or docs; only fabricated examples (for example `SKU-001`, `Widget A`,
 See [docs/features/active/2026-05-26-mix-decomp-transforms-9/](docs/features/active/2026-05-26-mix-decomp-transforms-9/)
 for the full specification and acceptance criteria (issue #9).
 
+## Mix Pipeline GUI (`mix-pipeline-gui`)
+
+`src/gui/` provides a PySide6 desktop GUI for the mix-decomposition pipeline.
+It uses an MVP (Model-View-Presenter) passive-view structure: presenters hold
+the GUI logic (no Qt imports), widgets are thin views, and services
+(`PipelineService`, `WorkbookReader`, `DbService`, `ExporterRegistry`) are
+constructor-injected at the composition root. The existing `mix-pipeline` CLI is
+unchanged; the GUI calls the same loaders and transform chain through a service
+seam.
+
+```sh
+poetry run mix-pipeline-gui
+```
+
+The main window hosts a per-input file/sheet selector for LE, AOP, and SKU_LU
+with the default sheet names pre-filled:
+
+- LE default sheet: `"LE-8 + 4"`
+- AOP default sheet: `"AOP1"`
+- SKU_LU default sheet: `"SKU_LU"`
+
+Workflow:
+
+1. Select an Excel workbook and pick a worksheet tab for each input. Selecting a
+   file populates the tab dropdown. An optional "render tab" checkbox shows a
+   bounded preview (200 rows) of the chosen tab.
+2. Import one selected input or all selected inputs.
+3. Run the pipeline. The run executes off the UI thread via a `QObject` worker
+   on a `QThread`; the status bar reflects the running state.
+4. Save the working tables to a SQLite `.db` file. Save uses `if_exists="replace"`
+   table semantics, matching the CLI output sink.
+5. Open an existing `.db` to repopulate the working tables.
+6. Export selected tables via the Export dialog (per-table checklist plus an
+   Export-All control). Excel writes one worksheet per selected table; CSV writes
+   one CSV file per selected table into a destination directory. The format set
+   is extensible by registering a new exporter — no presenter change required.
+
+Headless testing uses the offscreen Qt platform plugin:
+
+```sh
+QT_QPA_PLATFORM=offscreen poetry run pytest tests/gui
+```
+
+The repository's `tests/gui/conftest.py` pins `QT_QPA_PLATFORM=offscreen` for
+the whole session so widget and worker tests run without a display server.
+
+Example values throughout the GUI tests and docs are fabricated only (for
+example `Acme Foods`, `SKU-001`, `Widget A`, `Category X`); no confidential
+`SKU Description` or `Category` values appear.
+
+See [docs/features/active/2026-05-27-mix-pipeline-gui-19/](docs/features/active/2026-05-27-mix-pipeline-gui-19/)
+for the full specification and acceptance criteria (issue #19).
+
 ## Development
 
 This project uses [Poetry](https://python-poetry.org/) with an in-project
