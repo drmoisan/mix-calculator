@@ -96,12 +96,29 @@ poetry run python -m src.mix_pipeline --input <workbook.xlsx> --output <database
   command exits `0` on success and `1` on a loader column/`KEY`/validation
   failure.
 
-The pipeline writes the two import tables (`aop`, `LE`) plus nineteen derived
+The pipeline writes the two import tables (`aop`, `LE`) plus twenty derived
 tables: `le_wide`, `aop_wide`, `customer_lu`, `sku_lu`, `aop_norm`, `le_norm`,
 `aop_vs_le`, `mix_base`, `rate_impacts`, `mix_rollup_1`, `mix_1_sku`,
 `mix_rollup_2`, `mix_2_category`, `mix_rollup_3`, `mix_3_customer`,
-`mix_rollup_4` (a single-row scalar table), `mix_4_country`, `mix_0_detail`, and
-`q1_results_by_sku`.
+`mix_rollup_4` (a single-row scalar table), `mix_4_country`, `mix_0_detail`,
+`q1_results_by_sku`, and `nrr_summary` (the appended final summary table).
+
+`nrr_summary` (issue #15) replicates the workbook's `NRR_Summary` tab as a tidy
+long table built purely from the frames above (`aop_vs_le`, `rate_impacts`, and
+the four `mix_*` levels). It has one row per source-tab label, in source order,
+with columns `section` (one of `attribute_summary`, `net_revenue_realization`,
+`net_pricing_breakdown`, `mix_breakdown`, `reconciliation`), `metric` (the row
+label), `aop`, `le`, `value` (the `Abs` change or `NR $`), `pct` (the `%` change
+or `%NR`), and `check`. The final `Check` row carries `"CHECK"` in its `check`
+column when the realization-derived Price/Mix and the pricing-plus-mix build-up
+reconcile (for both `NR $` and `%NR`), and `"ERROR"` otherwise. Example shape
+(fabricated values):
+
+| section | metric | aop | le | value | pct | check |
+| --- | --- | --- | --- | --- | --- | --- |
+| attribute_summary | Net-Revenue $ | 100.0 | 130.0 | 30.0 | 0.30 | |
+| net_revenue_realization | Price/Mix | | | 10.0 | 0.10 | |
+| reconciliation | Check | | | | | CHECK |
 
 Confidentiality: the source workbooks (for example
 `artifacts/LE v AOP Gross to Net Decomp.xlsx`, `artifacts/Input Files.xlsx`) and

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.mix_nrr_summary import build_nrr_summary
 from src.mix_q1 import build_q1_results_by_sku
 from src.mix_rate_impacts import build_rate_impacts
 from src.mix_rollups import (
@@ -58,7 +59,8 @@ def run_transforms(
         evaluation order, covering ``rate_impacts``, ``mix_rollup_1``,
         ``mix_1_sku``, ``mix_rollup_2``, ``mix_2_category``, ``mix_rollup_3``,
         ``mix_3_customer``, ``mix_rollup_4`` (single-row), ``mix_4_country``,
-        ``mix_0_detail``, and ``q1_results_by_sku``.
+        ``mix_0_detail``, ``q1_results_by_sku``, and ``nrr_summary`` (the final
+        derived summary table, issue #15).
     """
     # Step 9: rate impacts for the normal lines.
     rate_impacts = build_rate_impacts(aop_vs_le, sku_lu)
@@ -79,6 +81,18 @@ def run_transforms(
     # Step 19: the Q1 results-by-SKU table (separate path over the raw LE months).
     q1_results = build_q1_results_by_sku(le_raw)
 
+    # Final summary step (issue #15): the NRR summary ties the AOP-vs-LE net
+    # revenue change to its volume/pricing/mix drivers from the frames computed
+    # above. It is pure and appended as the last derived table.
+    nrr_summary = build_nrr_summary(
+        aop_vs_le,
+        rate_impacts,
+        mix_1_sku,
+        mix_2_category,
+        mix_3_customer,
+        mix_4_country,
+    )
+
     # Wrap the scalar rollup as a single-row table so it persists like the rest.
     mix_rollup_4_table = pd.DataFrame({"value": [mix_rollup_4_value]})
 
@@ -94,4 +108,5 @@ def run_transforms(
         "mix_4_country": mix_4_country,
         "mix_0_detail": mix_0_detail,
         "q1_results_by_sku": q1_results,
+        "nrr_summary": nrr_summary,
     }
