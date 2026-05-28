@@ -4,9 +4,10 @@ This module provides the ``mix-pipeline`` CLI entry point. ``main`` orchestrates
 only: it reuses the existing loaders (:mod:`src.normalize_le`, :mod:`src.load_aop`,
 :mod:`src.load_skulu`) to import the ``LE``, ``aop``, and ``sku_lu`` tables, reads
 those tables back through :mod:`src.pandas_io`, runs the pure transform functions
-in topological order (evaluation steps 1-19), and persists each of the nineteen
-derived tables. It contains no transform logic; every transform lives in the pure
-``src.mix_*`` modules and every read/write routes through ``src.pandas_io``.
+in topological order (evaluation steps 1-19 plus the issue #15 ``nrr_summary``
+final summary step), and persists each of the twenty derived tables. It contains
+no transform logic; every transform lives in the pure ``src.mix_*`` modules and
+every read/write routes through ``src.pandas_io``.
 
 The ``mix_rollup_4`` scalar is persisted as a single-row, single-column table.
 
@@ -217,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         _persist_all(con, tables)
         con.commit()
 
-        # The two import tables plus the nineteen derived tables are now present.
+        # The two import tables plus the twenty derived tables are now present.
         _print_summary(con, tables)
     finally:
         con.close()
