@@ -72,15 +72,18 @@ def run_transforms(
     # Step 9: rate impacts for the normal lines.
     rate_impacts = build_rate_impacts(aop_vs_le, sku_lu)
 
-    # Steps 10-17: the linear rollup chain. Each rollup feeds the next mix layer.
+    # Steps 10-17: the rollup chain. Each coarser mix layer aggregates the
+    # unfiltered mix_base at its own granularity (issue #20), while each rollup
+    # target remains the summed prior finer layer so the mix column stays
+    # (this layer's recomputed NPI) - (sum of finer-layer NPI).
     mix_rollup_1 = build_mix_rollup_1(rate_impacts)
     mix_1_sku = build_mix_1_sku(mix_base, mix_rollup_1)
     mix_rollup_2 = build_mix_rollup_2(mix_1_sku)
-    mix_2_category = build_mix_2_category(mix_1_sku, mix_rollup_2)
+    mix_2_category = build_mix_2_category(mix_base, mix_rollup_2)
     mix_rollup_3 = build_mix_rollup_3(mix_2_category)
-    mix_3_customer = build_mix_3_customer(mix_2_category, mix_rollup_3)
+    mix_3_customer = build_mix_3_customer(mix_base, mix_rollup_3)
     mix_rollup_4_value = build_mix_rollup_4(mix_3_customer)
-    mix_4_country = build_mix_4_country(mix_3_customer, mix_rollup_4_value)
+    mix_4_country = build_mix_4_country(mix_base, mix_rollup_4_value)
 
     # Step 18: the row-level detail table (depends on mix_base, not the chain).
     mix_0_detail = build_mix_0_detail(mix_base)

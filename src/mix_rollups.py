@@ -6,6 +6,17 @@ impact into SKU, category, customer, and country mix layers, plus the row-level
 :mod:`src._mix_rollups_helpers` so this file stays under the 500-line limit;
 this module supplies each layer's group keys and the layer-specific steps.
 
+Each mix layer aggregates the **unfiltered** ``Mix_Base`` at its own granularity
+(SKU layer at ``{Customer, Category, Country}``, category at ``{Customer,
+Country}``, customer at ``{Country}``, country at the single all-rows group)
+rather than re-aggregating the prior filtered layer (issue #20). The
+rollup-subtraction target is the prior finer layer's summed ``Calc Net Price
+Impact`` (via ``group_net_price_impact``), so each layer's mix column remains
+``(this layer's recomputed Calc Net Price Impact) - (sum of the prior finer
+layer's Calc Net Price Impact)``. Sourcing the unfiltered base retains the
+volume of single-scenario lines that the nonzero-Lbs filter drops at the SKU
+granularity.
+
 Functions provided (research §4.10-§4.17):
     - ``build_mix_rollup_1`` .. ``build_mix_rollup_3``: net-price-impact lookups.
     - ``build_mix_rollup_4``: the scalar ``float`` sum of the customer layer.
@@ -29,7 +40,6 @@ from src._mix_rollups_helpers import (
     build_mix_stage,
     group_net_price_impact,
     join_rollup_mix,
-    unstack_to_long,
 )
 from src.mix_transforms import add_ratios, fill_zero_with_avg, stack_pivot
 
@@ -101,23 +111,31 @@ def build_mix_rollup_2(mix_1_sku: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_mix_2_category(
-    mix_1_sku: pd.DataFrame,
+    mix_base: pd.DataFrame,
     mix_rollup_2: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Build the category mix layer from Mix-1-SKu and Mix-Rollup-2 (research §4.13).
+    """Build the category mix layer from ``Mix_Base`` and Mix-Rollup-2 (§4.13).
+
+    Aggregates the **unfiltered** ``Mix_Base`` at ``{Customer, Country}``
+    granularity rather than re-aggregating the already-filtered SKU layer
+    (issue #20). Re-aggregating the SKU layer dropped single-scenario lines that
+    the SKU-layer nonzero-Lbs filter removed, understating the coarser-layer LE
+    volume; sourcing ``Mix_Base`` directly retains that volume. The
+    rollup-subtraction target is unchanged: ``mix_rollup_2`` still carries the
+    summed prior-finer-layer (``Mix-1-SKu``) ``Calc Net Price Impact``.
 
     Args:
-        mix_1_sku: The SKU mix layer from :func:`build_mix_1_sku`.
-        mix_rollup_2: The Mix-Rollup-2 lookup from :func:`build_mix_rollup_2`.
+        mix_base: The enriched ``Mix_Base`` table (the unfiltered detail).
+        mix_rollup_2: The Mix-Rollup-2 lookup from :func:`build_mix_rollup_2`,
+            i.e. the summed SKU-layer net price impact by ``{Customer, Country}``.
 
     Returns:
         A DataFrame keyed by ``{Customer, Country}`` with the stacked columns,
         ``Calc Net Price Impact``, and ``Category Mix``.
     """
-    # Mix-1-SKu arrives in wide stacked form; reverse it to long AOP/LE/Diff so
-    # the shared stage can regroup it by the coarser {Customer, Country} keys.
-    long_form = unstack_to_long(mix_1_sku, ["Customer", "Category", "Country"])
-    stage = build_mix_stage(long_form, ["Customer", "Country"])
+    # Aggregate Mix_Base at {Customer, Country} so single-scenario lines dropped
+    # at the SKU layer still contribute their volume to the category aggregate.
+    stage = build_mix_stage(mix_base, ["Customer", "Country"])
     return join_rollup_mix(stage, mix_rollup_2, ["Customer", "Country"], "Category Mix")
 
 
@@ -135,15 +153,20 @@ def build_mix_rollup_3(mix_2_category: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_mix_3_customer(
-    mix_2_category: pd.DataFrame,
+    mix_base: pd.DataFrame,
     mix_rollup_3: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Build the customer mix layer from Mix-2-Category and Mix-Rollup-3 (§4.14).
+    """Build the customer mix layer from ``Mix_Base`` and Mix-Rollup-3 (§4.14).
 
-    Runs the shared Mix-N reshape grouped by ``{Country}``, applies
-    ``fill_zero_with_avg`` to both scenario ``Net Rev Per Lb`` columns so zero
-    rates do not distort the decomposition, recomputes the net price impact, then
-    joins Mix-Rollup-3 and computes ``Customer Mix``.
+    Aggregates the **unfiltered** ``Mix_Base`` at ``{Country}`` granularity
+    rather than re-aggregating the already-filtered category layer (issue #20),
+    so single-scenario lines that the SKU-layer filter dropped still reach the
+    customer-layer aggregate. Applies ``fill_zero_with_avg`` to both scenario
+    ``Net Rev Per Lb`` columns so zero rates do not distort the decomposition,
+    recomputes the net price impact, then joins Mix-Rollup-3 and computes
+    ``Customer Mix``. The rollup-subtraction target is unchanged: ``mix_rollup_3``
+    still carries the summed prior-finer-layer (``Mix-2-Category``) net price
+    impact by ``{Country}``.
 
     The derived column is named ``Customer Mix`` rather than the M source's
     "Category Mix"; the M source reuses the "Category Mix" label here, which is a
@@ -151,17 +174,16 @@ def build_mix_3_customer(
     :func:`build_mix_2_category`.
 
     Args:
-        mix_2_category: The category mix layer from :func:`build_mix_2_category`.
+        mix_base: The enriched ``Mix_Base`` table (the unfiltered detail).
         mix_rollup_3: The Mix-Rollup-3 lookup from :func:`build_mix_rollup_3`.
 
     Returns:
         A DataFrame keyed by ``{Country}`` with the stacked columns, the
         zero-filled rate, ``Calc Net Price Impact``, and ``Customer Mix``.
     """
-    # Mix-2-Category arrives in wide stacked form keyed by {Customer, Country};
-    # reverse it to long form so the shared stage can regroup it by {Country}.
-    long_form = unstack_to_long(mix_2_category, ["Customer", "Country"])
-    stage = build_mix_stage(long_form, ["Country"])
+    # Aggregate Mix_Base at {Country} so single-scenario lines dropped at the
+    # SKU layer still contribute their volume to the customer aggregate.
+    stage = build_mix_stage(mix_base, ["Country"])
     stage = _apply_fill_zero_and_recompute(stage)
     return join_rollup_mix(stage, mix_rollup_3, ["Country"], "Customer Mix")
 
@@ -179,29 +201,33 @@ def build_mix_rollup_4(mix_3_customer: pd.DataFrame) -> float:
 
 
 def build_mix_4_country(
-    mix_3_customer: pd.DataFrame,
+    mix_base: pd.DataFrame,
     mix_rollup_4: float,
 ) -> pd.DataFrame:
     """Build the country mix layer subtracting the scalar Mix-Rollup-4 (§4.16).
 
-    Runs the shared Mix-N reshape grouped by no dimension (a single all-rows
-    group), applies ``fill_zero_with_avg``, recomputes the net price impact, then
-    subtracts the broadcast scalar ``mix_rollup_4`` to produce ``Country Mix``.
+    Aggregates the **unfiltered** ``Mix_Base`` collapsed to a single all-rows
+    group rather than re-aggregating the already-filtered customer layer
+    (issue #20), so single-scenario lines that the SKU-layer filter dropped
+    still reach the country-level aggregate. Applies ``fill_zero_with_avg``,
+    recomputes the net price impact, then subtracts the broadcast scalar
+    ``mix_rollup_4`` (the summed prior-finer-layer customer net price impact) to
+    produce ``Country Mix``. The output remains a single row.
 
     Args:
-        mix_3_customer: The customer mix layer from :func:`build_mix_3_customer`.
+        mix_base: The enriched ``Mix_Base`` table (the unfiltered detail).
         mix_rollup_4: The scalar from :func:`build_mix_rollup_4`.
 
     Returns:
         A single-group DataFrame with the stacked columns, the zero-filled rate,
         ``Calc Net Price Impact``, and ``Country Mix``.
     """
-    # Mix-3-Customer arrives in wide stacked form keyed by {Country}; reverse it
-    # to long form, then group with a constant key so the shared stage collapses
-    # every row into one country-level line, dropping the synthetic key after.
-    long_form = unstack_to_long(mix_3_customer, ["Country"])
-    long_form["_all"] = "all"
-    stage = build_mix_stage(long_form, ["_all"])
+    # Group Mix_Base with a constant key so the shared stage collapses every row
+    # into one country-level line; aggregating the unfiltered detail retains the
+    # single-scenario volume. Drop the synthetic key after staging.
+    base_with_all = mix_base.copy()
+    base_with_all["_all"] = "all"
+    stage = build_mix_stage(base_with_all, ["_all"])
     stage = _apply_fill_zero_and_recompute(stage)
     stage = stage.drop(columns=["_all"])
 

@@ -6,13 +6,15 @@ This module holds the pure helpers that the Mix-1..4 rollup tables share, so tha
 nothing from :mod:`src.mix_rollups`, so the rollup builders can compose these
 helpers without an import cycle.
 
-The recurring Mix-N pattern (research §4.11, §4.13-§4.14) is: group the prior
+The recurring Mix-N pattern (research §4.11, §4.13-§4.14) is: group the source
 table by its key columns summing ``AOP``/``LE``/``Diff``; melt to a Scenario
 shape and drop ``Diff``; ``add_ratios`` for both scenarios; pivot back to
 ``AOP``/``LE`` and recompute ``Diff``; melt again and ``stack_pivot`` into wide
 ``"Attribute - Scenario"`` columns; filter to nonzero Lbs; recompute the net
 per-Lb diff and the net price impact. This module factors that shared body into
-``build_mix_stage`` so each rollup builder supplies only its group keys.
+``build_mix_stage`` so each rollup builder supplies only its group keys. Each
+mix layer aggregates the unfiltered ``Mix_Base`` at its own granularity
+(issue #20), so the layers do not re-aggregate a prior filtered layer.
 
 All column names here are schema, not secret; only the source data values are
 confidential and never appear in this module.
@@ -20,64 +22,16 @@ confidential and never appear in this module.
 
 from __future__ import annotations
 
-import pandas as pd
+from typing import TYPE_CHECKING
 
 from src.mix_transforms import add_ratios, stack_pivot
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # Attributes carried into the StackPivot for the Mix-N stages; the rate
 # decomposition only needs volume, the net per-Lb rate, and net revenue.
 _STAGE_ATTRIBUTES: list[str] = ["Lbs", "Net Rev Per Lb", "Net-Revenue $"]
-
-# The scenario suffixes a wide stacked frame carries per attribute.
-_STAGE_SCENARIOS: list[str] = ["AOP", "LE", "Diff"]
-
-
-def unstack_to_long(
-    stage: pd.DataFrame,
-    id_cols: list[str],
-) -> pd.DataFrame:
-    """Reverse a wide ``"Attribute - Scenario"`` stage into long AOP/LE/Diff form.
-
-    The Mix-N chain feeds each layer the wide stacked output of the prior layer.
-    This helper converts those ``"<Attribute> - <Scenario>"`` columns back into a
-    long ``{id_cols, Attribute, AOP, LE, Diff}`` frame so :func:`build_mix_stage`
-    can regroup it at the next level. Only the volume/net-rate/net-revenue stage
-    attributes are reconstructed; ratio columns are recomputed downstream.
-
-    Args:
-        stage: A wide stage frame from :func:`build_mix_stage`.
-        id_cols: The dimension columns to retain as the long-form identity.
-
-    Returns:
-        A long DataFrame with ``id_cols`` plus ``Attribute``, ``AOP``, ``LE``,
-        and ``Diff`` columns.
-    """
-    records: list[dict[str, object]] = []
-    id_value_lists: dict[str, list[object]] = {
-        column: stage[column].tolist() for column in id_cols
-    }
-    # Reconstruct each stage attribute's AOP/LE/Diff triple per row from the wide
-    # "<Attribute> - <Scenario>" columns produced by the prior stack_pivot.
-    for attribute in _STAGE_ATTRIBUTES:
-        scenario_lists: dict[str, list[float]] = {}
-        for scenario in _STAGE_SCENARIOS:
-            column = f"{attribute} - {scenario}"
-            if column in stage.columns:
-                scenario_lists[scenario] = [
-                    float(value) for value in stage[column].tolist()
-                ]
-            else:
-                scenario_lists[scenario] = [0.0] * len(stage)
-        for row_index in range(len(stage)):
-            record: dict[str, object] = {
-                column: id_value_lists[column][row_index] for column in id_cols
-            }
-            record["Attribute"] = attribute
-            record["AOP"] = scenario_lists["AOP"][row_index]
-            record["LE"] = scenario_lists["LE"][row_index]
-            record["Diff"] = scenario_lists["Diff"][row_index]
-            records.append(record)
-    return pd.DataFrame(records)
 
 
 def group_net_price_impact(
@@ -109,17 +63,21 @@ def build_mix_stage(
 ) -> pd.DataFrame:
     """Run the shared Mix-N reshape and net-price-impact computation.
 
-    Implements the body common to ``Mix-1-SKu``, ``Mix-2-Category``, and
-    ``Mix-3-Customer`` (research §4.11): group by ``group_keys`` plus
-    ``Attribute`` summing the scenarios, append per-scenario ratios, recompute the
-    scenario diff, stack into wide ``"Attribute - Scenario"`` columns, keep only
-    rows with nonzero AOP and LE Lbs, recompute the net per-Lb diff, and compute
-    ``Calc Net Price Impact``.
+    Implements the body common to ``Mix-1-SKu``, ``Mix-2-Category``,
+    ``Mix-3-Customer``, and ``Mix-4-Country`` (research §4.11): group by
+    ``group_keys`` plus ``Attribute`` summing the scenarios, append per-scenario
+    ratios, recompute the scenario diff, stack into wide ``"Attribute -
+    Scenario"`` columns, keep only rows with nonzero AOP and LE Lbs, recompute
+    the net per-Lb diff, and compute ``Calc Net Price Impact``.
+
+    Each mix layer supplies the unfiltered ``Mix_Base`` as ``source`` at its own
+    ``group_keys`` granularity (issue #20), so coarser layers retain volume from
+    single-scenario lines that the nonzero-Lbs filter would drop at the SKU
+    granularity.
 
     Args:
-        source: The prior table (``Mix_Base`` for Mix-1, ``Mix-1-SKu`` for Mix-2,
-            ``Mix-2-Category`` for Mix-3) carrying ``Attribute``, ``AOP``,
-            ``LE``, and ``Diff`` plus the ``group_keys`` columns.
+        source: The unfiltered ``Mix_Base`` table carrying ``Attribute``,
+            ``AOP``, ``LE``, and ``Diff`` plus the ``group_keys`` columns.
         group_keys: The dimension columns that survive this stage's grouping.
 
     Returns:
