@@ -173,3 +173,77 @@ def test_import_all_then_le_path_change_re_enables_le_and_all(qtbot: QtBot) -> N
     # AOP and SKU_LU remain disabled.
     assert wired.window.import_aop_btn.isEnabled() is False
     assert wired.window.import_skulu_btn.isEnabled() is False
+
+
+# --- Off-thread dispatch behavior: error routing, busy, messages (P3-T3) ----
+
+
+def test_le_failure_routes_message_to_status_bar(qtbot: QtBot) -> None:
+    """AC-6: a loader ValueError routes the message to the status bar."""
+    # Arrange: the LE loader raises so the error path runs.
+    service = FakePipelineService(import_result=_fake_imports())
+    service.raise_on_import = ValueError("bad LE")
+    wired = _wired(qtbot, service=service)
+
+    # Act
+    _click(qtbot, wired.window.import_le_btn)
+
+    # Assert: the status bar shows the error (the adapter prefixes "Error: ").
+    assert wired.window.statusBar().currentMessage() == "Error: bad LE"
+
+
+def test_import_one_clears_busy_after_completion(qtbot: QtBot) -> None:
+    """AC-8: the busy state is cleared once an import-one completes."""
+    # Arrange
+    wired = _wired(qtbot)
+
+    # Act
+    _click(qtbot, wired.window.import_le_btn)
+
+    # Assert: the presenter is idle after the synchronous dispatch completes.
+    assert wired.pipeline_presenter.is_running is False
+
+
+def test_import_all_failure_clears_busy_and_leaves_buttons_enabled(
+    qtbot: QtBot,
+) -> None:
+    """AC-6/AC-8: a bulk ValueError clears busy and re-enables the buttons."""
+    # Arrange: the bulk loader raises.
+    service = FakePipelineService(import_result=_fake_imports())
+    service.raise_on_import = ValueError("combined invalid")
+    wired = _wired(qtbot, service=service)
+
+    # Act
+    _click(qtbot, wired.window.import_all_btn)
+
+    # Assert: error routed, busy cleared, and the buttons re-enabled for retry.
+    assert wired.window.statusBar().currentMessage() == "Error: combined invalid"
+    assert wired.pipeline_presenter.is_running is False
+    assert wired.window.import_all_btn.isEnabled() is True
+    assert wired.window.import_le_btn.isEnabled() is True
+    assert wired.window.import_aop_btn.isEnabled() is True
+    assert wired.window.import_skulu_btn.isEnabled() is True
+
+
+def test_import_one_success_shows_completion_message(qtbot: QtBot) -> None:
+    """AC-9: a successful import-one shows the completion message in the status bar."""
+    # Arrange
+    wired = _wired(qtbot)
+
+    # Act
+    _click(qtbot, wired.window.import_le_btn)
+
+    # Assert: the import-one completion message reaches the status bar.
+    assert wired.window.statusBar().currentMessage() == "Imported LE."
+
+
+def test_import_all_success_shows_completion_message(qtbot: QtBot) -> None:
+    """AC-10: a successful import-all shows the completion message in the status bar."""
+    # Arrange
+    wired = _wired(qtbot)
+
+    # Act
+    _click(qtbot, wired.window.import_all_btn)
+
+    # Assert: the import-all completion message reaches the status bar.
+    assert wired.window.statusBar().currentMessage() == "Imported all 3 sources."

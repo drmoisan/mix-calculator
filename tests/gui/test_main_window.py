@@ -88,3 +88,33 @@ def test_main_window_exposes_export_btn_publicly(qtbot: QtBot) -> None:
 
     assert hasattr(window, "export_btn")
     assert window.export_btn.isEnabled() is True
+
+
+def test_per_input_import_buttons_live_in_source_widgets_not_control_row(
+    qtbot: QtBot,
+) -> None:
+    """AC12/AC13: per-input Import buttons are children of their source widgets.
+
+    The three per-input Import buttons must be owned by their source widgets
+    (so they render beside each input) rather than the global control row, while
+    Import All remains a direct child of the main window's central area.
+    """
+    # Arrange
+    from PySide6.QtWidgets import QPushButton
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    # Assert: each per-input button is a descendant of its own source widget.
+    assert window.import_le_btn in window.le_widget.findChildren(QPushButton)
+    assert window.import_aop_btn in window.aop_widget.findChildren(QPushButton)
+    assert window.import_skulu_btn in window.skulu_widget.findChildren(QPushButton)
+
+    # Assert: the per-input buttons are NOT owned by any other source widget,
+    # confirming they were removed from the shared control row.
+    assert window.import_le_btn not in window.aop_widget.findChildren(QPushButton)
+    assert window.import_aop_btn not in window.skulu_widget.findChildren(QPushButton)
+
+    # Assert: Import All is not inside any source widget (it stays in the row).
+    for widget in (window.le_widget, window.aop_widget, window.skulu_widget):
+        assert window.import_all_btn not in widget.findChildren(QPushButton)

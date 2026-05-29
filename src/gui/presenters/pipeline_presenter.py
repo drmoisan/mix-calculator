@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from src.gui.presenters import import_dispatch
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -141,26 +143,6 @@ class PipelinePresenter:
         """Return whether a pipeline or import job is in flight."""
         return self._is_running
 
-    def _resolve_path_for_key(self, key: str, spec: ImportSpec) -> str:
-        """Return the source path the spec carries for an import key.
-
-        Args:
-            key: ``"LE"``, ``"aop"``, or ``"sku_lu"``.
-            spec: The per-input file/sheet selection.
-
-        Returns:
-            The path that the matching loader will read. For ``"sku_lu"`` the
-            spec may carry an empty ``skulu_path`` in which case the LE path is
-            substituted, matching :meth:`_import_one_frame`.
-        """
-        if key == "LE":
-            return spec.le_path
-        if key == "aop":
-            return spec.aop_path
-        if key == "sku_lu":
-            return spec.skulu_path if spec.skulu_path else spec.le_path
-        raise KeyError(f"Unknown import key {key!r}.")
-
     def on_file_path_changed(self, key: str, path: str) -> None:
         """Re-enable the keyed import button when the user picks a new source.
 
@@ -183,113 +165,135 @@ class PipelinePresenter:
         if path != self._last_imported_path.get(key):
             self._view.set_import_button_enabled(key, True)
 
-    def _push_action_enabled_states(self) -> None:
+    def push_action_enabled_states(self) -> None:
         """Push Save/Export enabled flags based on the working-table set.
 
         Save and Export are enabled iff there is at least one working table
         (imports or derived). Run uses ``can_run()`` which is pushed from the
-        per-import success path so a partial import enables Run.
+        per-import success path so a partial import enables Run. Public because
+        the import dispatch callbacks recompute these states on completion.
         """
         has_working = bool(self.working_tables)
         self._view.set_save_button_enabled(has_working)
         self._view.set_export_button_enabled(has_working)
 
+    # --- ImportDispatchContext surface -------------------------------------
+    # These public members let src.gui.presenters.import_dispatch apply an
+    # import outcome without reaching into this presenter's private state. The
+    # presenter therefore structurally satisfies ImportDispatchContext. The
+    # delegators below are thin wrappers; their behavior lives in import_dispatch.
+
+    @property
+    def view(self) -> PipelineViewProtocol:
+        """Return the passive pipeline view the dispatch callbacks update."""
+        return self._view
+
+    @property
+    def service(self) -> PipelineServiceProtocol:
+        """Return the pipeline service seam the import tasks call."""
+        return self._service
+
+    def record_one_import_result(
+        self, name: str, spec: ImportSpec, frame: pd.DataFrame
+    ) -> None:
+        """Record one import's frame/spec/path; invalidate derived tables."""
+        self._imported_tables[name] = frame
+        self._import_specs[name] = spec
+        self._last_imported_path[name] = import_dispatch.resolve_path_for_key(
+            name, spec
+        )
+        # Derived-table invalidation rule: a fresh import rebuilds downstream.
+        self._derived_tables = {}
+
+    def record_all_import_result(
+        self, spec: ImportSpec, frames: dict[str, pd.DataFrame]
+    ) -> None:
+        """Record an import-all result; invalidate derived tables (private state)."""
+        self._imported_tables = dict(frames)
+        # Record the spec and resolved path for each known key in one pass.
+        for name in _IMPORT_KEYS:
+            self._import_specs[name] = spec
+            self._last_imported_path[name] = import_dispatch.resolve_path_for_key(
+                name, spec
+            )
+        self._derived_tables = {}
+
+    def set_busy(self, is_running: bool) -> None:
+        """Public alias for the busy-flag setter used by the dispatch callbacks."""
+        self._set_running(is_running)
+
+    # --- Off-thread import dispatch (Change 2/3) ---------------------------
+    # Thin delegators onto src.gui.presenters.import_dispatch so the composition
+    # root can build import tasks and route runner success/error callbacks the
+    # same way the Run path does. Behavior and side effects are documented on the
+    # delegate functions; these wrappers only forward to them.
+
+    def make_import_one_task(
+        self, name: str, spec: ImportSpec
+    ) -> Callable[[], dict[str, pd.DataFrame]]:
+        """Build a one-key import task (thin wrapper; loader ValueError propagates)."""
+        return import_dispatch.build_import_one_task(self, name, spec)
+
+    def on_import_one_success(
+        self, name: str, spec: ImportSpec, result: dict[str, pd.DataFrame]
+    ) -> None:
+        """Apply a one-key import success (thin wrapper; records frame, message)."""
+        import_dispatch.handle_import_one_success(self, name, spec, result)
+
+    def on_import_one_error(self, message: str) -> None:
+        """Apply a one-key import error (thin wrapper; show_error, button kept)."""
+        import_dispatch.handle_import_one_error(self, message)
+
+    def make_import_all_task(
+        self, spec: ImportSpec
+    ) -> Callable[[], dict[str, pd.DataFrame]]:
+        """Build an import-all task (thin wrapper; service ValueError propagates)."""
+        return import_dispatch.build_import_all_task(self, spec)
+
+    def on_import_all_success(
+        self, spec: ImportSpec, result: dict[str, pd.DataFrame]
+    ) -> None:
+        """Apply an import-all success (thin wrapper; records frames, emits message)."""
+        import_dispatch.handle_import_all_success(self, spec, result)
+
+    def on_import_all_error(self, message: str) -> None:
+        """Apply an import-all error (thin wrapper; show_error, clears busy)."""
+        import_dispatch.handle_import_all_error(self, message)
+
     def on_import_one(self, name: str, spec: ImportSpec) -> None:
-        """Import one selected input and record its frame.
+        """Import one selected input synchronously (in-presenter/test path).
+
+        Thin wrapper over ``import_dispatch.run_import_one_sync``: builds the
+        one-key task, runs it inline, and routes the outcome through the shared
+        callbacks so behavior matches the off-thread path.
 
         Args:
             name: The import key (``"LE"``, ``"aop"``, or ``"sku_lu"``).
             spec: The per-input file/sheet selection.
 
         Returns:
-            ``None``.
-
-        Side effects:
-            Populates ``_imported_tables[name]`` or routes a ``ValueError`` to
-            ``view.show_error``. On success: invalidates ``_derived_tables`` per
-            spec "Derived-table invalidation rule", records the path, disables
-            the import button, and recomputes Run/Save/Export enable states.
+            ``None``. A loader ``ValueError`` routes to ``show_error``; an
+            unknown-key ``KeyError`` propagates.
         """
         logger.info("Importing one source: %r.", name)
-        # Route only the matching loader for the requested key. A loader
-        # ValueError is a user-facing condition shown via the view; the import
-        # button stays enabled so the user can retry.
-        try:
-            frame = self._import_one_frame(name, spec)
-        except ValueError as error:
-            logger.error("Import of %r failed: %s", name, error)
-            self._view.show_error(str(error))
-            return
-        self._imported_tables[name] = frame
-        self._import_specs[name] = spec
-        self._last_imported_path[name] = self._resolve_path_for_key(name, spec)
-        # Derived-table invalidation rule: a successful re-import invalidates
-        # the prior derived set so a downstream run rebuilds.
-        self._derived_tables = {}
-        self._view.set_import_button_enabled(name, False)
-        self._view.set_run_button_enabled(self.can_run())
-        self._push_action_enabled_states()
-
-    def _import_one_frame(self, name: str, spec: ImportSpec) -> pd.DataFrame:
-        """Call the loader for one import key and return its frame.
-
-        Args:
-            name: The import key to load.
-            spec: The per-input selection supplying paths and sheet names.
-
-        Returns:
-            The imported frame for ``name``.
-
-        Raises:
-            ValueError: Propagated from the loader.
-            KeyError: When ``name`` is not a known import key.
-        """
-        # Routing table: each import key maps to its loader call. Ordering is not
-        # significant; only the matching key's loader runs.
-        if name == "LE":
-            return self._service.import_le(spec.le_path, spec.le_sheet)
-        if name == "aop":
-            return self._service.import_aop(spec.aop_path, spec.aop_sheet)
-        if name == "sku_lu":
-            skulu_path = spec.skulu_path if spec.skulu_path else spec.le_path
-            return self._service.import_skulu(skulu_path, spec.skulu_sheet)
-        raise KeyError(f"Unknown import key {name!r}.")
+        import_dispatch.run_import_one_sync(self, name, spec)
 
     def on_import_all(self, spec: ImportSpec) -> None:
-        """Import all three inputs and record their frames.
+        """Import all three inputs synchronously (in-presenter/test path).
 
-        On full success every keyed import button is disabled and Run is
-        enabled. A bulk-service ``ValueError`` surfaces via
-        ``view.show_error`` and leaves the prior state in place (button states
-        are not flipped).
+        Thin wrapper over ``import_dispatch.run_import_all_sync``: builds the
+        bulk task, runs it inline, and routes the outcome through the shared
+        callbacks.
 
         Args:
             spec: The per-input file/sheet selection.
 
         Returns:
-            ``None``.
-
-        Side effects:
-            Populates ``_imported_tables`` on full success, records per-key
-            last-imported paths, disables imported-key buttons, invalidates
-            derived tables, and pushes Run/Save/Export states.
+            ``None``. A service ``ValueError`` routes to ``show_error`` and
+            leaves prior button states.
         """
         logger.info("Importing all sources.")
-        try:
-            tables = self._service.import_sources(spec)
-        except ValueError as error:
-            logger.error("Import-all failed: %s", error)
-            self._view.show_error(str(error))
-            return
-        self._imported_tables = dict(tables)
-        for name in _IMPORT_KEYS:
-            self._import_specs[name] = spec
-            self._last_imported_path[name] = self._resolve_path_for_key(name, spec)
-            self._view.set_import_button_enabled(name, False)
-        # Derived-table invalidation rule applies to import-all as well.
-        self._derived_tables = {}
-        self._view.set_run_button_enabled(self.can_run())
-        self._push_action_enabled_states()
+        import_dispatch.run_import_all_sync(self, spec)
 
     def can_run(self) -> bool:
         """Return whether Run is permitted (non-empty working set, not running).
@@ -366,7 +370,7 @@ class PipelinePresenter:
         """
         self._derived_tables = dict(derived)
         self._view.show_result(f"Run complete: {len(derived)} derived tables.")
-        self._push_action_enabled_states()
+        self.push_action_enabled_states()
 
     def on_run_success(self, derived: dict[str, pd.DataFrame]) -> None:
         """Handle a successful worker run; record result and re-enable Run.
@@ -468,7 +472,7 @@ class PipelinePresenter:
                 self._view.set_import_button_enabled(key, False)
         self._view.show_result(f"Opened {len(tables)} tables from {path}.")
         self._view.set_run_button_enabled(self.can_run())
-        self._push_action_enabled_states()
+        self.push_action_enabled_states()
 
     def _set_running(self, is_running: bool) -> None:
         """Update the running flag and notify the view.

@@ -242,3 +242,89 @@ def test_on_run_error_surfaces_message_and_re_enables_run() -> None:
     assert view.errors == ["boom"]
     assert view.running_states[-1] is False
     assert view.run_button_states.count(True) == 1
+
+
+# --- Off-thread import-all surface (P2-T4) ---------------------------------
+
+
+def test_make_import_all_task_returns_callable_producing_three_frames() -> None:
+    """make_import_all_task returns a callable producing the three-entry dict."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+
+    # Act
+    task = presenter.make_import_all_task(_spec())
+    result = task()
+
+    # Assert: the bulk loader produced all three import keys.
+    assert set(result) == {"LE", "aop", "sku_lu"}
+
+
+def test_on_import_all_success_records_all_and_emits_message() -> None:
+    """on_import_all_success records all frames, paths, and the completion message."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+
+    # Act
+    presenter.on_import_all_success(_spec(), _import_result())
+
+    # Assert: all frames recorded, per-key paths set, derived invalidated,
+    # three buttons disabled, completion message emitted.
+    assert set(presenter.imported_tables) == {"LE", "aop", "sku_lu"}
+    assert presenter.last_imported_path["LE"] == "le.xlsx"
+    assert presenter.last_imported_path["aop"] == "aop.xlsx"
+    assert presenter.last_imported_path["sku_lu"] == "sku.xlsx"
+    assert presenter.derived_tables == {}
+    for key in ("LE", "aop", "sku_lu"):
+        assert (key, False) in view.import_button_states
+    assert view.results[-1] == "Imported all 3 sources."
+
+
+def test_on_import_all_success_recomputes_run_save_export() -> None:
+    """on_import_all_success recomputes Run/Save/Export enable states."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+
+    # Act
+    presenter.on_import_all_success(_spec(), _import_result())
+
+    # Assert
+    assert view.run_button_states[-1] is True
+    assert view.save_button_states[-1] is True
+    assert view.export_button_states[-1] is True
+
+
+def test_on_import_all_error_routes_to_show_error_and_clears_busy() -> None:
+    """on_import_all_error shows the error and clears the busy flag."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService()
+    presenter = PipelinePresenter(view, service)
+
+    # Act
+    presenter.on_import_all_error("combined workbook invalid")
+
+    # Assert
+    assert view.errors == ["combined workbook invalid"]
+    assert view.running_states[-1] is False
+
+
+def test_import_all_brackets_running_state_true_then_false() -> None:
+    """on_import_all sets running True during dispatch and False on completion."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+
+    # Act: the synchronous wrapper brackets busy like the off-thread path.
+    presenter.on_import_all(_spec())
+
+    # Assert: the busy flag was raised then lowered, ending idle.
+    assert view.running_states == [True, False]
+    assert presenter.is_running is False

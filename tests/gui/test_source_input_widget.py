@@ -262,3 +262,30 @@ def test_render_checkbox_accessor_returns_internal_checkbox(qtbot: QtBot) -> Non
 
     # The widget's state must reflect the change made through the accessor.
     assert widget.render_checkbox.isChecked() is True
+
+
+def test_import_label_exposes_import_button_with_expected_text(qtbot: QtBot) -> None:
+    """AC11: a widget built with import_label exposes import_btn with that text."""
+    # Arrange
+    widget = SourceInputWidget("LE", import_label="Import LE")
+    qtbot.addWidget(widget)
+
+    # Act
+    button = widget.import_btn
+
+    # Assert: the button carries the label and is owned by the widget.
+    assert button.text() == "Import LE"
+    assert button.parent() is widget or button in widget.findChildren(type(button))
+
+
+def test_no_import_label_constructs_no_import_button(qtbot: QtBot) -> None:
+    """AC11: a widget built without import_label has no import button."""
+    # Arrange
+    import pytest
+
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    # Act / Assert: accessing import_btn raises the documented AttributeError.
+    with pytest.raises(AttributeError, match="without an import_label"):
+        _ = widget.import_btn

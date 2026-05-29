@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication
 
+from src.gui._import_dispatch_wiring import wire_import_dispatch
+from src.gui._render_exclusivity import wire_render_checkboxes
 from src.gui._wiring import (
     default_export_runner,
     default_open_chooser,
@@ -155,13 +157,10 @@ def wire_control_signals(
         presenters.
     """
 
-    def _handle_import_one(name: str) -> None:
-        """Route a per-input import request through the pipeline presenter."""
-        pipeline_presenter.on_import_one(name, _current_import_spec(window))
-
-    def _handle_import_all() -> None:
-        """Route the import-all request through the pipeline presenter."""
-        pipeline_presenter.on_import_all(_current_import_spec(window))
+    # Import-one/import-all dispatch is wired in a dedicated helper module so
+    # this file stays under the 500-line cap; both signals route through the
+    # injected runner there (spec section 4).
+    wire_import_dispatch(window, pipeline_presenter, runner, _current_import_spec)
 
     def _handle_run() -> None:
         """Dispatch the run task through the injected runner.
@@ -223,8 +222,7 @@ def wire_control_signals(
 
     # Connect each control-button signal to its handler closure. The closures
     # bind the presenters and choosers without exposing them on the window.
-    window.import_one_requested.connect(_handle_import_one)
-    window.import_all_requested.connect(_handle_import_all)
+    # Import-one/import-all are connected by wire_import_dispatch above.
     window.run_requested.connect(_handle_run)
     window.save_requested.connect(_handle_save)
     window.open_db_requested.connect(_handle_open_db)
@@ -334,23 +332,22 @@ def build_application(
     window.aop_widget.file_selected.connect(_aop_path_changed)
     window.skulu_widget.file_selected.connect(_skulu_path_changed)
 
-    # v2 (AC-1 preview-clear path): unchecking the Render Tab checkbox on any
-    # input clears the shared preview surface.
-    def _make_preview_clear(
-        checkbox_owner: SourceSelectionPresenter,
-    ) -> Callable[[bool], None]:
-        def _on_toggled(checked: bool) -> None:
-            if not checked:
-                checkbox_owner.on_clear_preview()
-
-        return _on_toggled
-
-    window.le_widget.render_checkbox.toggled.connect(_make_preview_clear(le_presenter))
-    window.aop_widget.render_checkbox.toggled.connect(
-        _make_preview_clear(aop_presenter)
-    )
-    window.skulu_widget.render_checkbox.toggled.connect(
-        _make_preview_clear(skulu_presenter)
+    # AC1-AC3: wire the three Render-tab checkboxes through the single
+    # composition-root entry point. It connects the preview-clear closures
+    # (fire only on uncheck so the shared preview clears) and then makes the
+    # boxes single-selection, with displaced unchecks emitting no signal so the
+    # zero-checked state stays reachable. Rationale and the blockSignals guard
+    # live in _render_exclusivity.
+    le_box = window.le_widget.render_checkbox
+    aop_box = window.aop_widget.render_checkbox
+    skulu_box = window.skulu_widget.render_checkbox
+    wire_render_checkboxes(
+        [le_box, aop_box, skulu_box],
+        [
+            le_presenter.on_clear_preview,
+            aop_presenter.on_clear_preview,
+            skulu_presenter.on_clear_preview,
+        ],
     )
 
     # Export dialog + presenter. v2: dialog has no format combo (Decision 2).
