@@ -19,7 +19,7 @@ remediation-inputs.<entry-ts>.md     (orchestrator writes from audit findings)
   -> orchestrator                     exit-check: if blocking_count == 0 exit, else cycle N+1
 ```
 
-**Why:** Confirmed by user 2026-05-28 after PR #24 (issue #19). In that session I wrote `remediation-inputs.2026-05-28T12-17.md`, then called `python-typed-engineer` directly three times in a row (initial fix, suppression cleanup, file-size split) plus a fourth direct commit for the CI Qt-libs workflow fix. No `remediation-plan.<ts>.md` was ever produced and no `atomic-executor` preflight was run. The cascading rework happened because there was no plan to constrain scope or anticipate the file-size cap and the unauthorized-suppression policy. The user's correction: the loop is mandatory and exact.
+**Why:** Confirmed by user 2026-05-28 after PR #24 (issue #19). In that session I wrote `remediation-inputs.2026-05-28T12-17.md`, then called `python-typed-engineer` directly three times in a row (initial fix, suppression cleanup, file-size split) plus a fourth direct commit (`553547d`) for the CI Qt-libs workflow fix, bypassing the audit set entirely. No `remediation-plan.<ts>.md` was ever produced and no `atomic-executor` preflight was run. The cascading rework happened because there was no plan to constrain scope or anticipate the file-size cap and the unauthorized-suppression policy. The user's correction: the loop is mandatory and exact. See [[remediation-handoff-atomic-planner]] for the full chain and the five-artifact contract.
 
 **How to apply:**
 
@@ -33,6 +33,6 @@ remediation-inputs.<entry-ts>.md     (orchestrator writes from audit findings)
 
 5. A failed required CI check after the PR is open enters the same loop. Workflow changes are implemented by `atomic-executor` running the plan, not by the orchestrator authoring the YAML. This also satisfies `.claude/rules/ci-workflows.md` and the feature-review `modified-workflow-needs-green-run` rule.
 
-6. Persist `remediation_loop.current_cycle` and `remediation_loop.cycles[]` in `orchestrator-state.json`. Each cycle entry holds `timestamp`, `inputs_path`, `plan_path`, `preflight.{iterations, final_status}`, `execution_status`, `audit_paths`, `blocking_count`, and `exit_condition_met`. The `next_step` field uses cycle-aware names: `remediation.cycle_N.plan`, `remediation.cycle_N.preflight`, `remediation.cycle_N.execute`, `remediation.cycle_N.reaudit`, `remediation.cycle_N.exit_check`.
+6. Persist `remediation_loop.current_cycle` and `remediation_loop.cycles[]` in `orchestrator-state.json`. Each cycle entry holds `timestamp`, `inputs_path`, `plan_path`, `preflight.{iterations, final_status}`, `execution_status`, `audit_paths`, `blocking_count`, and `exit_condition_met`. The `next_step` field uses cycle-aware names: `remediation.cycle_N.plan`, `remediation.cycle_N.preflight`, `remediation.cycle_N.execute`, `remediation.cycle_N.reaudit`, `remediation.cycle_N.exit_check`. The cycle-aware checkpoint shape is defined in `.claude/schemas/orchestrator-state.schema.json` and validated by `.claude/hooks/validate-orchestrator-output.ps1`.
 
 7. Exit the loop only when the most recent cycle's `blocking_count == 0` derived from the post-execution audit artifact, not by visual inspection.
