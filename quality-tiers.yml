@@ -60,3 +60,44 @@ projects:
 
   # Empty package marker / scaffolding (T4).
   src/__init__.py: T4
+
+  # PySide6 desktop GUI (issue #19). MVP passive-view structure over the existing
+  # pipeline. Tier rationale per .claude/rules/quality-tiers.md:
+  #   T2 (Core) — the PipelineService seam, view Protocols, exporter base/registry,
+  #     and the plain-Python presenters that hold the presentation logic.
+  #   T3 (Adapters & UI) — Qt widgets/dialogs, the workbook/db I/O services, the
+  #     concrete exporters, the worker, and the main window shell.
+  #   T4 (Scaffolding) — empty package markers and the app composition root.
+  src/gui/__init__.py: T4
+  src/gui/protocols.py: T2
+  src/gui/pipeline_service.py: T2
+  src/gui/services/__init__.py: T4
+  src/gui/services/workbook_reader.py: T3
+  src/gui/services/db_service.py: T3
+  src/gui/exporters/__init__.py: T4
+  src/gui/exporters/base.py: T2
+  src/gui/exporters/registry.py: T2
+  src/gui/exporters/excel_exporter.py: T3
+  src/gui/exporters/csv_exporter.py: T3
+  src/gui/presenters/__init__.py: T4
+  src/gui/presenters/source_selection_presenter.py: T2
+  src/gui/presenters/pipeline_presenter.py: T2
+  src/gui/presenters/export_presenter.py: T2
+  src/gui/workers/__init__.py: T4
+  src/gui/workers/pipeline_worker.py: T3
+  # Runner abstraction (v2 issue #19) — RunnerProtocol seam plus the threaded
+  # production runner and synchronous test seam. Classified T2-Core: it owns
+  # the dispatch contract used by AC-6 and the presenter callback routing;
+  # bugs cause behavioral regressions in Run, not data loss.
+  src/gui/runners.py: T2
+  src/gui/widgets/__init__.py: T4
+  src/gui/widgets/source_input_widget.py: T3
+  src/gui/widgets/preview_widget.py: T3
+  src/gui/widgets/export_dialog.py: T3
+  src/gui/widgets/progress_dialog.py: T3
+  src/gui/main_window.py: T3
+  src/gui/app.py: T4
+  # v2 escape hatch: composition-root chooser/runner defaults extracted from
+  # app.py to keep both modules under the 500-line cap. Same T4 scaffolding
+  # tier as app.py; both are pure composition glue with no transform logic.
+  src/gui/_wiring.py: T4
