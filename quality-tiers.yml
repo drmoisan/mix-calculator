@@ -85,6 +85,11 @@ projects:
   src/gui/presenters/export_presenter.py: T2
   src/gui/workers/__init__.py: T4
   src/gui/workers/pipeline_worker.py: T3
+  # Runner abstraction (v2 issue #19) — RunnerProtocol seam plus the threaded
+  # production runner and synchronous test seam. Classified T2-Core: it owns
+  # the dispatch contract used by AC-6 and the presenter callback routing;
+  # bugs cause behavioral regressions in Run, not data loss.
+  src/gui/runners.py: T2
   src/gui/widgets/__init__.py: T4
   src/gui/widgets/source_input_widget.py: T3
   src/gui/widgets/preview_widget.py: T3
@@ -92,3 +97,7 @@ projects:
   src/gui/widgets/progress_dialog.py: T3
   src/gui/main_window.py: T3
   src/gui/app.py: T4
+  # v2 escape hatch: composition-root chooser/runner defaults extracted from
+  # app.py to keep both modules under the 500-line cap. Same T4 scaffolding
+  # tier as app.py; both are pure composition glue with no transform logic.
+  src/gui/_wiring.py: T4

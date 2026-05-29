@@ -1,8 +1,10 @@
 """Qt tests for :mod:`src.gui.widgets.export_dialog`.
 
 Runs under ``QT_QPA_PLATFORM=offscreen``. Verifies ``set_table_list`` renders
-the checklist, ``get_selected_names`` returns checked names, ``select_all_tables``
-checks every item, and the format selector lists the constructor formats.
+the checklist, ``get_selected_names`` returns checked names, and
+``select_all_tables`` checks every item. Per v2 Decision 2, the format selector
+combo was removed from the dialog; format choice now lives in the Save dialog's
+filter and is covered by ``tests/gui/test_app_wiring_defaults.py``.
 Fabricated data only.
 """
 
@@ -20,7 +22,7 @@ if TYPE_CHECKING:
 def test_set_table_list_renders_checklist(qtbot: QtBot) -> None:
     """set_table_list adds one checkable item per name."""
     # Arrange
-    dialog = ExportDialog(["Excel", "CSV"])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
 
     # Act
@@ -33,7 +35,7 @@ def test_set_table_list_renders_checklist(qtbot: QtBot) -> None:
 def test_checking_items_then_get_selected_names_returns_checked(qtbot: QtBot) -> None:
     """Checking items then reading get_selected_names returns checked names."""
     # Arrange
-    dialog = ExportDialog(["Excel", "CSV"])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     dialog.set_table_list(["le_wide", "aop_wide", "mix_rollup_4"])
 
@@ -48,7 +50,7 @@ def test_checking_items_then_get_selected_names_returns_checked(qtbot: QtBot) ->
 def test_select_all_tables_checks_every_item(qtbot: QtBot) -> None:
     """select_all_tables checks every item; get_selected_names returns them all."""
     # Arrange
-    dialog = ExportDialog(["Excel", "CSV"])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     dialog.set_table_list(["a", "b", "c"])
 
@@ -59,21 +61,27 @@ def test_select_all_tables_checks_every_item(qtbot: QtBot) -> None:
     assert dialog.get_selected_names() == ["a", "b", "c"]
 
 
-def test_format_selector_lists_constructor_formats(qtbot: QtBot) -> None:
-    """The format dropdown lists the formats supplied to the constructor."""
-    # Arrange / Act
-    dialog = ExportDialog(["Excel", "CSV"])
-    qtbot.addWidget(dialog)
+def test_set_table_list_populates_three_checklist_items(qtbot: QtBot) -> None:
+    """Calling set_table_list(['LE', 'aop', 'sku_lu']) populates three items.
 
-    # Assert
-    assert dialog.available_formats() == ["Excel", "CSV"]
-    assert dialog.selected_format() == "Excel"
+    Then checking the first two yields ['LE', 'aop'] and select_all checks all.
+    """
+    dialog = ExportDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_table_list(["LE", "aop", "sku_lu"])
+
+    dialog.set_item_checked(0, True)
+    dialog.set_item_checked(1, True)
+    assert dialog.get_selected_names() == ["LE", "aop"]
+
+    dialog.select_all_tables()
+    assert dialog.get_selected_names() == ["LE", "aop", "sku_lu"]
 
 
 def test_set_item_checked_out_of_range_is_noop(qtbot: QtBot) -> None:
     """An out-of-range set_item_checked is a no-op (does not raise)."""
     # Arrange
-    dialog = ExportDialog(["Excel"])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     dialog.set_table_list(["a", "b"])
 

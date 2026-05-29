@@ -154,3 +154,68 @@ def test_tab_list_equals_reader_output_for_any_names(names: list[str]) -> None:
 
     # Assert: the presenter forwards exactly the reader's names, unchanged.
     assert view.tab_lists == [list(names)]
+
+
+# v2 P3-T4: preview_sink (AC-1) tests.
+
+
+def test_render_tab_with_preview_sink_pushes_rows_to_both() -> None:
+    """on_render_tab pushes the preview rows to the view and the wired sink."""
+    # Arrange
+    view = FakeSourceSelectionView()
+    sink = FakeSourceSelectionView()
+    rows = [["a", "b"], ["c", "d"]]
+    reader = FakeWorkbookReader(preview_rows=rows)
+    presenter = SourceSelectionPresenter(view, reader, preview_sink=sink)
+
+    # Act
+    presenter.on_render_tab("workbook.xlsx", "AOP1")
+
+    # Assert: both the primary view and the sink received the same rows once.
+    assert view.previews == [rows]
+    assert sink.previews == [rows]
+
+
+def test_on_clear_preview_clears_both_view_and_sink() -> None:
+    """on_clear_preview pushes ``[]`` to the view and the wired sink."""
+    # Arrange
+    view = FakeSourceSelectionView()
+    sink = FakeSourceSelectionView()
+    reader = FakeWorkbookReader()
+    presenter = SourceSelectionPresenter(view, reader, preview_sink=sink)
+
+    # Act
+    presenter.on_clear_preview()
+
+    # Assert
+    assert view.previews == [[]]
+    assert sink.previews == [[]]
+
+
+def test_render_tab_without_preview_sink_only_pushes_to_view() -> None:
+    """With ``preview_sink=None``, on_render_tab leaves the sink untouched."""
+    # Arrange
+    view = FakeSourceSelectionView()
+    rows = [["x"]]
+    reader = FakeWorkbookReader(preview_rows=rows)
+    presenter = SourceSelectionPresenter(view, reader)  # preview_sink defaults to None
+
+    # Act
+    presenter.on_render_tab("workbook.xlsx", "AOP1")
+
+    # Assert: only the primary view received the preview.
+    assert view.previews == [rows]
+
+
+def test_on_clear_preview_without_sink_only_clears_view() -> None:
+    """on_clear_preview with no sink only pushes ``[]`` to the primary view."""
+    # Arrange
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader()
+    presenter = SourceSelectionPresenter(view, reader)
+
+    # Act
+    presenter.on_clear_preview()
+
+    # Assert
+    assert view.previews == [[]]

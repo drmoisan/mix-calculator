@@ -65,6 +65,13 @@ class FakePipelineView:
         running_states: Each ``set_running`` flag, in call order.
         results: Each ``show_result`` summary, in call order.
         errors: Each ``show_error`` message, in call order.
+        import_button_states: Each ``set_import_button_enabled`` call recorded
+            as ``(key, enabled)`` in call order.
+        run_button_states: Each ``set_run_button_enabled`` flag, in call order.
+        save_button_states: Each ``set_save_button_enabled`` flag, in call
+            order.
+        export_button_states: Each ``set_export_button_enabled`` flag, in call
+            order.
     """
 
     def __init__(self) -> None:
@@ -72,6 +79,10 @@ class FakePipelineView:
         self.running_states: list[bool] = []
         self.results: list[str] = []
         self.errors: list[str] = []
+        self.import_button_states: list[tuple[str, bool]] = []
+        self.run_button_states: list[bool] = []
+        self.save_button_states: list[bool] = []
+        self.export_button_states: list[bool] = []
 
     def set_running(self, is_running: bool) -> None:
         """Record a running-state transition.
@@ -105,6 +116,51 @@ class FakePipelineView:
             ``None``.
         """
         self.errors.append(message)
+
+    def set_import_button_enabled(self, key: str, enabled: bool) -> None:
+        """Record a per-input import-button enable transition.
+
+        Args:
+            key: The import key being toggled.
+            enabled: The new enabled state.
+
+        Returns:
+            ``None``.
+        """
+        self.import_button_states.append((key, enabled))
+
+    def set_run_button_enabled(self, enabled: bool) -> None:
+        """Record a Run-button enable transition.
+
+        Args:
+            enabled: The new enabled state.
+
+        Returns:
+            ``None``.
+        """
+        self.run_button_states.append(enabled)
+
+    def set_save_button_enabled(self, enabled: bool) -> None:
+        """Record a Save-button enable transition.
+
+        Args:
+            enabled: The new enabled state.
+
+        Returns:
+            ``None``.
+        """
+        self.save_button_states.append(enabled)
+
+    def set_export_button_enabled(self, enabled: bool) -> None:
+        """Record an Export-button enable transition.
+
+        Args:
+            enabled: The new enabled state.
+
+        Returns:
+            ``None``.
+        """
+        self.export_button_states.append(enabled)
 
 
 class FakeExportView:

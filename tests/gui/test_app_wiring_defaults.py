@@ -6,23 +6,18 @@ Covers :func:`src.gui.app.default_save_chooser`,
 :func:`src.gui.app.wire_control_signals` defaults to when callers do not supply
 their own chooser/runner callables.
 
-Each test monkeypatches the :class:`QFileDialog` static factory (or the
-:class:`ExportDialog.exec` method) at the import location used by the unit
-under test, then asserts the normalization rules:
-
-* a chosen file path becomes the return value,
-* an empty path is normalized to ``None``,
-* a rejected dialog short-circuits before the destination chooser fires.
-
-Companion module :mod:`tests.gui.test_app_wiring` covers signal routing for
-:func:`wire_control_signals`. Shared test doubles live in
-:mod:`tests.gui._wiring_test_doubles`.
+v2 Decision 2: the export runner no longer reads the format off
+``ExportDialog``; it parses the Save dialog's filter string
+("Excel (*.xlsx);;CSV (*.csv)") to decide the format. These tests stub
+``QFileDialog.getSaveFileName`` to return the filter the user picked and
+assert the runner returns the matching format tuple.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.gui import _wiring as wiring_module
 from src.gui import app as app_module
 from src.gui.widgets.export_dialog import ExportDialog
 
@@ -54,8 +49,13 @@ def _stub_filename_chosen_existing_db(
 
 
 def _stub_filename_chosen_xlsx(*_args: object, **_kwargs: object) -> tuple[str, str]:
-    """Stand in for ``QFileDialog.getSaveFileName`` returning ``dest.xlsx``."""
-    return ("dest.xlsx", "")
+    """Stand in for ``QFileDialog.getSaveFileName`` returning an xlsx path/filter."""
+    return ("C:/out.xlsx", "Excel (*.xlsx)")
+
+
+def _stub_filename_chosen_csv(*_args: object, **_kwargs: object) -> tuple[str, str]:
+    """Stand in for ``QFileDialog.getSaveFileName`` returning a csv path/filter."""
+    return ("C:/out.csv", "CSV (*.csv)")
 
 
 def _stub_filename_cancelled(*_args: object, **_kwargs: object) -> tuple[str, str]:
@@ -67,16 +67,13 @@ def test_default_save_chooser_returns_path_on_selection(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The production save chooser returns the path from QFileDialog.getSaveFileName."""
-    # Arrange: a QApplication exists via qtbot; patch the static factory at the
-    # location the chooser imports it from.
     del qtbot
     monkeypatch.setattr(
-        app_module.QFileDialog,
+        wiring_module.QFileDialog,
         "getSaveFileName",
         staticmethod(_stub_filename_chosen_db),
     )
 
-    # Act + Assert
     assert app_module.default_save_chooser() == "chosen.db"
 
 
@@ -84,15 +81,13 @@ def test_default_save_chooser_returns_none_on_cancel(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty path from QFileDialog is normalized to None."""
-    # Arrange
     del qtbot
     monkeypatch.setattr(
-        app_module.QFileDialog,
+        wiring_module.QFileDialog,
         "getSaveFileName",
         staticmethod(_stub_filename_cancelled),
     )
 
-    # Act + Assert
     assert app_module.default_save_chooser() is None
 
 
@@ -100,15 +95,13 @@ def test_default_open_chooser_returns_path_on_selection(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The production open chooser returns the path from QFileDialog.getOpenFileName."""
-    # Arrange
     del qtbot
     monkeypatch.setattr(
-        app_module.QFileDialog,
+        wiring_module.QFileDialog,
         "getOpenFileName",
         staticmethod(_stub_filename_chosen_existing_db),
     )
 
-    # Act + Assert
     assert app_module.default_open_chooser() == "existing.db"
 
 
@@ -116,50 +109,60 @@ def test_default_open_chooser_returns_none_on_cancel(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An empty path from QFileDialog is normalized to None for Open."""
-    # Arrange
     del qtbot
     monkeypatch.setattr(
-        app_module.QFileDialog,
+        wiring_module.QFileDialog,
         "getOpenFileName",
         staticmethod(_stub_filename_cancelled),
     )
 
-    # Act + Assert
     assert app_module.default_open_chooser() is None
 
 
-def test_default_export_runner_returns_tuple_on_accept(
+def test_default_export_runner_returns_excel_for_xlsx_filter(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The production runner returns (format, path) when both dialogs accept."""
-    # Arrange: real ExportDialog with one format; patch its exec to return
-    # truthy, and the destination chooser to return a path.
-    dialog = ExportDialog(["Excel"])
+    """An ``"Excel (*.xlsx)"`` filter resolves to ``("Excel", path)``."""
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     monkeypatch.setattr(ExportDialog, "exec", _accept_exec)
     monkeypatch.setattr(
-        app_module.QFileDialog,
+        wiring_module.QFileDialog,
         "getSaveFileName",
         staticmethod(_stub_filename_chosen_xlsx),
     )
 
-    # Act
     result = app_module.default_export_runner(dialog)
 
-    # Assert
-    assert result == ("Excel", "dest.xlsx")
+    assert result == ("Excel", "C:/out.xlsx")
+
+
+def test_default_export_runner_returns_csv_for_csv_filter(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``"CSV (*.csv)"`` filter resolves to ``("CSV", path)``."""
+    dialog = ExportDialog()
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(ExportDialog, "exec", _accept_exec)
+    monkeypatch.setattr(
+        wiring_module.QFileDialog,
+        "getSaveFileName",
+        staticmethod(_stub_filename_chosen_csv),
+    )
+
+    result = app_module.default_export_runner(dialog)
+
+    assert result == ("CSV", "C:/out.csv")
 
 
 def test_default_export_runner_returns_none_when_dialog_rejected(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A rejected export dialog (exec returns falsy) skips the destination chooser."""
-    # Arrange
-    dialog = ExportDialog(["Excel"])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     monkeypatch.setattr(ExportDialog, "exec", _reject_exec)
 
-    # Act + Assert
     assert app_module.default_export_runner(dialog) is None
 
 
@@ -167,15 +170,13 @@ def test_default_export_runner_returns_none_when_destination_cancelled(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An accepted export dialog with a cancelled destination returns None."""
-    # Arrange
-    dialog = ExportDialog(["Excel"])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     monkeypatch.setattr(ExportDialog, "exec", _accept_exec)
     monkeypatch.setattr(
-        app_module.QFileDialog,
+        wiring_module.QFileDialog,
         "getSaveFileName",
         staticmethod(_stub_filename_cancelled),
     )
 
-    # Act + Assert
     assert app_module.default_export_runner(dialog) is None

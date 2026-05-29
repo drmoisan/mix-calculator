@@ -1,12 +1,17 @@
-"""Export dialog (checklist + format selector + export-all).
+"""Export dialog (checklist + export-all).
 
 This passive Qt dialog implements :class:`ExportViewProtocol`. It owns a
-per-table checklist (``QListWidget`` with checkable items), a format selector
-(``QComboBox``), an export-all control, and accept/cancel buttons. It contains
-no service or transform logic.
+per-table checklist (``QListWidget`` with checkable items), an export-all
+control, and accept/cancel buttons. It contains no service or transform logic.
+
+Per v2 Decision 2 (research Q5): the format-selection combo box was removed
+from this dialog. Format choice now lives in the Save file dialog's filter
+("Excel (*.xlsx);;CSV (*.csv)") that ``default_export_runner`` opens after
+this dialog is accepted; the export presenter receives the chosen format
+through the runner's return value rather than reading it off the dialog.
 
 Responsibilities:
-    - Render the table checklist and the format dropdown.
+    - Render the table checklist.
     - Report the user's checked selection.
     - Check every item on export-all.
 """
@@ -15,7 +20,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QListWidget,
@@ -32,40 +36,33 @@ class ExportDialog(QDialog):
     """Passive dialog implementing :class:`ExportViewProtocol`.
 
     Purpose:
-        Let the user pick which tables to export and which format to use.
+        Let the user pick which tables to export.
 
     Responsibilities:
-        Render the checklist, format dropdown, and export-all control; report
-        the user's selection via ``get_selected_names``.
+        Render the checklist and the export-all control; report the user's
+        selection via ``get_selected_names``. Format selection is no longer the
+        dialog's responsibility (v2 Decision 2).
 
     Usage:
         Constructed at the composition root; the export presenter pushes the
-        table list and available formats, then drives ``on_export`` against the
-        dialog's selection.
+        table list and the runner reads format/path from the post-accept Save
+        dialog.
 
     Attributes:
         _list: The checklist of table names.
-        _format_combo: The format selector dropdown.
         _select_all_button: The export-all control.
     """
 
-    def __init__(
-        self,
-        available_formats: list[str],
-        parent: QWidget | None = None,
-    ) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         """Build the dialog controls.
 
         Args:
-            available_formats: The format names to show in the dropdown.
             parent: Optional Qt parent widget.
         """
         super().__init__(parent)
         self.setWindowTitle("Export Tables")
 
         self._list = QListWidget()
-        self._format_combo = QComboBox()
-        self._format_combo.addItems(available_formats)
         self._select_all_button = QPushButton("Export All")
 
         # Standard accept/cancel buttons; the composition root reads the dialog
@@ -76,7 +73,6 @@ class ExportDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._list)
-        layout.addWidget(self._format_combo)
         layout.addWidget(self._select_all_button)
         layout.addWidget(self._buttons)
 
@@ -161,13 +157,3 @@ class ExportDialog(QDialog):
         self._list.item(index).setCheckState(
             Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
         )
-
-    def selected_format(self) -> str:
-        """Return the currently selected format name from the dropdown."""
-        return self._format_combo.currentText()
-
-    def available_formats(self) -> list[str]:
-        """Return the format names currently shown in the dropdown."""
-        return [
-            self._format_combo.itemText(i) for i in range(self._format_combo.count())
-        ]

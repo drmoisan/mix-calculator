@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.gui.app import wire_control_signals
+from src.gui.app import MainWindowPipelineView, wire_control_signals
 from src.gui.exporters.registry import ExporterRegistry
 from src.gui.main_window import MainWindow
 from src.gui.presenters.export_presenter import ExportPresenter
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
+from src.gui.runners import SynchronousRunner
 from src.gui.widgets.export_dialog import ExportDialog
 from tests.gui._wiring_test_doubles import (
     build_wired,
@@ -66,7 +67,7 @@ def test_run_signal_with_no_imports_surfaces_guard_error(qtbot: QtBot) -> None:
     fake_view = FakePipelineView()
     presenter = PipelinePresenter(fake_view, FakePipelineService())
     registry = ExporterRegistry()
-    dialog = ExportDialog([])
+    dialog = ExportDialog()
     qtbot.addWidget(dialog)
     export_presenter = ExportPresenter(dialog, registry)
     wire_control_signals(
@@ -77,6 +78,7 @@ def test_run_signal_with_no_imports_surfaces_guard_error(qtbot: QtBot) -> None:
         save_path_chooser=lambda: None,
         open_path_chooser=lambda: None,
         export_dialog_runner=lambda _d: None,
+        runner=SynchronousRunner(),
     )
 
     # Act
@@ -242,3 +244,249 @@ def test_wire_helper_reads_live_widget_state_into_spec(qtbot: QtBot) -> None:
     assert service.import_calls[-1] == ("sku_lu", "alt-sku.xlsx", "SKU_LU")
     # Reference the canonical spec helper to keep its public surface exercised.
     assert seed_import_spec().le_path == "le.xlsx"
+
+
+# v2 P2-T4: MainWindowPipelineView routing tests for the four new button methods.
+
+
+def test_adapter_set_import_button_enabled_le_routes_to_le_button(
+    qtbot: QtBot,
+) -> None:
+    """``set_import_button_enabled('LE', False)`` disables the LE import button."""
+    # Arrange
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    # Act
+    adapter.set_import_button_enabled("LE", False)
+
+    # Assert
+    assert window.import_le_btn.isEnabled() is False
+
+
+def test_adapter_set_import_button_enabled_le_re_enable(qtbot: QtBot) -> None:
+    """``set_import_button_enabled('LE', True)`` re-enables the LE button."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_import_button_enabled("LE", False)
+    adapter.set_import_button_enabled("LE", True)
+
+    assert window.import_le_btn.isEnabled() is True
+
+
+def test_adapter_set_import_button_enabled_aop_routes_to_aop_button(
+    qtbot: QtBot,
+) -> None:
+    """``set_import_button_enabled('aop', False)`` disables the AOP button."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_import_button_enabled("aop", False)
+
+    assert window.import_aop_btn.isEnabled() is False
+
+
+def test_adapter_set_import_button_enabled_sku_lu_routes_to_skulu_button(
+    qtbot: QtBot,
+) -> None:
+    """``set_import_button_enabled('sku_lu', False)`` disables the SKU_LU button."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_import_button_enabled("sku_lu", False)
+
+    assert window.import_skulu_btn.isEnabled() is False
+
+
+def test_adapter_set_import_button_unknown_key_is_no_op(qtbot: QtBot) -> None:
+    """An unknown import key leaves all four import buttons unchanged."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_import_button_enabled("unknown", False)
+
+    assert window.import_le_btn.isEnabled() is True
+    assert window.import_aop_btn.isEnabled() is True
+    assert window.import_skulu_btn.isEnabled() is True
+    assert window.import_all_btn.isEnabled() is True
+
+
+def test_adapter_import_all_recomputes_as_disjunction(qtbot: QtBot) -> None:
+    """Import-All is enabled iff any of LE/AOP/SKU_LU is enabled."""
+    # Arrange
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    # Act + Assert: disabling all three drives Import-All to False.
+    adapter.set_import_button_enabled("LE", False)
+    adapter.set_import_button_enabled("aop", False)
+    adapter.set_import_button_enabled("sku_lu", False)
+    assert window.import_all_btn.isEnabled() is False
+
+    # Re-enabling one of them drives Import-All back to True.
+    adapter.set_import_button_enabled("aop", True)
+    assert window.import_all_btn.isEnabled() is True
+
+
+def test_adapter_set_run_button_enabled_routes_to_run_btn(qtbot: QtBot) -> None:
+    """``set_run_button_enabled(False)`` disables the Run button."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_run_button_enabled(False)
+    assert window.run_btn.isEnabled() is False
+
+    adapter.set_run_button_enabled(True)
+    assert window.run_btn.isEnabled() is True
+
+
+def test_adapter_set_save_button_enabled_routes_to_save_btn(qtbot: QtBot) -> None:
+    """``set_save_button_enabled(False)`` disables the Save button."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_save_button_enabled(False)
+    assert window.save_btn.isEnabled() is False
+
+
+def test_adapter_set_export_button_enabled_routes_to_export_btn(qtbot: QtBot) -> None:
+    """``set_export_button_enabled(False)`` disables the Export button."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    adapter = MainWindowPipelineView(window)
+
+    adapter.set_export_button_enabled(False)
+    assert window.export_btn.isEnabled() is False
+
+
+# v2 P7-T2: build_application runner/chooser/service injection tests.
+
+
+def test_build_application_injects_synchronous_runner(qtbot: QtBot) -> None:
+    """``build_application(runner=SynchronousRunner())`` exposes that runner."""
+    from src.gui.app import build_application
+
+    runner = SynchronousRunner()
+    wired = build_application(runner=runner)
+    qtbot.addWidget(wired.window)
+
+    assert wired.runner is runner
+
+
+def test_build_application_defaults_to_threaded_runner(qtbot: QtBot) -> None:
+    """With ``runner=None`` the default is a ThreadedRunner."""
+    from src.gui.app import build_application
+    from src.gui.runners import ThreadedRunner
+
+    wired = build_application()
+    qtbot.addWidget(wired.window)
+
+    assert isinstance(wired.runner, ThreadedRunner)
+
+
+def test_build_application_wires_preview_sink_to_main_window_preview(
+    qtbot: QtBot,
+) -> None:
+    """Each source-selection presenter is wired to the shared PreviewWidget."""
+    from src.gui.app import build_application
+
+    wired = build_application(runner=SynchronousRunner())
+    qtbot.addWidget(wired.window)
+
+    # The presenter's preview_sink should reference the same widget the main
+    # window exposes as the shared preview.
+    assert wired.le_presenter.preview_sink is wired.window.preview_widget
+    assert wired.aop_presenter.preview_sink is wired.window.preview_widget
+    assert wired.skulu_presenter.preview_sink is wired.window.preview_widget
+
+
+def test_build_application_file_selected_triggers_on_file_path_changed(
+    qtbot: QtBot,
+) -> None:
+    """``le_widget.file_selected`` re-enables the LE import button on new path."""
+    from src.gui.app import build_application
+    from tests.gui.fakes.fake_services import FakeWorkbookReader
+
+    fake_reader = FakeWorkbookReader(sheet_names=["AOP1"])
+    wired = build_application(runner=SynchronousRunner(), workbook_reader=fake_reader)
+    qtbot.addWidget(wired.window)
+
+    # Seed the presenter's last-imported LE path so any new selection differs.
+    wired.pipeline_presenter.set_last_imported_path_for_test("LE", "old.xlsx")
+    # Disable the button first so the re-enable transition is observable.
+    wired.window.import_le_btn.setEnabled(False)
+
+    wired.window.le_widget.set_path("new.xlsx")
+
+    assert wired.window.import_le_btn.isEnabled() is True
+
+
+def test_build_application_unchecking_render_clears_preview(qtbot: QtBot) -> None:
+    """Toggling the LE render checkbox off pushes an empty preview to the sink."""
+    from src.gui.app import build_application
+
+    wired = build_application(runner=SynchronousRunner())
+    qtbot.addWidget(wired.window)
+
+    # Populate the preview directly so we can observe the clear.
+    wired.window.preview_widget.show_preview([["a", "b"]])
+    assert wired.window.preview_widget.model.rowCount() > 0
+
+    # Act: toggle on then off to drive the clear branch.
+    wired.window.le_widget.render_checkbox.setChecked(True)
+    wired.window.le_widget.render_checkbox.setChecked(False)
+
+    assert wired.window.preview_widget.model.rowCount() == 0
+
+
+def test_build_application_injects_pipeline_service_and_workbook_reader(
+    qtbot: QtBot,
+) -> None:
+    """``pipeline_service`` and ``workbook_reader`` are used when injected."""
+    from src.gui.app import build_application
+    from tests.gui.fakes.fake_services import FakePipelineService, FakeWorkbookReader
+
+    fake_service = FakePipelineService()
+    fake_reader = FakeWorkbookReader(sheet_names=["AOP1"])
+
+    wired = build_application(
+        runner=SynchronousRunner(),
+        pipeline_service=fake_service,
+        workbook_reader=fake_reader,
+    )
+    qtbot.addWidget(wired.window)
+
+    # Assert: the wired pipeline service is the injected fake, and the
+    # workbook reader is the one the presenters were constructed with.
+    assert wired.pipeline_service is fake_service
+    assert wired.le_presenter.reader is fake_reader
+
+
+def test_build_application_uses_injected_exporter_registry(qtbot: QtBot) -> None:
+    """Cycle-1 seam: injected ``exporter_registry`` honored; default kept otherwise."""
+    from io import StringIO
+
+    from src.gui.app import build_application
+    from src.gui.exporters.csv_exporter import CsvExporter
+    from src.gui.exporters.excel_exporter import ExcelExporter
+
+    injected = ExporterRegistry()
+    injected.register(ExcelExporter())
+    injected.register(CsvExporter(open_writer=lambda _path: StringIO()))
+    wired = build_application(runner=SynchronousRunner(), exporter_registry=injected)
+    qtbot.addWidget(wired.window)
+    assert wired.registry is injected
+    assert wired.registry.get("CSV") is injected.get("CSV")
+
+    wired_default = build_application(runner=SynchronousRunner())
+    qtbot.addWidget(wired_default.window)
+    assert wired_default.registry.available_formats() == ["Excel", "CSV"]

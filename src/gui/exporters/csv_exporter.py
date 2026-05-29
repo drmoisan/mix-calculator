@@ -105,12 +105,22 @@ class CsvExporter:
         selected_names: list[str],
         destination_path: str,
     ) -> None:
-        """Write each selected table to its own CSV under the destination.
+        """Write each selected table to its own CSV using the name-mangling rule.
+
+        Per v2 Decision 1 / spec section 7: ``destination_path`` is interpreted
+        as a single CSV file path the user selected from the Save dialog. The
+        exporter strips a trailing ``.csv`` (case-insensitive) to compute the
+        base name, then writes one file per selected table as
+        ``<directory>/<base>_<table>.csv``.
 
         Args:
             tables: All available tables keyed by name.
-            selected_names: The subset of table names to export.
-            destination_path: The destination directory for the per-table CSVs.
+            selected_names: The subset of table names to export. An empty
+                selection produces no output (the caller is responsible for
+                empty-selection guards).
+            destination_path: The CSV file path the user selected. The base
+                name (filename minus a trailing ``.csv``) is used as the
+                per-table file's prefix.
 
         Returns:
             ``None``.
@@ -121,11 +131,22 @@ class CsvExporter:
         Side effects:
             Writes one CSV per selected table via the injected ``open_writer``.
         """
-        # Write each selected table to its own CSV file under the destination
-        # directory, routing the write through the injected text-sink seam so
-        # tests can capture output without creating files on disk.
+        # Decompose the destination path into directory + base. The base is the
+        # filename portion with a trailing ".csv" (case-insensitive) stripped;
+        # an empty directory means the current working directory.
+        directory = os.path.dirname(destination_path)
+        filename = os.path.basename(destination_path)
+        if filename.lower().endswith(".csv"):
+            base = filename[: -len(".csv")]
+        else:
+            base = filename
+        # Write each selected table to <directory>/<base>_<table>.csv via the
+        # injected text-sink seam so tests can capture output without files.
         for name in selected_names:
-            csv_path = os.path.join(destination_path, f"{name}.csv")
+            target_name = f"{base}_{name}.csv"
+            csv_path = (
+                os.path.join(directory, target_name) if directory else target_name
+            )
             frame = cast("_FrameCsvWriter", tables[name])
             with self._open_writer(csv_path) as sink:
                 frame.to_csv(sink, index=False)

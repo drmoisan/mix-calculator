@@ -23,6 +23,7 @@ from src.gui.main_window import MainWindow
 from src.gui.pipeline_service import ImportSpec
 from src.gui.presenters.export_presenter import ExportPresenter
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
+from src.gui.runners import SynchronousRunner
 from src.gui.widgets.export_dialog import ExportDialog
 from tests.gui.fakes.fake_exporters import FakeExporter
 from tests.gui.fakes.fake_services import FakePipelineService
@@ -172,7 +173,8 @@ def build_wired(
     registry = ExporterRegistry()
     exporter = FakeExporter("Fake")
     registry.register(exporter)
-    export_dialog = ExportDialog(registry.available_formats())
+    # v2 Decision 2: ExportDialog no longer takes a format list.
+    export_dialog = ExportDialog()
     qtbot.addWidget(export_dialog)
     # Choose the test subclass for the auto-check-all path so the wiring's
     # set_available_tables call also produces a non-empty selection. The
@@ -192,6 +194,7 @@ def build_wired(
         save_path_chooser=lambda: save_path,
         open_path_chooser=lambda: open_path,
         export_dialog_runner=lambda _dialog: export_result,
+        runner=SynchronousRunner(),
     )
     return (
         window,

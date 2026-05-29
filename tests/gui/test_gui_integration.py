@@ -244,8 +244,11 @@ def test_gui_end_to_end_pipeline_round_trip(
     excel_exporter = ExcelExporter()
     excel_exporter.export(tables, export_view.get_selected_names(), excel_target)
 
-    # CSV export to a fabricated directory; the injected writer captures content.
-    export_presenter.on_export(tables, "CSV", "out-dir")
+    # CSV export to a fabricated destination path; the injected writer captures
+    # content. v2 Decision 1: the destination is now a CSV file path, not a
+    # directory; the exporter writes one file per selected table using the
+    # ``<base>_<table>.csv`` name-mangling rule (here base == "results").
+    export_presenter.on_export(tables, "CSV", "out-dir/results.csv")
 
     # Assert 3 — both exports contain the selected table.
     excel_target.seek(0)
@@ -258,7 +261,8 @@ def test_gui_end_to_end_pipeline_round_trip(
     sheet_back = read_excel_sheet(excel_target, sheet_name="mix_rollup_4", header=0)
     assert "value" in sheet_back.columns
 
-    csv_path = os.path.join("out-dir", "mix_rollup_4.csv")
+    # v2 name-mangled path: "<directory>/<base>_<table>.csv".
+    csv_path = os.path.join("out-dir", "results_mix_rollup_4.csv")
     assert csv_path in captures
     csv_back = pd.read_csv(io.StringIO(captures[csv_path].getvalue()))
     assert list(csv_back.columns) == ["value"]

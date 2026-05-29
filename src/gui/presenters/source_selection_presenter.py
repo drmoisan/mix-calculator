@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.gui.pipeline_service import ImportSpec
-    from src.gui.protocols import SourceSelectionViewProtocol
+    from src.gui.protocols import PreviewSinkProtocol, SourceSelectionViewProtocol
     from src.gui.services.workbook_reader import WorkbookReaderProtocol
 
 from src.gui.pipeline_service import ImportSpec as _ImportSpec
@@ -61,15 +61,34 @@ class SourceSelectionPresenter:
         self,
         view: SourceSelectionViewProtocol,
         workbook_reader: WorkbookReaderProtocol,
+        *,
+        preview_sink: PreviewSinkProtocol | None = None,
     ) -> None:
-        """Initialize the presenter with its view and workbook reader.
+        """Initialize the presenter with its view, reader, and optional sink.
 
         Args:
             view: The source-selection view to update.
             workbook_reader: The reader used to enumerate tabs and read previews.
+            preview_sink: Optional second view that also receives preview rows
+                via ``show_preview`` (per spec section 1 / research Q1 Option A:
+                the composition root passes the shared ``PreviewWidget`` here so
+                a render request renders into the main-window preview as well
+                as into the per-input widget's no-op sink). Defaults to
+                ``None`` (single-view behavior, the v1 contract).
         """
         self._view = view
         self._reader = workbook_reader
+        self._preview_sink = preview_sink
+
+    @property
+    def preview_sink(self) -> PreviewSinkProtocol | None:
+        """Return the wired preview sink (or ``None`` when not wired)."""
+        return self._preview_sink
+
+    @property
+    def reader(self) -> WorkbookReaderProtocol:
+        """Return the workbook reader the presenter was constructed with."""
+        return self._reader
 
     def on_file_selected(self, path: str) -> None:
         """Discover the workbook's tabs and push them to the view.
@@ -122,6 +141,29 @@ class SourceSelectionPresenter:
             self._view.show_error(str(error))
             return
         self._view.show_preview(rows)
+        # When a preview sink is wired (the composition root passes the main
+        # window's shared PreviewWidget), forward the same rows so the shared
+        # preview surface renders the request.
+        if self._preview_sink is not None:
+            self._preview_sink.show_preview(rows)
+
+    def on_clear_preview(self) -> None:
+        """Clear the preview on both the primary view and any wired sink.
+
+        Spec section 1: when the user unchecks the Render Tab checkbox, the
+        composition root invokes this path so the shared preview surface
+        returns to an empty state.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Calls ``show_preview([])`` on the primary view and, when set, on
+            the preview sink.
+        """
+        self._view.show_preview([])
+        if self._preview_sink is not None:
+            self._preview_sink.show_preview([])
 
     def build_import_spec(
         self,

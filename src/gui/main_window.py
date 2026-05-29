@@ -95,14 +95,14 @@ class MainWindow(QMainWindow):
         )
 
         # Control buttons drive the pipeline actions via signals.
-        self._import_le_btn = QPushButton("Import LE")
-        self._import_aop_btn = QPushButton("Import AOP")
-        self._import_skulu_btn = QPushButton("Import SKU_LU")
-        self._import_all_btn = QPushButton("Import All")
-        self._run_btn = QPushButton("Run")
-        self._save_btn = QPushButton("Save...")
-        self._open_btn = QPushButton("Open...")
-        self._export_btn = QPushButton("Export...")
+        self.import_le_btn = QPushButton("Import LE")
+        self.import_aop_btn = QPushButton("Import AOP")
+        self.import_skulu_btn = QPushButton("Import SKU_LU")
+        self.import_all_btn = QPushButton("Import All")
+        self.run_btn = QPushButton("Run")
+        self.save_btn = QPushButton("Save...")
+        self.open_btn = QPushButton("Open...")
+        self.export_btn = QPushButton("Export...")
 
         sources_column = QVBoxLayout()
         sources_column.addWidget(self.le_widget)
@@ -110,14 +110,14 @@ class MainWindow(QMainWindow):
         sources_column.addWidget(self.skulu_widget)
 
         controls_row = QHBoxLayout()
-        controls_row.addWidget(self._import_le_btn)
-        controls_row.addWidget(self._import_aop_btn)
-        controls_row.addWidget(self._import_skulu_btn)
-        controls_row.addWidget(self._import_all_btn)
-        controls_row.addWidget(self._run_btn)
-        controls_row.addWidget(self._save_btn)
-        controls_row.addWidget(self._open_btn)
-        controls_row.addWidget(self._export_btn)
+        controls_row.addWidget(self.import_le_btn)
+        controls_row.addWidget(self.import_aop_btn)
+        controls_row.addWidget(self.import_skulu_btn)
+        controls_row.addWidget(self.import_all_btn)
+        controls_row.addWidget(self.run_btn)
+        controls_row.addWidget(self.save_btn)
+        controls_row.addWidget(self.open_btn)
+        controls_row.addWidget(self.export_btn)
 
         body = QVBoxLayout()
         body.addLayout(sources_column)
@@ -131,20 +131,18 @@ class MainWindow(QMainWindow):
 
         # Wire each control button to its named signal so the composition root
         # can connect a single emitter per action.
-        self._import_le_btn.clicked.connect(
-            lambda: self.import_one_requested.emit("LE")
-        )
-        self._import_aop_btn.clicked.connect(
+        self.import_le_btn.clicked.connect(lambda: self.import_one_requested.emit("LE"))
+        self.import_aop_btn.clicked.connect(
             lambda: self.import_one_requested.emit("aop")
         )
-        self._import_skulu_btn.clicked.connect(
+        self.import_skulu_btn.clicked.connect(
             lambda: self.import_one_requested.emit("sku_lu")
         )
-        self._import_all_btn.clicked.connect(self.import_all_requested.emit)
-        self._run_btn.clicked.connect(self.run_requested.emit)
-        self._save_btn.clicked.connect(self.save_requested.emit)
-        self._open_btn.clicked.connect(self.open_db_requested.emit)
-        self._export_btn.clicked.connect(self.export_requested.emit)
+        self.import_all_btn.clicked.connect(self.import_all_requested.emit)
+        self.run_btn.clicked.connect(self.run_requested.emit)
+        self.save_btn.clicked.connect(self.save_requested.emit)
+        self.open_btn.clicked.connect(self.open_db_requested.emit)
+        self.export_btn.clicked.connect(self.export_requested.emit)
 
     def set_status(self, message: str) -> None:
         """Display a status-bar message.

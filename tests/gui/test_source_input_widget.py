@@ -180,3 +180,85 @@ def test_browse_button_with_canceled_dialog_does_not_emit(
     # Assert: no path is recorded and no signal fires.
     assert received == []
     assert widget.current_path() == ""
+
+
+# v2 P3-T3: re-render-on-tab-change (AC-1) tests.
+
+
+def test_tab_change_with_render_checked_re_emits_render_request(qtbot: QtBot) -> None:
+    """Changing the worksheet tab while render is checked re-emits the request."""
+    # Arrange: widget with a path, two tabs, render checkbox already checked.
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_path("workbook.xlsx")
+    widget.set_tab_list(["AOP1", "LE-8 + 4"])
+    widget.set_render_tab_checked(True)
+    # Reset the recorder after the initial check-toggle emit so we observe only
+    # the tab-change re-emit.
+    received: list[tuple[str, str]] = []
+
+    def _record(path: str, sheet: str) -> None:
+        received.append((path, sheet))
+
+    widget.render_tab_requested.connect(_record)
+
+    # Act: switch the dropdown to the second tab.
+    widget.render_checkbox.setChecked(True)  # confirm checked state stays True
+    widget.set_current_sheet("LE-8 + 4")
+
+    # Assert: a re-render request was emitted with the new sheet.
+    assert received == [("workbook.xlsx", "LE-8 + 4")]
+
+
+def test_tab_change_with_render_unchecked_does_not_emit(qtbot: QtBot) -> None:
+    """Tab changes with render unchecked do not emit a render request."""
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_path("workbook.xlsx")
+    widget.set_tab_list(["AOP1", "LE-8 + 4"])
+    # Leave the render checkbox unchecked.
+    received: list[tuple[str, str]] = []
+
+    def _record(path: str, sheet: str) -> None:
+        received.append((path, sheet))
+
+    widget.render_tab_requested.connect(_record)
+
+    # Act
+    widget.set_current_sheet("LE-8 + 4")
+
+    # Assert
+    assert received == []
+
+
+def test_tab_change_with_no_path_does_not_emit(qtbot: QtBot) -> None:
+    """Tab changes with the checkbox checked but no path do not emit."""
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_tab_list(["AOP1", "LE-8 + 4"])
+    # Check the render checkbox before any path is selected.
+    widget.set_render_tab_checked(True)
+    received: list[tuple[str, str]] = []
+
+    def _record(path: str, sheet: str) -> None:
+        received.append((path, sheet))
+
+    widget.render_tab_requested.connect(_record)
+
+    # Act: changing the tab must not fire, because no path is set.
+    widget.set_current_sheet("LE-8 + 4")
+
+    # Assert
+    assert received == []
+
+
+def test_render_checkbox_accessor_returns_internal_checkbox(qtbot: QtBot) -> None:
+    """The ``render_checkbox`` property returns the underlying QCheckBox."""
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    cb = widget.render_checkbox
+    cb.setChecked(True)
+
+    # The widget's state must reflect the change made through the accessor.
+    assert widget.render_checkbox.isChecked() is True

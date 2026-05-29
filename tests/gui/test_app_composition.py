@@ -30,12 +30,12 @@ def test_build_application_wires_real_collaborators(qtbot: QtBot) -> None:
     assert wired.registry.available_formats() == ["Excel", "CSV"]
 
     # Assert: the main window exposes the three per-input source widgets and the
-    # preview, and the export dialog lists the same formats.
+    # preview. Per v2 Decision 2 the ExportDialog no longer carries a format
+    # selector; the registry still reports the supported formats above.
     assert wired.window.le_widget is not None
     assert wired.window.aop_widget is not None
     assert wired.window.skulu_widget is not None
     assert wired.window.preview_widget is not None
-    assert wired.export_dialog.available_formats() == ["Excel", "CSV"]
 
     # Assert: the presenters are wired (constructed without raising).
     assert wired.le_presenter is not None
@@ -129,6 +129,32 @@ def test_main_window_set_status_updates_status_bar(qtbot: QtBot) -> None:
 
     # Assert
     assert wired.window.statusBar().currentMessage() == "Ready"
+
+
+def test_build_application_synchronous_runner_smoke(qtbot: QtBot) -> None:
+    """Smoke test for the v2 SynchronousRunner-injected composition path."""
+    from src.gui.app import build_application
+    from src.gui.runners import SynchronousRunner
+
+    wired = build_application(
+        runner=SynchronousRunner(),
+        save_path_chooser=lambda: None,
+        open_path_chooser=lambda: None,
+        export_dialog_runner=lambda _dialog: None,
+    )
+    qtbot.addWidget(wired.window)
+
+    # (a) The runner is the injected SynchronousRunner.
+    assert isinstance(wired.runner, SynchronousRunner)
+    # (b) All four import buttons start enabled.
+    assert wired.window.import_le_btn.isEnabled() is True
+    assert wired.window.import_aop_btn.isEnabled() is True
+    assert wired.window.import_skulu_btn.isEnabled() is True
+    assert wired.window.import_all_btn.isEnabled() is True
+    # (c) The preview model starts empty.
+    assert wired.window.preview_widget.model.rowCount() == 0
+    # (d) The exporter registry still reports both formats.
+    assert wired.registry.available_formats() == ["Excel", "CSV"]
 
 
 def test_main_entry_point_runs_event_loop(

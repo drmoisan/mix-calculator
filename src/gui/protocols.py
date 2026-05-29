@@ -22,8 +22,37 @@ from typing import Protocol, runtime_checkable
 __all__ = [
     "ExportViewProtocol",
     "PipelineViewProtocol",
+    "PreviewSinkProtocol",
     "SourceSelectionViewProtocol",
 ]
+
+
+@runtime_checkable
+class PreviewSinkProtocol(Protocol):
+    """Narrow view-sink for receiving rendered preview rows.
+
+    Purpose:
+        Decouple the preview surface the source-selection presenter pushes
+        rows to from the broader source-selection contract. Both the
+        :class:`PreviewWidget` and the per-input :class:`SourceInputWidget`
+        structurally implement this method, but the wider
+        :class:`SourceSelectionViewProtocol` carries additional members the
+        PreviewWidget does not implement.
+
+    Responsibilities:
+        Accept a ``list[list[str]]`` of preview rows and render them.
+    """
+
+    def show_preview(self, rows: list[list[str]]) -> None:
+        """Render a tabular preview of the selected worksheet tab.
+
+        Args:
+            rows: The preview rows to display.
+
+        Returns:
+            ``None``.
+        """
+        ...
 
 
 @runtime_checkable
@@ -142,6 +171,66 @@ class PipelineViewProtocol(Protocol):
 
         Side effects:
             Updates the view's error surface.
+        """
+        ...
+
+    def set_import_button_enabled(self, key: str, enabled: bool) -> None:
+        """Toggle the enabled state of one per-input import button.
+
+        Args:
+            key: The import key (``"LE"``, ``"aop"``, or ``"sku_lu"``) whose
+                button is being updated.
+            enabled: ``True`` to enable the button, ``False`` to disable it.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's per-input import button state. The view also
+            recomputes the Import-All button's enabled state as the disjunction
+            of the three per-input buttons.
+        """
+        ...
+
+    def set_run_button_enabled(self, enabled: bool) -> None:
+        """Toggle the enabled state of the Run button.
+
+        Args:
+            enabled: ``True`` to enable the Run button, ``False`` to disable it.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's Run button state.
+        """
+        ...
+
+    def set_save_button_enabled(self, enabled: bool) -> None:
+        """Toggle the enabled state of the Save button.
+
+        Args:
+            enabled: ``True`` to enable Save, ``False`` to disable it.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's Save button state.
+        """
+        ...
+
+    def set_export_button_enabled(self, enabled: bool) -> None:
+        """Toggle the enabled state of the Export button.
+
+        Args:
+            enabled: ``True`` to enable Export, ``False`` to disable it.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's Export button state.
         """
         ...
 

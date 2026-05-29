@@ -102,6 +102,19 @@ class SourceInputWidget(QWidget):
         # Wire internal controls to the widget's signal-emitting handlers.
         self._browse_button.clicked.connect(self.open_file_dialog)
         self._render_checkbox.toggled.connect(self._on_render_toggled)
+        # v2 (AC-1): when the user changes the worksheet tab while the render
+        # checkbox is checked, re-request a preview for the new sheet.
+        self._tab_combo.currentTextChanged.connect(self._on_tab_changed)
+
+    @property
+    def render_checkbox(self) -> QCheckBox:
+        """Return the underlying render-tab checkbox.
+
+        Exposed read-only so the composition root can connect to its
+        ``toggled`` signal (per spec section 1) without reaching into private
+        state. Tests use this seam to drive the toggle deterministically.
+        """
+        return self._render_checkbox
 
     def current_path(self) -> str:
         """Return the currently selected workbook path (empty if none)."""
@@ -114,6 +127,33 @@ class SourceInputWidget(QWidget):
     def error_text(self) -> str:
         """Return the current error-label text (empty when none shown)."""
         return self._error_label.text()
+
+    def set_current_sheet(self, sheet: str) -> None:
+        """Programmatically change the selected worksheet in the dropdown.
+
+        This is the public test seam used to drive ``_on_tab_changed`` without
+        reaching into private state. In production the user changes the tab
+        through the dropdown widget.
+
+        Args:
+            sheet: The worksheet name to select. Must be present in the current
+                tab list; absent names are appended to the dropdown so the
+                selection still takes effect.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the dropdown selection, which triggers
+            ``QComboBox.currentTextChanged`` and routes to ``_on_tab_changed``.
+        """
+        # Find the matching index; append the sheet if it is not present so the
+        # current selection always reflects the requested name.
+        index = self._tab_combo.findText(sheet)
+        if index < 0:
+            self._tab_combo.addItem(sheet)
+            index = self._tab_combo.findText(sheet)
+        self._tab_combo.setCurrentIndex(index)
 
     def set_render_tab_checked(self, checked: bool) -> None:
         """Programmatically toggle the render-tab checkbox.
@@ -236,3 +276,28 @@ class SourceInputWidget(QWidget):
         # selected tab; unchecking or missing selections do nothing.
         if checked and self._path and self.current_sheet():
             self.render_tab_requested.emit(self._path, self.current_sheet())
+
+    def _on_tab_changed(self, sheet: str) -> None:
+        """Re-request a preview when the user switches tabs with render on.
+
+        Per AC-1 / spec section 1: while the render checkbox is checked and the
+        widget has a valid path, switching the worksheet tab in the dropdown
+        re-emits ``render_tab_requested`` so the preview reflects the new
+        sheet.
+
+        Args:
+            sheet: The newly-selected worksheet name (may be empty when the
+                dropdown is cleared, in which case the re-render is suppressed).
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Emits ``render_tab_requested`` with the current path and the new
+            sheet when the checkbox is checked, the path is non-empty, and the
+            sheet is non-empty.
+        """
+        # The uncheck-clears-preview path is wired at the composition root, not
+        # here, so this slot only fires the positive-flow re-render request.
+        if self._render_checkbox.isChecked() and self._path and sheet:
+            self.render_tab_requested.emit(self._path, sheet)
