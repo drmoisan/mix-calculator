@@ -164,10 +164,10 @@ def test_resolve_pack_command_contains_required_argv() -> None:
 
     # Each documented flag must appear once, immediately followed by its value.
     expected_pairs = [
-        ("--packId", "mix-calculator"),
+        ("--packId", "MixCalculator"),
         ("--packVersion", "0.1.0"),
         ("--packDir", str(REPO_ROOT / "dist" / "nuitka" / "app.dist")),
-        ("--mainExe", "app.exe"),
+        ("--mainExe", "MixCalculator.exe"),
         ("--packTitle", "Mix Calculator"),
         ("--packAuthors", "Dan Moisan"),
         ("--outputDir", str(release_dir)),
@@ -198,7 +198,7 @@ def test_main_dry_run_prints_argv_and_does_not_invoke_seam(
 
     captured = capsys.readouterr()
     # Every required argv token appears in the printed line.
-    for token in ("vpk", "pack", "--packId", "mix-calculator", "--channel", "win"):
+    for token in ("vpk", "pack", "--packId", "MixCalculator", "--channel", "win"):
         assert token in captured.out
     assert len(run_recorder.calls) == 0
     assert rc == 0
@@ -337,7 +337,7 @@ def test_resolve_upload_command_argv_shape() -> None:
     expected_pairs = [
         ("--repoUrl", "https://github.com/drmoisan/mix-calculator"),
         ("--tag", "v0.1.0"),
-        ("--releaseName", "mix-calculator 0.1.0"),
+        ("--releaseName", "Mix Calculator 0.1.0"),
         ("--token", "ghp_test_TOKEN_VALUE_DO_NOT_USE"),
     ]
     for flag, value in expected_pairs:

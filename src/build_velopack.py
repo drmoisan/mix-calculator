@@ -2,9 +2,10 @@
 
 Provides a reproducible, flag-stable invocation of the Velopack CLI
 (``vpk``) wrapping ``dist/nuitka/app.dist/`` into the Velopack artifacts
-(``mix-calculator-Setup.exe``, ``mix-calculator-<version>-full.nupkg``,
+(``MixCalculator-Setup.exe``, ``MixCalculator-<version>-full.nupkg``,
 ``releases.win.json``), and optionally publishing the bundle to GitHub
-Releases.
+Releases. Velopack output filenames track ``--packId``, so the case-
+aligned packId ``MixCalculator`` flows through to the produced filenames.
 
 Surface:
     * ``build_argument_parser`` returns the AC1 argparse parser.
@@ -196,17 +197,21 @@ def resolve_pack_command(version: str, release_dir: Path) -> list[str]:
     # The argv order is part of the contract: tool, command, then the AC4
     # flag/value pairs. Path values are stringified Path objects so the
     # assertion side compares against platform-correct separators on Windows.
+    # The packId and mainExe values are aligned with the Nuitka output:
+    # ``--packId MixCalculator`` matches the case-corrected branding (the
+    # ``--packTitle`` display name is unchanged at ``Mix Calculator``), and
+    # ``--mainExe MixCalculator.exe`` matches Nuitka's ``--output-filename``.
     return [
         "vpk",
         "pack",
         "--packId",
-        "mix-calculator",
+        "MixCalculator",
         "--packVersion",
         version,
         "--packDir",
         str(REPO_ROOT / "dist" / "nuitka" / "app.dist"),
         "--mainExe",
-        "app.exe",
+        "MixCalculator.exe",
         "--packTitle",
         "Mix Calculator",
         "--packAuthors",
@@ -232,7 +237,9 @@ def resolve_upload_command(version: str, repo_url: str, token: str) -> list[str]
         The fully-resolved upload argv as a list of strings.
     """
     # ``--publish`` is a bare switch; the tag is the v-prefixed version per
-    # the GitHub Releases convention.
+    # the GitHub Releases convention. The release name uses the human-
+    # readable display string ``Mix Calculator`` (matching ``--packTitle``)
+    # rather than the packId, so GitHub Releases lists user-facing names.
     return [
         "vpk",
         "upload",
@@ -243,7 +250,7 @@ def resolve_upload_command(version: str, repo_url: str, token: str) -> list[str]
         "--tag",
         f"v{version}",
         "--releaseName",
-        f"mix-calculator {version}",
+        f"Mix Calculator {version}",
         "--token",
         token,
     ]
@@ -280,8 +287,12 @@ def _dist_velopack_exists() -> bool:
 
 
 def _app_exe_exists() -> bool:
-    """Predicate seam: return whether the Nuitka standalone exe exists."""
-    return (REPO_ROOT / "dist" / "nuitka" / "app.dist" / "app.exe").is_file()
+    """Predicate seam: return whether the Nuitka standalone exe exists.
+
+    The probed filename ``MixCalculator.exe`` tracks the
+    ``--output-filename`` Nuitka uses via ``src.build_exe.EXE_NAME``.
+    """
+    return (REPO_ROOT / "dist" / "nuitka" / "app.dist" / "MixCalculator.exe").is_file()
 
 
 def _icon_exists() -> bool:
@@ -350,7 +361,7 @@ def main(
     # non-dry runs so the seam never receives an invalid input.
     if not _app_exe_exists():
         print(
-            "Error: dist/nuitka/app.dist/app.exe is missing. Run "
+            "Error: dist/nuitka/app.dist/MixCalculator.exe is missing. Run "
             "`poetry run build-exe` first to produce the Nuitka "
             "standalone build.",
             file=sys.stderr,

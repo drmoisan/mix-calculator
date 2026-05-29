@@ -272,3 +272,130 @@ def test_main_calls_velopack_app_run_before_qapplication(
 
     # Assert: the velopack bootstrap must be the very first observable event.
     assert events[:2] == ["velopack_run", "qapplication_init"]
+
+
+def test_main_sets_window_icon_on_qapplication(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC8: main() resolves the icon path and calls setWindowIcon on the QApplication.
+
+    Patches the QIcon constructor and the resolve_icon_path helper so the
+    test asserts the path string flows through unchanged and that
+    ``setWindowIcon`` was driven with the QIcon recorder's return value.
+    """
+    del qtbot  # qtbot ensures a QApplication exists for pytest-qt
+
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    from src.gui import app as app_module
+
+    raw_instance = QApplication.instance()
+    assert raw_instance is not None
+    instance = cast("QApplication", raw_instance)
+
+    fake_icon_path = Path("/fake/icon.ico")
+    qicon_calls: list[str] = []
+    set_window_icon_args: list[object] = []
+    sentinel = object()
+
+    def _fake_qicon(path: str) -> object:
+        # Record every QIcon constructor call so the test can verify the
+        # exact path string that was passed through from resolve_icon_path.
+        qicon_calls.append(path)
+        return sentinel
+
+    def _record_set_window_icon(_self: QApplication, icon: object) -> None:
+        # The test records the icon argument so it can confirm the QIcon
+        # instance produced by the recorded constructor is the value passed
+        # to setWindowIcon.
+        set_window_icon_args.append(icon)
+
+    def _instant_exec(_self: QApplication) -> int:
+        return 0
+
+    def _existing_qapp(_args: list[str]) -> QApplication:
+        return instance
+
+    def _no_op_velopack() -> None:
+        return None
+
+    monkeypatch.setattr(app_module, "resolve_icon_path", lambda: fake_icon_path)
+    monkeypatch.setattr(app_module, "QIcon", _fake_qicon)
+    monkeypatch.setattr(QApplication, "setWindowIcon", _record_set_window_icon)
+    monkeypatch.setattr(QApplication, "exec", _instant_exec)
+    monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
+    monkeypatch.setattr(app_module, "run_velopack_bootstrap", _no_op_velopack)
+
+    # Act
+    rc = app_module.main([])
+
+    # Assert: exit was clean.
+    assert rc == 0
+    # AC8: main() drives setWindowIcon on the QApplication. The plan's
+    # P7-T5 also drives setWindowIcon inside build_application, so both
+    # paths fire here. Each call MUST construct a QIcon from the same
+    # resolved path and pass the resulting icon to setWindowIcon, so the
+    # title bar / taskbar / Alt-Tab preview pick up the icon regardless
+    # of which composition entry the caller used.
+    assert len(qicon_calls) >= 1
+    for recorded in qicon_calls:
+        assert Path(recorded) == fake_icon_path
+    assert len(set_window_icon_args) == len(qicon_calls)
+    for icon_arg in set_window_icon_args:
+        assert icon_arg is sentinel
+
+
+def test_build_application_calls_set_window_icon_when_qt_app_constructed(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC8: build_application drives setWindowIcon on the resolved QApplication.
+
+    The composition root is responsible for setting the icon on the
+    QApplication so the title bar, taskbar, and Alt-Tab preview surface
+    it. The test patches resolve_icon_path and QIcon, calls
+    build_application without supplying qt_app, and asserts the QIcon
+    constructor was driven with the resolved path string.
+    """
+    from pathlib import Path
+
+    from PySide6.QtWidgets import QApplication
+
+    from src.gui import app as app_module
+
+    raw_instance = QApplication.instance()
+    assert raw_instance is not None
+    instance = cast("QApplication", raw_instance)
+
+    fake_icon_path = Path("/fake/icon.ico")
+    qicon_calls: list[str] = []
+    set_window_icon_args: list[object] = []
+    sentinel = object()
+
+    def _fake_qicon(path: str) -> object:
+        qicon_calls.append(path)
+        return sentinel
+
+    def _record_set_window_icon(_self: QApplication, icon: object) -> None:
+        set_window_icon_args.append(icon)
+
+    def _existing_qapp(_args: list[str]) -> QApplication:
+        return instance
+
+    monkeypatch.setattr(app_module, "resolve_icon_path", lambda: fake_icon_path)
+    monkeypatch.setattr(app_module, "QIcon", _fake_qicon)
+    monkeypatch.setattr(QApplication, "setWindowIcon", _record_set_window_icon)
+    monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
+
+    # Act: build_application without an externally-managed QApplication so
+    # the function follows the construction branch and drives setWindowIcon.
+    wired = app_module.build_application()
+    qtbot.addWidget(wired.window)
+
+    # Assert: the QIcon was constructed once with the resolved string and
+    # setWindowIcon was driven once with the resulting icon object.
+    assert len(qicon_calls) == 1
+    assert Path(qicon_calls[0]) == fake_icon_path
+    assert len(set_window_icon_args) == 1
+    assert set_window_icon_args[0] is sentinel

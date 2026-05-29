@@ -153,6 +153,36 @@ def test_resolve_nuitka_command_contains_required_flags() -> None:
     assert expected_output_dir in argv
 
 
+def test_resolve_nuitka_command_contains_icon_flags() -> None:
+    """AC1: the resolved Nuitka argv contains the rename + icon flags in order.
+
+    The three required flags are ``--output-filename=MixCalculator.exe``,
+    ``--windows-icon-from-ico=<icon-abs-path>``, and
+    ``--include-data-file=<icon-abs-path>=icon.ico``. Their values are
+    string-compared against the ``REPO_ROOT``-anchored absolute paths so
+    Windows separators line up with the production string formation.
+    """
+    from src.build_exe import REPO_ROOT, resolve_nuitka_command
+
+    argv = resolve_nuitka_command()
+    icon_path = REPO_ROOT / "packaging" / "velopack" / "icon.ico"
+
+    expected_flags = [
+        "--output-filename=MixCalculator.exe",
+        f"--windows-icon-from-ico={icon_path}",
+        f"--include-data-file={icon_path}=icon.ico",
+    ]
+    # Each required flag must appear in the argv. Ordered membership is
+    # established by index comparison: the relative order matches the
+    # contract documented in the resolver.
+    indices: list[int] = []
+    for flag in expected_flags:
+        assert flag in argv, f"missing flag {flag!r} in argv {argv!r}"
+        indices.append(argv.index(flag))
+    # Strictly ascending indices verify the documented insertion order.
+    assert indices == sorted(indices)
+
+
 def test_resolve_nuitka_command_ends_with_app_entry() -> None:
     """The trailing positional must be the absolute path to ``src/gui/app.py``."""
     from src.build_exe import REPO_ROOT, resolve_nuitka_command
@@ -202,6 +232,11 @@ def test_main_dry_run_prints_argv_and_does_not_invoke_seam(
     assert "--include-package=openpyxl" in captured.out
     assert "--output-dir=" in captured.out
     assert "app.py" in captured.out
+    # AC1: the new rename + icon flags must also appear in the printed line so
+    # an inspector sees the exe name and the icon-embed wiring at a glance.
+    assert "--output-filename=MixCalculator.exe" in captured.out
+    assert "--windows-icon-from-ico=" in captured.out
+    assert "--include-data-file=" in captured.out
     # The seam must NOT fire on the dry-run path.
     assert len(run_recorder.calls) == 0
     assert rc == 0
