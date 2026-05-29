@@ -56,6 +56,9 @@ class SourceInputWidget(QWidget):
             picked.
         render_tab_requested: Emitted with ``(path, sheet)`` when the render-tab
             checkbox is checked with a selected tab.
+        _import_button: The optional per-input Import button, constructed only
+            when an ``import_label`` is supplied (issue #27 AC11). ``None`` when
+            the widget is built without an import button.
     """
 
     file_selected: Signal = Signal(str)
@@ -66,6 +69,8 @@ class SourceInputWidget(QWidget):
         input_label: str,
         default_sheet: str = "",
         parent: QWidget | None = None,
+        *,
+        import_label: str | None = None,
     ) -> None:
         """Build the widget controls.
 
@@ -73,6 +78,19 @@ class SourceInputWidget(QWidget):
             input_label: The input's display label (for example ``"LE"``).
             default_sheet: A default sheet name pre-filled in the tab dropdown.
             parent: Optional Qt parent widget.
+            import_label: Optional label for a per-input Import button. When
+                supplied (for example ``"Import LE"``), an Import button is
+                constructed inside this widget beside the render checkbox and
+                exposed via :attr:`import_btn` (issue #27 AC11). When ``None``
+                (the default), no import button is constructed.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Constructs the child controls and, when ``import_label`` is
+            supplied, an additional Import :class:`QPushButton` added to the
+            widget's layout.
         """
         super().__init__(parent)
         self._path = ""
@@ -87,6 +105,12 @@ class SourceInputWidget(QWidget):
             self._tab_combo.addItem(default_sheet)
         self._render_checkbox = QCheckBox("Render tab")
         self._error_label = QLabel("")
+        # Construct the per-input Import button only when the caller opts in by
+        # supplying an import label (issue #27 AC11); otherwise leave it None so
+        # callers that do not want an in-widget button get no extra control.
+        self._import_button = (
+            QPushButton(import_label) if import_label is not None else None
+        )
 
         file_row = QHBoxLayout()
         file_row.addWidget(QLabel(input_label))
@@ -97,6 +121,10 @@ class SourceInputWidget(QWidget):
         layout.addLayout(file_row)
         layout.addWidget(self._tab_combo)
         layout.addWidget(self._render_checkbox)
+        # Place the optional Import button beside the render checkbox so the
+        # per-input import control lives inside this widget (issue #27 AC11).
+        if self._import_button is not None:
+            layout.addWidget(self._import_button)
         layout.addWidget(self._error_label)
 
         # Wire internal controls to the widget's signal-emitting handlers.
@@ -105,6 +133,30 @@ class SourceInputWidget(QWidget):
         # v2 (AC-1): when the user changes the worksheet tab while the render
         # checkbox is checked, re-request a preview for the new sheet.
         self._tab_combo.currentTextChanged.connect(self._on_tab_changed)
+
+    @property
+    def import_btn(self) -> QPushButton:
+        """Return the per-input Import button.
+
+        Exposed read-only so the composition root can connect the button's
+        ``clicked`` signal and toggle its enabled state (issue #27 AC11). The
+        button exists only when the widget was constructed with an
+        ``import_label``.
+
+        Returns:
+            The Import :class:`QPushButton` owned by this widget.
+
+        Raises:
+            AttributeError: When the widget was constructed without an
+                ``import_label`` and therefore has no import button.
+        """
+        if self._import_button is None:
+            msg = (
+                "This SourceInputWidget was constructed without an import_label, "
+                "so it has no import button."
+            )
+            raise AttributeError(msg)
+        return self._import_button
 
     @property
     def render_checkbox(self) -> QCheckBox:
