@@ -55,7 +55,11 @@ class MainWindow(QMainWindow):
 
     Attributes:
         le_widget, aop_widget, skulu_widget: The three per-input source widgets.
+            Each owns its per-input Import button (issue #27 AC11).
         preview_widget: The shared tab-preview widget.
+        import_le_btn, import_aop_btn, import_skulu_btn: Read-only properties
+            resolving to each widget's owned Import button (issue #27 AC13), so
+            existing callers (the view adapter, tests) keep working unchanged.
         import_one_requested: Emitted with the import key on a per-input import.
         import_all_requested: Emitted on Import-All.
         run_requested: Emitted on Run.
@@ -83,10 +87,16 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Mix Pipeline GUI")
 
         # Per-input source widgets with the spec default sheet names pre-filled.
-        self.le_widget = SourceInputWidget("LE", default_sheet=_LE_DEFAULT_SHEET)
-        self.aop_widget = SourceInputWidget("AOP", default_sheet=_AOP_DEFAULT_SHEET)
+        # Each widget owns its per-input Import button (issue #27 AC11); the
+        # button label matches the prior standalone control's text.
+        self.le_widget = SourceInputWidget(
+            "LE", default_sheet=_LE_DEFAULT_SHEET, import_label="Import LE"
+        )
+        self.aop_widget = SourceInputWidget(
+            "AOP", default_sheet=_AOP_DEFAULT_SHEET, import_label="Import AOP"
+        )
         self.skulu_widget = SourceInputWidget(
-            "SKU_LU", default_sheet=_SKULU_DEFAULT_SHEET
+            "SKU_LU", default_sheet=_SKULU_DEFAULT_SHEET, import_label="Import SKU_LU"
         )
 
         # Shared preview panel; tests can inject a fake-equivalent.
@@ -94,10 +104,9 @@ class MainWindow(QMainWindow):
             preview_widget if preview_widget is not None else PreviewWidget()
         )
 
-        # Control buttons drive the pipeline actions via signals.
-        self.import_le_btn = QPushButton("Import LE")
-        self.import_aop_btn = QPushButton("Import AOP")
-        self.import_skulu_btn = QPushButton("Import SKU_LU")
+        # Control buttons drive the pipeline actions via signals. The three
+        # per-input Import buttons now live inside their source widgets (issue
+        # #27 AC12); only Import All and the global actions remain in the row.
         self.import_all_btn = QPushButton("Import All")
         self.run_btn = QPushButton("Run")
         self.save_btn = QPushButton("Save...")
@@ -110,9 +119,6 @@ class MainWindow(QMainWindow):
         sources_column.addWidget(self.skulu_widget)
 
         controls_row = QHBoxLayout()
-        controls_row.addWidget(self.import_le_btn)
-        controls_row.addWidget(self.import_aop_btn)
-        controls_row.addWidget(self.import_skulu_btn)
         controls_row.addWidget(self.import_all_btn)
         controls_row.addWidget(self.run_btn)
         controls_row.addWidget(self.save_btn)
@@ -129,13 +135,16 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
 
-        # Wire each control button to its named signal so the composition root
-        # can connect a single emitter per action.
-        self.import_le_btn.clicked.connect(lambda: self.import_one_requested.emit("LE"))
-        self.import_aop_btn.clicked.connect(
+        # Wire each widget-owned Import button to emit import_one_requested with
+        # its key, and each global control button to its named signal, so the
+        # composition root connects a single emitter per action.
+        self.le_widget.import_btn.clicked.connect(
+            lambda: self.import_one_requested.emit("LE")
+        )
+        self.aop_widget.import_btn.clicked.connect(
             lambda: self.import_one_requested.emit("aop")
         )
-        self.import_skulu_btn.clicked.connect(
+        self.skulu_widget.import_btn.clicked.connect(
             lambda: self.import_one_requested.emit("sku_lu")
         )
         self.import_all_btn.clicked.connect(self.import_all_requested.emit)
@@ -143,6 +152,21 @@ class MainWindow(QMainWindow):
         self.save_btn.clicked.connect(self.save_requested.emit)
         self.open_btn.clicked.connect(self.open_db_requested.emit)
         self.export_btn.clicked.connect(self.export_requested.emit)
+
+    @property
+    def import_le_btn(self) -> QPushButton:
+        """Return the LE Import button (owned by ``le_widget``, issue #27 AC13)."""
+        return self.le_widget.import_btn
+
+    @property
+    def import_aop_btn(self) -> QPushButton:
+        """Return the AOP Import button (owned by ``aop_widget``, issue #27 AC13)."""
+        return self.aop_widget.import_btn
+
+    @property
+    def import_skulu_btn(self) -> QPushButton:
+        """Return the SKU_LU Import button (owned by ``skulu_widget``, AC13)."""
+        return self.skulu_widget.import_btn
 
     def set_status(self, message: str) -> None:
         """Display a status-bar message.

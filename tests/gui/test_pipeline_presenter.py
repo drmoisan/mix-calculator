@@ -15,6 +15,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from src.gui.pipeline_service import ImportSpec
+from src.gui.presenters import import_dispatch
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
 from src.gui.protocols import PipelineViewProtocol
 from tests.gui.fakes.fake_services import FakePipelineService
@@ -227,6 +228,9 @@ def test_run_brackets_running_state() -> None:
     )
     presenter = PipelinePresenter(view, service)
     presenter.on_import_all(_spec())
+    # Reset the recorder after import setup so the assertion observes only the
+    # run path's busy transitions (import-all now brackets busy too).
+    view.running_states.clear()
 
     # Act
     presenter.on_run()
@@ -334,3 +338,100 @@ def test_run_result_summary_reports_table_count(table_count: int) -> None:
 
     # Assert: the summary reflects the exact derived-table count.
     assert view.results[-1] == f"Run complete: {table_count} derived tables."
+
+
+# --- Off-thread import-one surface (P2-T3) ---------------------------------
+
+
+def test_make_import_one_task_returns_callable_producing_single_frame() -> None:
+    """make_import_one_task returns a callable producing {name: frame}."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+
+    # Act: build and invoke the task for the AOP key.
+    task = presenter.make_import_one_task("aop", _spec())
+    result = task()
+
+    # Assert: the task produced exactly the AOP frame under its key.
+    assert set(result) == {"aop"}
+    assert isinstance(result["aop"], pd.DataFrame)
+
+
+def test_make_import_one_task_callable_raises_on_loader_value_error() -> None:
+    """The one-key task callable propagates a loader ValueError to the caller."""
+    # Arrange: configure the LE loader to raise.
+    view = FakePipelineView()
+    service = FakePipelineService()
+    service.raise_on_import = ValueError("LE schema mismatch")
+    presenter = PipelinePresenter(view, service)
+
+    # Act: build the task; the error surfaces only when the callable runs.
+    task = presenter.make_import_one_task("LE", _spec())
+
+    # Assert: invoking the callable raises so the runner routes to on_error.
+    with pytest.raises(ValueError, match="LE schema mismatch"):
+        task()
+
+
+def test_on_import_one_success_records_frame_and_emits_message() -> None:
+    """on_import_one_success records state, disables the button, emits a message."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+    frame = pd.DataFrame({"KEY": ["k1"]})
+
+    # Act
+    presenter.on_import_one_success("LE", _spec(), {"LE": frame})
+
+    # Assert: frame recorded, last-imported path set, derived invalidated,
+    # button disabled, busy cleared, completion message emitted.
+    assert set(presenter.imported_tables) == {"LE"}
+    assert presenter.last_imported_path["LE"] == "le.xlsx"
+    assert presenter.derived_tables == {}
+    assert ("LE", False) in view.import_button_states
+    assert view.running_states[-1] is False
+    assert view.results[-1] == "Imported LE."
+
+
+def test_on_import_one_success_recomputes_run_save_export() -> None:
+    """on_import_one_success recomputes Run/Save/Export enable states."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService(import_result=_import_result())
+    presenter = PipelinePresenter(view, service)
+
+    # Act
+    presenter.on_import_one_success("LE", _spec(), {"LE": pd.DataFrame({"K": [1]})})
+
+    # Assert: a non-empty working set enables Run, Save, and Export.
+    assert view.run_button_states[-1] is True
+    assert view.save_button_states[-1] is True
+    assert view.export_button_states[-1] is True
+
+
+def test_on_import_one_error_routes_to_show_error_and_keeps_button() -> None:
+    """on_import_one_error shows the error, clears busy, leaves button enabled."""
+    # Arrange
+    view = FakePipelineView()
+    service = FakePipelineService()
+    presenter = PipelinePresenter(view, service)
+
+    # Act
+    presenter.on_import_one_error("LE schema mismatch")
+
+    # Assert: error routed, busy cleared, and no disabling button transition.
+    assert view.errors == ["LE schema mismatch"]
+    assert view.running_states[-1] is False
+    assert all(enabled for _key, enabled in view.import_button_states) or (
+        view.import_button_states == []
+    )
+
+
+def test_resolve_path_for_key_unknown_key_raises() -> None:
+    """resolve_path_for_key raises KeyError for an unknown import key."""
+    # Act / Assert: the defensive routing branch rejects unknown keys.
+    with pytest.raises(KeyError, match="Unknown import key"):
+        import_dispatch.resolve_path_for_key("nope", _spec())
