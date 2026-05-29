@@ -66,6 +66,11 @@ projects:
   # deterministic argv resolver + a subprocess seam. Classified T4-Scaffolding.
   src/build_exe.py: T4
 
+  # Velopack pack-and-upload orchestration script (issue #31) — pure build-
+  # tooling glue sibling of build_exe.py: argparse + deterministic argv
+  # resolvers + a subprocess seam, no transform logic. Classified T4.
+  src/build_velopack.py: T4
+
   # PySide6 desktop GUI (issue #19). MVP passive-view structure over the existing
   # pipeline. Tier rationale per .claude/rules/quality-tiers.md:
   #   T2 (Core) — the PipelineService seam, view Protocols, exporter base/registry,

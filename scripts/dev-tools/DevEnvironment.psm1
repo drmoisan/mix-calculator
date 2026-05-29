@@ -116,7 +116,10 @@ function Get-DevRequirementDefinition {
         @{ Id = 'python'; Name = 'Python 3.12-3.14'; RequiresElevation = $false },
         @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false },
         @{ Id = 'msvc'; Name = 'MSVC C++ build tools'; RequiresElevation = $true },
-        @{ Id = 'project'; Name = 'Project environment (poetry install)'; RequiresElevation = $false }
+        @{ Id = 'project'; Name = 'Project environment (poetry install)'; RequiresElevation = $false },
+        # Velopack CLI (issue #31): installed via `dotnet tool install -g vpk`;
+        # no elevation required because the install is per-user.
+        @{ Id = 'vpk'; Name = 'Velopack CLI (vpk)'; RequiresElevation = $false }
     )
 }
 

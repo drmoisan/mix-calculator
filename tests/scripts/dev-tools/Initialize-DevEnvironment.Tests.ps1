@@ -3,16 +3,10 @@
 
 <#
 .SYNOPSIS
-    Pester v5 tests for scripts/dev-tools/Initialize-DevEnvironment.ps1 and its
-    sibling module DevEnvironment.psm1.
-
-.DESCRIPTION
-    Pure decision logic is exercised through real code paths with no mocks. The
-    detection, install, and orchestration functions are exercised with the external
-    executable wrappers and host-adapter seams mocked, so no real winget, py launcher,
-    python, Poetry, vswhere, VS Installer, elevation relaunch, PATH, network, or
-    filesystem state is touched. The script is dot-sourced (its entrypoint is guarded)
-    so its functions and the imported module functions are available in the test scope.
+    Pester v5 tests for Initialize-DevEnvironment.ps1 + DevEnvironment.psm1. Pure
+    decision logic exercises real code paths; detection / install / orchestration
+    use mocked wrappers so no real winget, py, python, Poetry, vswhere, dotnet,
+    VS Installer, elevation, PATH, or filesystem is touched.
 #>
 
 BeforeAll {
@@ -30,35 +24,29 @@ BeforeAll {
 }
 
 Describe 'Test-PythonVersionInBand (pure logic)' {
-    Context 'in-band versions' {
-        It 'accepts <Version>' -ForEach @(
-            @{ Version = '3.12' }
-            @{ Version = '3.12.0' }
-            @{ Version = '3.13.12' }
-            @{ Version = '3.14.99' }
-            @{ Version = 'Python 3.13.12' }
-        ) {
-            Test-PythonVersionInBand -VersionText $Version | Should -BeTrue
-        }
+    It 'accepts in-band <Version>' -ForEach @(
+        @{ Version = '3.12' }
+        @{ Version = '3.12.0' }
+        @{ Version = '3.13.12' }
+        @{ Version = '3.14.99' }
+        @{ Version = 'Python 3.13.12' }
+    ) {
+        Test-PythonVersionInBand -VersionText $Version | Should -BeTrue
     }
-    Context 'out-of-band versions' {
-        It 'rejects <Version>' -ForEach @(
-            @{ Version = '3.11.9' }
-            @{ Version = '3.15.0' }
-            @{ Version = '3.15' }
-            @{ Version = '4.0.0' }
-            @{ Version = '2.7.18' }
-        ) {
-            Test-PythonVersionInBand -VersionText $Version | Should -BeFalse
-        }
+    It 'rejects out-of-band <Version>' -ForEach @(
+        @{ Version = '3.11.9' }
+        @{ Version = '3.15.0' }
+        @{ Version = '3.15' }
+        @{ Version = '4.0.0' }
+        @{ Version = '2.7.18' }
+    ) {
+        Test-PythonVersionInBand -VersionText $Version | Should -BeFalse
     }
-    Context 'unparseable input' {
-        It 'returns false for an empty string' {
-            Test-PythonVersionInBand -VersionText '' | Should -BeFalse
-        }
-        It 'returns false when no version token is present' {
-            Test-PythonVersionInBand -VersionText 'no version here' | Should -BeFalse
-        }
+    It 'returns false for an empty string' {
+        Test-PythonVersionInBand -VersionText '' | Should -BeFalse
+    }
+    It 'returns false when no version token is present' {
+        Test-PythonVersionInBand -VersionText 'no version here' | Should -BeFalse
     }
 }
 
@@ -75,31 +63,32 @@ Describe 'Select-PythonBandSatisfied (pure logic)' {
 }
 
 Describe 'Resolve-InstallDecision (pure logic)' {
-    It 'returns Skip when present' {
-        Resolve-InstallDecision -IsPresent $true -IsDryRun $false -IsConfirmed $true | Should -Be 'Skip'
-    }
-    It 'returns WouldInstall when missing and dry-run' {
-        Resolve-InstallDecision -IsPresent $false -IsDryRun $true -IsConfirmed $true | Should -Be 'WouldInstall'
-    }
-    It 'returns Install when missing, not dry-run, and confirmed' {
-        Resolve-InstallDecision -IsPresent $false -IsDryRun $false -IsConfirmed $true | Should -Be 'Install'
-    }
-    It 'returns Declined when missing, not dry-run, and not confirmed' {
-        Resolve-InstallDecision -IsPresent $false -IsDryRun $false -IsConfirmed $false | Should -Be 'Declined'
-    }
-    It 'prefers Skip over dry-run when present' {
-        Resolve-InstallDecision -IsPresent $true -IsDryRun $true -IsConfirmed $false | Should -Be 'Skip'
+    It 'returns <Expected> for (present=<IsPresent>, dryrun=<IsDryRun>, confirmed=<IsConfirmed>)' -ForEach @(
+        @{ IsPresent = $true; IsDryRun = $false; IsConfirmed = $true; Expected = 'Skip' }
+        @{ IsPresent = $false; IsDryRun = $true; IsConfirmed = $true; Expected = 'WouldInstall' }
+        @{ IsPresent = $false; IsDryRun = $false; IsConfirmed = $true; Expected = 'Install' }
+        @{ IsPresent = $false; IsDryRun = $false; IsConfirmed = $false; Expected = 'Declined' }
+        @{ IsPresent = $true; IsDryRun = $true; IsConfirmed = $false; Expected = 'Skip' }
+    ) {
+        Resolve-InstallDecision -IsPresent $IsPresent -IsDryRun $IsDryRun -IsConfirmed $IsConfirmed | Should -Be $Expected
     }
 }
 
 Describe 'Get-DevRequirementDefinition (pure logic)' {
-    It 'returns the four requirements in order' {
+    It 'returns the five requirements in order' {
         $ids = (Get-DevRequirementDefinition).Id
-        $ids | Should -Be @('python', 'poetry', 'msvc', 'project')
+        $ids | Should -Be @('python', 'poetry', 'msvc', 'project', 'vpk')
     }
     It 'marks only msvc as requiring elevation' {
         $defs = Get-DevRequirementDefinition
         ($defs | Where-Object { $_.RequiresElevation }).Id | Should -Be 'msvc'
+    }
+    It 'includes a vpk entry with the expected display name (issue #31)' {
+        $defs = Get-DevRequirementDefinition
+        $vpk = $defs | Where-Object { $_.Id -eq 'vpk' }
+        $vpk | Should -Not -BeNullOrEmpty
+        $vpk.Name | Should -Be 'Velopack CLI (vpk)'
+        $vpk.RequiresElevation | Should -Be $false
     }
 }
 
@@ -113,15 +102,13 @@ Describe 'Get-RequirementResult and Resolve-RequirementOutcome (pure logic)' {
     It 'rejects an invalid state via ValidateSet' {
         { Get-RequirementResult -Id 'x' -Name 'X' -State 'Bogus' } | Should -Throw
     }
-    It 'maps WouldInstall to a dry-run record' {
-        $r = Resolve-RequirementOutcome -Decision 'WouldInstall' -Id 'poetry' -Name 'Poetry'
-        $r.State | Should -Be 'WouldInstall'
-        $r.Detail | Should -Match 'dry-run'
-    }
-    It 'maps Declined to a declined record' {
-        $r = Resolve-RequirementOutcome -Decision 'Declined' -Id 'poetry' -Name 'Poetry'
-        $r.State | Should -Be 'Declined'
-        $r.Detail | Should -Match 'not confirmed'
+    It 'maps <Decision> to a <ExpectedState> record matching <ExpectedDetail>' -ForEach @(
+        @{ Decision = 'WouldInstall'; ExpectedState = 'WouldInstall'; ExpectedDetail = 'dry-run' }
+        @{ Decision = 'Declined'; ExpectedState = 'Declined'; ExpectedDetail = 'not confirmed' }
+    ) {
+        $r = Resolve-RequirementOutcome -Decision $Decision -Id 'poetry' -Name 'Poetry'
+        $r.State | Should -Be $ExpectedState
+        $r.Detail | Should -Match $ExpectedDetail
     }
     It 'returns null for the Install decision' {
         Resolve-RequirementOutcome -Decision 'Install' -Id 'poetry' -Name 'Poetry' | Should -BeNullOrEmpty
@@ -161,7 +148,6 @@ Describe 'Get-DetectedPythonVersion (detection; wrappers mocked)' {
         Mock Test-CommandAvailable { $true } -ParameterFilter { $Name -eq 'python' }
         Mock Invoke-PyLauncherExe { " -V:3.13 *        C:\Python313\python.exe`n -V:3.11          C:\Python311\python.exe" }
         Mock Invoke-PythonExe { 'Python 3.13.12' }
-
         $versions = Get-DetectedPythonVersion
         $versions | Should -Contain '3.13'
         $versions | Should -Contain '3.11'
@@ -216,7 +202,6 @@ Describe 'Test-MsvcRequirementSatisfied (detection; wrappers mocked)' {
         Mock Invoke-VsWhereExe { 'C:\Program Files\Microsoft Visual Studio\18\Community' } `
             -ParameterFilter { $VsWhereArgs -notcontains '-requires' }
         Mock Invoke-VsWhereExe { '' } -ParameterFilter { $VsWhereArgs -contains '-requires' }
-
         $r = Test-MsvcRequirementSatisfied
         $r.Satisfied | Should -BeFalse
         $r.VsInstallPath | Should -Be 'C:\Program Files\Microsoft Visual Studio\18\Community'
@@ -288,9 +273,7 @@ Describe 'Install actions (seams mocked; no real executables)' {
         Mock Get-EnvironmentVariableValue { 'C:\global\python' } -ParameterFilter { $Name -eq 'VIRTUAL_ENV' }
         Mock Set-EnvironmentVariableValue { }
         Mock Invoke-PoetryExe { '' }
-
         Install-ProjectRequirement
-
         # VIRTUAL_ENV cleared before the poetry call and restored to the prior value after.
         Should -Invoke Set-EnvironmentVariableValue -Times 1 -ParameterFilter {
             $Name -eq 'VIRTUAL_ENV' -and [string]::IsNullOrEmpty($Value)
@@ -322,12 +305,13 @@ Describe 'Invoke-RequirementInstall (dispatch; install actions mocked)' {
 }
 
 Describe 'Invoke-RequirementCheck (orchestration of one requirement)' {
+    BeforeEach {
+        $script:Def = @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false }
+    }
     It 'returns Satisfied without installing when already present' {
         Mock Test-RequirementPresent { [pscustomobject]@{ IsPresent = $true; MsvcState = $null } }
         Mock Invoke-RequirementInstall { }
-        $def = @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false }
-
-        $r = Invoke-RequirementCheck -Definition $def -IsDryRun $false -AutoApprove $true `
+        $r = Invoke-RequirementCheck -Definition $Def -IsDryRun $false -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false
         $r.State | Should -Be 'Satisfied'
         Should -Invoke Invoke-RequirementInstall -Times 0
@@ -335,9 +319,7 @@ Describe 'Invoke-RequirementCheck (orchestration of one requirement)' {
     It 'returns WouldInstall on a dry run without installing' {
         Mock Test-RequirementPresent { [pscustomobject]@{ IsPresent = $false; MsvcState = $null } }
         Mock Invoke-RequirementInstall { }
-        $def = @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false }
-
-        $r = Invoke-RequirementCheck -Definition $def -IsDryRun $true -AutoApprove $true `
+        $r = Invoke-RequirementCheck -Definition $Def -IsDryRun $true -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false
         $r.State | Should -Be 'WouldInstall'
         Should -Invoke Invoke-RequirementInstall -Times 0
@@ -345,9 +327,7 @@ Describe 'Invoke-RequirementCheck (orchestration of one requirement)' {
     It 'returns Declined when not confirmed and not auto-approved' {
         Mock Test-RequirementPresent { [pscustomobject]@{ IsPresent = $false; MsvcState = $null } }
         Mock Invoke-RequirementInstall { }
-        $def = @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false }
-
-        $r = Invoke-RequirementCheck -Definition $def -IsDryRun $false -AutoApprove $false `
+        $r = Invoke-RequirementCheck -Definition $Def -IsDryRun $false -AutoApprove $false `
             -ShouldProcessCallback $DeclineAll -IsElevated $false
         $r.State | Should -Be 'Declined'
         Should -Invoke Invoke-RequirementInstall -Times 0
@@ -355,9 +335,7 @@ Describe 'Invoke-RequirementCheck (orchestration of one requirement)' {
     It 'returns Installed after a confirmed install' {
         Mock Test-RequirementPresent { [pscustomobject]@{ IsPresent = $false; MsvcState = $null } }
         Mock Invoke-RequirementInstall { }
-        $def = @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false }
-
-        $r = Invoke-RequirementCheck -Definition $def -IsDryRun $false -AutoApprove $true `
+        $r = Invoke-RequirementCheck -Definition $Def -IsDryRun $false -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false
         $r.State | Should -Be 'Installed'
         Should -Invoke Invoke-RequirementInstall -Times 1
@@ -365,9 +343,7 @@ Describe 'Invoke-RequirementCheck (orchestration of one requirement)' {
     It 'returns Failed with the error detail when the install throws' {
         Mock Test-RequirementPresent { [pscustomobject]@{ IsPresent = $false; MsvcState = $null } }
         Mock Invoke-RequirementInstall { throw 'install boom' }
-        $def = @{ Id = 'poetry'; Name = 'Poetry'; RequiresElevation = $false }
-
-        $r = Invoke-RequirementCheck -Definition $def -IsDryRun $false -AutoApprove $true `
+        $r = Invoke-RequirementCheck -Definition $Def -IsDryRun $false -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false
         $r.State | Should -Be 'Failed'
         $r.Detail | Should -Match 'install boom'
@@ -380,25 +356,24 @@ Describe 'Invoke-DevEnvironmentSetup (full orchestration; seams mocked)' {
         Mock Test-PythonRequirementSatisfied { $true }
         Mock Test-PoetryRequirementSatisfied { $true }
         Mock Test-MsvcRequirementSatisfied { [pscustomobject]@{ Satisfied = $true; VsInstallPath = 'C:\VS' } }
+        Mock Test-VpkRequirementSatisfied { $true }
         Mock Invoke-RequirementInstall { }
-
         $results = Invoke-DevEnvironmentSetup -IsDryRun $false -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false
-
-        $results.Id | Should -Be @('python', 'poetry', 'msvc', 'project')
+        $results.Id | Should -Be @('python', 'poetry', 'msvc', 'project', 'vpk')
         ($results | Where-Object { $_.Id -eq 'python' }).State | Should -Be 'Satisfied'
         ($results | Where-Object { $_.Id -eq 'project' }).State | Should -Be 'Installed'
+        ($results | Where-Object { $_.Id -eq 'vpk' }).State | Should -Be 'Satisfied'
         Should -Invoke Invoke-RequirementInstall -Times 1 -ParameterFilter { $Id -eq 'project' }
     }
     It 'reports WouldInstall for every missing requirement on a dry run' {
         Mock Test-PythonRequirementSatisfied { $false }
         Mock Test-PoetryRequirementSatisfied { $false }
         Mock Test-MsvcRequirementSatisfied { [pscustomobject]@{ Satisfied = $false; VsInstallPath = '' } }
+        Mock Test-VpkRequirementSatisfied { $false }
         Mock Invoke-RequirementInstall { }
-
         $results = Invoke-DevEnvironmentSetup -IsDryRun $true -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false
-
         ($results | Where-Object { $_.State -ne 'WouldInstall' }) | Should -BeNullOrEmpty
         Should -Invoke Invoke-RequirementInstall -Times 0
     }
@@ -434,7 +409,6 @@ Describe 'Invoke-DevEnvironmentMain (entrypoint logic; setup mocked)' {
             )
         }
         Mock Write-Information { }
-
         Invoke-DevEnvironmentMain -IsDryRun $false -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false | Should -Be 0
         Should -Invoke Write-Information -Times 1 -ParameterFilter {
@@ -446,7 +420,6 @@ Describe 'Invoke-DevEnvironmentMain (entrypoint logic; setup mocked)' {
             @((Get-RequirementResult -Id 'msvc' -Name 'MSVC' -State 'Failed' -Detail 'boom'))
         }
         Mock Write-Information { }
-
         Invoke-DevEnvironmentMain -IsDryRun $false -AutoApprove $true `
             -ShouldProcessCallback $ApproveAll -IsElevated $false | Should -Be 1
     }
@@ -471,12 +444,57 @@ Describe 'Host adapter seams (no irreversible side effects)' {
         try {
             Set-EnvironmentVariableValue -Name $name -Value 'seam-value'
             Get-EnvironmentVariableValue -Name $name | Should -Be 'seam-value'
-
             Set-EnvironmentVariableValue -Name $name -Value $null
             Get-EnvironmentVariableValue -Name $name | Should -BeNullOrEmpty
         }
-        finally {
-            Set-EnvironmentVariableValue -Name $name -Value $original
-        }
+        finally { Set-EnvironmentVariableValue -Name $name -Value $original }
     }
 }
+
+Describe 'vpk requirement (issue #31)' {
+    BeforeEach {
+        $script:VpkDef = @{ Id = 'vpk'; Name = 'Velopack CLI (vpk)'; RequiresElevation = $false }
+    }
+    It 'Test-VpkRequirementSatisfied is true when vpk is on PATH' {
+        Mock Test-CommandAvailable { $true } -ParameterFilter { $Name -eq 'vpk' }
+        Test-VpkRequirementSatisfied | Should -BeTrue
+    }
+    It 'Test-VpkRequirementSatisfied is false when vpk is not on PATH' {
+        Mock Test-CommandAvailable { $false } -ParameterFilter { $Name -eq 'vpk' }
+        Test-VpkRequirementSatisfied | Should -BeFalse
+    }
+    It 'Install-VpkRequirement invokes dotnet tool install -g vpk' {
+        Mock Invoke-DotnetExe { '' }
+        Install-VpkRequirement
+        Should -Invoke Invoke-DotnetExe -Times 1 -ParameterFilter {
+            ($DotnetArgs -contains 'tool') -and ($DotnetArgs -contains 'install') -and `
+            ($DotnetArgs -contains '-g') -and ($DotnetArgs -contains 'vpk')
+        }
+    }
+    It 'Invoke-RequirementInstall dispatches vpk to Install-VpkRequirement' {
+        Mock Install-VpkRequirement { }
+        Invoke-RequirementInstall -Id 'vpk' -IsElevated $false
+        Should -Invoke Install-VpkRequirement -Times 1
+    }
+    It 'Test-RequirementPresent returns the vpk detection state for the vpk id' {
+        Mock Test-VpkRequirementSatisfied { $true }
+        (Test-RequirementPresent -Id 'vpk').IsPresent | Should -BeTrue
+    }
+    It 'orchestrator records Installed when vpk is absent and confirmed' {
+        Mock Test-VpkRequirementSatisfied { $false }
+        Mock Install-VpkRequirement { }
+        $r = Invoke-RequirementCheck -Definition $VpkDef -IsDryRun $false -AutoApprove $true `
+            -ShouldProcessCallback $ApproveAll -IsElevated $false
+        $r.State | Should -Be 'Installed'
+        Should -Invoke Install-VpkRequirement -Times 1
+    }
+    It 'orchestrator records Satisfied when vpk is present (no install)' {
+        Mock Test-VpkRequirementSatisfied { $true }
+        Mock Install-VpkRequirement { }
+        $r = Invoke-RequirementCheck -Definition $VpkDef -IsDryRun $false -AutoApprove $true `
+            -ShouldProcessCallback $ApproveAll -IsElevated $false
+        $r.State | Should -Be 'Satisfied'
+        Should -Invoke Install-VpkRequirement -Times 0
+    }
+}
+
