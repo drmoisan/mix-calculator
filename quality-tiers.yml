@@ -61,6 +61,11 @@ projects:
   # Empty package marker / scaffolding (T4).
   src/__init__.py: T4
 
+  # Nuitka build orchestration script (issue #29) — pure build-tooling glue
+  # analogous to src/gui/app.py: no transform logic, only argparse + a
+  # deterministic argv resolver + a subprocess seam. Classified T4-Scaffolding.
+  src/build_exe.py: T4
+
   # PySide6 desktop GUI (issue #19). MVP passive-view structure over the existing
   # pipeline. Tier rationale per .claude/rules/quality-tiers.md:
   #   T2 (Core) — the PipelineService seam, view Protocols, exporter base/registry,

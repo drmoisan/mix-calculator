@@ -34,6 +34,7 @@ pytest-qt = ">=4.4"
 normalize-le = "src.normalize_le:main"
 load-aop = "src.load_aop:main"
 mix-pipeline-gui = "src.gui.app:main"
+build-exe = "src.build_exe:main"
 
 [tool.black]
 line-length = 88
