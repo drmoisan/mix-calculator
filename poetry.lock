@@ -701,6 +701,27 @@ pytest = ">=7"
 testing = ["process-tests", "pytest-xdist", "virtualenv"]
 
 [[package]]
+name = "pytest-qt"
+version = "4.5.0"
+description = "pytest support for PyQt and PySide applications"
+optional = false
+python-versions = ">=3.9"
+groups = ["dev"]
+files = [
+    {file = "pytest_qt-4.5.0-py3-none-any.whl", hash = "sha256:ed21ea9b861247f7d18090a26bfbda8fb51d7a8a7b6f776157426ff2ccf26eff"},
+    {file = "pytest_qt-4.5.0.tar.gz", hash = "sha256:51620e01c488f065d2036425cbc1cbcf8a6972295105fd285321eb47e66a319f"},
+]
+
+[package.dependencies]
+pluggy = ">=1.1"
+pytest = "*"
+typing_extensions = "*"
+
+[package.extras]
+dev = ["pre-commit", "tox"]
+doc = ["sphinx", "sphinx_rtd_theme"]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 description = "Extensions to the standard Python datetime module"
@@ -877,4 +898,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "5de2a72ddcde792fe6789a7d2b85ef73cf6c71afc7903c3a043ef1214a76f8ae"
+content-hash = "e52b3f07a153019df5953300afc01d8741a63c459c61c23f7f33e25c7808c842"

@@ -11,3 +11,4 @@
 - [S9 CI-gate parser fallback](s9-ci-gate-parser-fallback.md) — Invoke-CiGateParser.ps1 is absent; derive ci_gate from gh pr checks JSON, use gh run watch to wait
 - [Remediation loop strict handoff](remediation-loop-strict-handoff.md) — remediation cycles must run atomic-planner -> atomic-executor -> feature-review only; no direct typed-engineer worker calls; five required artifacts per cycle
 - [Remediation-plan em-dash required](remediation-plan-em-dash-required.md) — the plan validator rejects `### Phase N (continued) — <Title>`; only canonical `### Phase N — <Title>` passes
+- [PySide6 CI system libs](pyside6-ci-system-libs.md) — Ubuntu runner needs libegl1/libgl1/libxkbcommon0/libdbus-1-3/libfontconfig1 plus QT_QPA_PLATFORM=offscreen for pytest-qt to collect

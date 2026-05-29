@@ -3,3 +3,5 @@
 - [NRR-summary mix-total spec gap](nrr-summary-mix-total-spec-gap.md) — issue #15 NRR_Summary is correct; its Check surfaced an upstream Category/Customer mix tie-out defect, now tracked as bug #20
 - [Mix builder signature now takes mix_base](mix-builder-signature-mix-base.md) — #20 changed coarser mix builders to take mix_base first; stale callers fail with "No group keys passed"
 - [PowerShell new files need UTF-8 BOM](powershell-bom-required.md) — PSScriptAnalyzer enforces PSUseBOMForUnicodeEncodedFile; prepend BOM after Write or restart the format loop
+- [Tier-classification has no script](tier-classification-no-script.md) — quality-tiers.yml tier stage is conceptual; no glob-and-fail script; verify "all classified" via `python -c` enumeration
+- [pytest-qt SignalBlocker.args typing](pytest-qt-signal-blocker-typing.md) — blocker.args is list[Unknown] | None; contain via a typed Protocol view + cast (the pandas_io pattern), not a suppression
