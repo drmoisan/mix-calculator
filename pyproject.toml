@@ -18,6 +18,7 @@ python = ">=3.12,<4.0"
 pyside6 = {version = "^6.11.1", python = ">=3.12,<3.15"}
 pandas = ">=2.2,<3.0"
 openpyxl = ">=3.1,<4.0"
+velopack = ">=1.0.1,<2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
@@ -35,6 +36,7 @@ normalize-le = "src.normalize_le:main"
 load-aop = "src.load_aop:main"
 mix-pipeline-gui = "src.gui.app:main"
 build-exe = "src.build_exe:main"
+build-velopack = "src.build_velopack:main"
 
 [tool.black]
 line-length = 88

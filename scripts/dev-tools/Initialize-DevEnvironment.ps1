@@ -1,37 +1,18 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Verifies and, on confirmation, installs the host prerequisites for the
-    mix-calculator development environment, then provisions the in-project venv.
-
+    Verifies and installs host prerequisites (Python 3.12-3.14, Poetry, MSVC C++
+    build tools, in-project venv, and the Velopack CLI). Tier T4.
 .DESCRIPTION
-    Checks each prerequisite in order (Python 3.12-3.14, Poetry, MSVC C++ build tools,
-    and the in-project Poetry environment). For any missing prerequisite the script asks
-    for confirmation (via ShouldProcess) and installs it, requesting elevation only for
-    the install that needs administrator rights (MSVC build tools). The script is
-    idempotent and ends with a summary of every requirement's final state.
-
-    Pure decision logic lives in the sibling module DevEnvironment.psm1. This file holds
-    the external-process wrapper seams, detection, install actions, orchestration, and
-    the entrypoint. Every external executable call is isolated behind a wrapper so tests
-    mock the wrapper, never the real executable. Installs are winget-first, with
-    documented fallbacks: Poetry uses its official installer, and the MSVC build tools
-    modify an existing Visual Studio install via the VS Installer when one is present,
-    else fall back to the winget BuildTools package.
-
+    Each prerequisite is detected; missing ones are installed under ShouldProcess
+    after confirmation. Only MSVC requires elevation. Decision logic lives in
+    DevEnvironment.psm1; this file holds wrapper seams, detection, install
+    actions, orchestration, and the entrypoint. Every external executable call
+    is isolated behind a wrapper so tests mock the wrapper, never the real exe.
 .PARAMETER AutoApprove
-    Approve every required install without an interactive prompt. Alias: -Force.
-
+    Approve every required install without prompting. Alias: -Force.
 .PARAMETER DryRun
     Report what would be installed without changing state. Equivalent to -WhatIf.
-
-.EXAMPLE
-    pwsh ./scripts/dev-tools/Initialize-DevEnvironment.ps1 -AutoApprove
-    Verifies and installs prerequisites without prompting.
-
-.NOTES
-    Compatible with PowerShell 7+. Tier T4 (dev tooling); coverage thresholds are
-    uniform (line >= 85%, branch >= 75%).
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -44,8 +25,6 @@ param(
 )
 
 Import-Module -Name (Join-Path $PSScriptRoot 'DevEnvironment.psm1') -Force
-
-# --- External-process wrapper seams (mock the wrapper, never the real exe) --
 
 function Invoke-WingetExe {
     # SYNOPSIS: Splat args into winget and return combined output.
@@ -79,6 +58,16 @@ function Invoke-PoetryExe {
     return (poetry @PoetryArgs 2>&1 | Out-String)
 }
 
+function Invoke-DotnetExe {
+    # SYNOPSIS: Splat args into dotnet and return combined output.
+    # Wrapper seam (issue #31) used by Install-VpkRequirement so tests mock the
+    # wrapper and never invoke the real dotnet binary.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [string[]] $DotnetArgs)
+    return (dotnet @DotnetArgs 2>&1 | Out-String)
+}
+
 function Invoke-VsWhereExe {
     # SYNOPSIS: Splat args into vswhere.exe at the given path and return output.
     [CmdletBinding()]
@@ -109,8 +98,6 @@ function Invoke-ElevatedProcess {
     $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Verb RunAs -Wait -PassThru
     return $process.ExitCode
 }
-
-# --- Environment / host adapter seams --------------------------------------
 
 function Test-IsElevated {
     # SYNOPSIS: Return $true when the current process is elevated (Administrator).
@@ -168,8 +155,6 @@ function Get-VsWhereLocation {
     return ''
 }
 
-# --- Detection helpers (compose seams + pure logic) ------------------------
-
 function Get-DetectedPythonVersion {
     # SYNOPSIS: Collect candidate Python versions via the py launcher and python.
     [CmdletBinding()]
@@ -213,6 +198,15 @@ function Test-PoetryRequirementSatisfied {
     return [bool]([regex]::Match($output, 'Poetry').Success)
 }
 
+function Test-VpkRequirementSatisfied {
+    # SYNOPSIS: Return $true when the Velopack CLI (vpk) is resolvable on PATH.
+    # Detection seam for issue #31; tests mock Test-CommandAvailable.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+    return Test-CommandAvailable -Name 'vpk'
+}
+
 function Test-MsvcRequirementSatisfied {
     # SYNOPSIS: Return @{Satisfied;VsInstallPath}. VsInstallPath is the latest VS install
     # path when any VS install exists (even without VC tools), so the caller can modify it.
@@ -242,8 +236,6 @@ function Test-MsvcRequirementSatisfied {
     return $result
 }
 
-# --- Confirmation seam -----------------------------------------------------
-
 function Approve-RequirementInstall {
     # SYNOPSIS: Decide whether an install is approved. -AutoApprove returns $true without
     # prompting; otherwise the caller's ShouldProcessResult (honoring -WhatIf/-Confirm) wins.
@@ -259,8 +251,6 @@ function Approve-RequirementInstall {
     if ($AutoApprove) { return $true }
     return $ShouldProcessResult
 }
-
-# --- Install actions (compose seams; elevation only where required) --------
 
 function Install-PythonRequirement {
     # SYNOPSIS: Install Python 3.12 via winget, or fail clearly when winget is absent.
@@ -315,6 +305,17 @@ function Install-MsvcRequirement {
     [void](Invoke-ElevatedProcess -FilePath 'winget' -ArgumentList $wingetArgs)
 }
 
+function Install-VpkRequirement {
+    # SYNOPSIS: Install the Velopack CLI as a per-user .NET global tool (issue #31).
+    # No elevation required: `dotnet tool install -g vpk` writes to %USERPROFILE%\.dotnet\tools.
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+    [OutputType([void])]
+    param()
+    if ($PSCmdlet.ShouldProcess('vpk', 'dotnet tool install -g vpk')) {
+        [void](Invoke-DotnetExe -DotnetArgs @('tool', 'install', '-g', 'vpk'))
+    }
+}
+
 function Install-ProjectRequirement {
     # SYNOPSIS: Run `poetry install` with VIRTUAL_ENV cleared so the in-project .venv is used.
     # The shell sets VIRTUAL_ENV to the global Python, which would push Poetry into global
@@ -332,8 +333,6 @@ function Install-ProjectRequirement {
         Set-EnvironmentVariableValue -Name 'VIRTUAL_ENV' -Value $previous
     }
 }
-
-# --- Orchestration ---------------------------------------------------------
 
 function Test-RequirementPresent {
     # SYNOPSIS: Detect whether a requirement is satisfied; return @{IsPresent;MsvcState}.
@@ -353,6 +352,7 @@ function Test-RequirementPresent {
             $state.IsPresent = [bool]$state.MsvcState.Satisfied
         }
         'project' { $state.IsPresent = $false }
+        'vpk' { $state.IsPresent = Test-VpkRequirementSatisfied }
         default { throw "Unknown requirement id: $Id" }
     }
 
@@ -378,6 +378,7 @@ function Invoke-RequirementInstall {
             Install-MsvcRequirement -VsInstallPath $path -IsElevated $IsElevated
         }
         'project' { Install-ProjectRequirement }
+        'vpk' { Install-VpkRequirement }
         default { throw "Unknown requirement id: $Id" }
     }
 }
@@ -475,8 +476,6 @@ function Invoke-DevEnvironmentMain {
     }
     return 0
 }
-
-# --- Entrypoint (guarded so the script can be dot-sourced for testing) -----
 
 if ($MyInvocation.InvocationName -eq '.') {
     return

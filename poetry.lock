@@ -895,7 +895,33 @@ files = [
     {file = "tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10"},
 ]
 
+[[package]]
+name = "velopack"
+version = "1.0.1"
+description = "Installer and automatic update framework for cross-platform desktop applications"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "velopack-1.0.1-cp37-abi3-macosx_10_12_x86_64.whl", hash = "sha256:a6c077a6659eac11d9163136e0b5da18edb528ea2d9e6971ec094117c10f490a"},
+    {file = "velopack-1.0.1-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:fa614e5a1095470f68443cd3f126578a4749767f831abebecc3ce63306592525"},
+    {file = "velopack-1.0.1-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2e92dd33e7d3c879ef96693c26053b7514de505bb43439f58197d30fac18439e"},
+    {file = "velopack-1.0.1-cp37-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:15f91192e67830aaeec207a7585731e2d263dac1f31da29799a7e872f7926e6a"},
+    {file = "velopack-1.0.1-cp37-abi3-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:4c2d11385e7292d58fd2875734057755b9040513fe6da772ea213a9da8ee547b"},
+    {file = "velopack-1.0.1-cp37-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:15fb8ed1c8b24e5dcc3fb805dd7165f347a0762d371ec50155735d77292b8867"},
+    {file = "velopack-1.0.1-cp37-abi3-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:089d7a5066fce5f560720c769aedbe96ddec41724b73646931bccbdba05ff7f5"},
+    {file = "velopack-1.0.1-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8822b5292226fd2ee221af12fe1303b74cb130992f40da2883951c5df7693f6f"},
+    {file = "velopack-1.0.1-cp37-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6529d0963bd2c03bc4ae9949d8f112e3de5e08e2107f1adf4c7f6e309ca0824e"},
+    {file = "velopack-1.0.1-cp37-abi3-musllinux_1_2_armv7l.whl", hash = "sha256:fe6abfd88fa7b5731799deb8c1fd3b1270ce2e521754d8c364d7c11e240859de"},
+    {file = "velopack-1.0.1-cp37-abi3-musllinux_1_2_i686.whl", hash = "sha256:2a9a94e35c8e41f51e5c695cf0a7349176f4054caff3432554cefe7ff2db065a"},
+    {file = "velopack-1.0.1-cp37-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:a9510fa44d2fec062944f1375b3ae441bd88c9e75d07a924d68d125425174e75"},
+    {file = "velopack-1.0.1-cp37-abi3-win32.whl", hash = "sha256:cb4dbfc1480f6a9531c146b70066f0effb13d05e695ef41a647fdbbbd5076569"},
+    {file = "velopack-1.0.1-cp37-abi3-win_amd64.whl", hash = "sha256:7c36cb1183ef544ebe63b08ed35d25af0148673043ab5b7805abd3c7f03f7557"},
+    {file = "velopack-1.0.1-cp37-abi3-win_arm64.whl", hash = "sha256:11b03d08c8cb12cc118333543dfb7646b77f2d27b5e34d220d5cf71cbe5f5d8c"},
+    {file = "velopack-1.0.1.tar.gz", hash = "sha256:a175057451b8fdc84efc81b4df0c67d64c43fd11c6418316037b7e3bf09d8426"},
+]
+
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "e52b3f07a153019df5953300afc01d8741a63c459c61c23f7f33e25c7808c842"
+content-hash = "be5739a504fcf37bfa146c35a48c2933b5ac7e5a3a4007398e9280151c5bdaad"

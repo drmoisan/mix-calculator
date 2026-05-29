@@ -157,6 +157,30 @@ def test_build_application_synchronous_runner_smoke(qtbot: QtBot) -> None:
     assert wired.registry.available_formats() == ["Excel", "CSV"]
 
 
+class _RecorderVelopackApp:
+    """Stub for ``velopack.App`` that records calls to ``run`` in a shared log.
+
+    Purpose:
+        Allow the GUI bootstrap tests to assert that ``velopack.App().run()``
+        is invoked exactly once, before ``QApplication`` construction, per AC10.
+
+    Attributes:
+        events: The shared ordered event log appended to by ``run`` so
+            tests can assert call ordering relative to ``QApplication``
+            construction.
+    """
+
+    def __init__(self, events: list[str]) -> None:
+        """Bind the recorder to a shared call-order log."""
+        self._events = events
+
+    def run(self) -> None:
+        """Record the Velopack bootstrap call in the shared log."""
+        # The single sentinel marker tests look for when asserting that the
+        # Velopack run() happens before QApplication construction.
+        self._events.append("velopack_run")
+
+
 def test_main_entry_point_runs_event_loop(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -164,7 +188,8 @@ def test_main_entry_point_runs_event_loop(
 
     Exercises the ``main`` entry without actually blocking by patching the
     Qt ``QApplication.exec`` to return immediately and reusing the pytest-qt
-    managed application instance.
+    managed application instance. Per AC10 this test now also asserts
+    ``velopack.App().run()`` is called before ``QApplication`` construction.
     """
     # Arrange: the qtbot fixture ensures a QApplication exists; patch exec on it
     # to return immediately, and patch QApplication construction in main to
@@ -182,14 +207,68 @@ def test_main_entry_point_runs_event_loop(
     def _instant_exec(_self: QApplication) -> int:
         return 0
 
+    # Shared ordered call-log to verify Velopack runs before QApplication.
+    events: list[str] = []
+
     def _existing_qapp(_args: list[str]) -> QApplication:
+        events.append("qapplication_init")
         return instance
+
+    def _velopack_app_factory() -> _RecorderVelopackApp:
+        return _RecorderVelopackApp(events)
 
     monkeypatch.setattr(QApplication, "exec", _instant_exec)
     monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
+    # Patch the velopack.App constructor so the bootstrap call is observable
+    # and inert. The recorder appends "velopack_run" to the shared log.
+    monkeypatch.setattr("velopack.App", _velopack_app_factory)
 
     # Act
     exit_code = app_module.main([])
 
-    # Assert
+    # Assert: exit code is 0 (no event loop crash) and AC10 ordering holds.
     assert exit_code == 0
+    assert events == ["velopack_run", "qapplication_init"]
+
+
+def test_main_calls_velopack_app_run_before_qapplication(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``velopack.App().run()`` must fire before ``QApplication`` construction (AC10).
+
+    This is a dedicated ordering assertion separate from the broader
+    event-loop smoke test so the AC10 invariant is testable in isolation
+    and so a future refactor that splits ``main`` cannot silently break
+    the bootstrap ordering.
+    """
+    del qtbot  # qtbot ensures a QApplication exists for pytest-qt
+
+    from PySide6.QtWidgets import QApplication
+
+    from src.gui import app as app_module
+
+    raw_instance = QApplication.instance()
+    assert raw_instance is not None
+    instance = cast("QApplication", raw_instance)
+
+    def _instant_exec(_self: QApplication) -> int:
+        return 0
+
+    events: list[str] = []
+
+    def _existing_qapp(_args: list[str]) -> QApplication:
+        events.append("qapplication_init")
+        return instance
+
+    def _velopack_app_factory() -> _RecorderVelopackApp:
+        return _RecorderVelopackApp(events)
+
+    monkeypatch.setattr(QApplication, "exec", _instant_exec)
+    monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
+    monkeypatch.setattr("velopack.App", _velopack_app_factory)
+
+    # Act: invoke the entry point; we only care about the call ordering.
+    app_module.main([])
+
+    # Assert: the velopack bootstrap must be the very first observable event.
+    assert events[:2] == ["velopack_run", "qapplication_init"]

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication
 
 from src.gui._import_dispatch_wiring import wire_import_dispatch
 from src.gui._render_exclusivity import wire_render_checkboxes
+from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
     default_export_runner,
     default_open_chooser,
@@ -425,17 +426,10 @@ class MainWindowPipelineView:
     def set_import_button_enabled(self, key: str, enabled: bool) -> None:
         """Route to the matching per-input import button and recompute Import-All.
 
-        Args:
-            key: The import key (``"LE"``, ``"aop"``, or ``"sku_lu"``).
-            enabled: The new enabled state for the keyed button.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Updates the keyed button's enabled state and recomputes the
-            Import-All button as the disjunction over the three per-input
-            buttons (per spec section 2 / research Q3).
+        Args ``key`` is ``"LE"``, ``"aop"``, or ``"sku_lu"``; ``enabled`` is
+        the new enabled state. Updates the keyed button and recomputes the
+        Import-All button as the disjunction over the three per-input
+        buttons (per spec section 2 / research Q3).
         """
         # Routing table for the three per-input import buttons. Import-All is
         # set to True iff any of the three per-input buttons is currently
@@ -481,8 +475,15 @@ def main(argv: list[str] | None = None) -> int:
 
     Side effects:
         Constructs a ``QApplication``, shows the main window, and runs the event
-        loop until the user closes the window.
+        loop until the user closes the window. Also invokes
+        ``velopack.App().run()`` as the very first statement so the Velopack
+        installer first-run and uninstall hooks fire correctly.
     """
+    # Velopack runtime SDK bootstrap (AC10): MUST be the first call in
+    # the entry point. The wrapper (in src.gui._velopack_bootstrap)
+    # isolates the untyped Velopack call behind a typed seam.
+    run_velopack_bootstrap()
+
     # Configure logging at the entry point so collaborator info/error messages
     # reach stderr.
     logging.basicConfig(level=logging.WARNING)
