@@ -70,6 +70,20 @@ projects:
   src/schema_settings.py: T2
   src/schema_registry.py: T2
 
+  # Schema matching and discovery (issue #42, epic #40 Feature B) — pure logic
+  # built additively on Feature A and the ETL resolver helpers. Classified
+  # T2-Core with the same rationale as the schema model and ETL core: the
+  # non-raising column probe and the best-match scorer define behavior later
+  # features (configurable ETL, the GUI schema picker) consume, so bugs cause
+  # feature regressions rather than silent data loss, and the deterministic
+  # scoring/tie-break is the correctness gate.
+  src/etl_column_probe.py: T2
+  src/schema_matching.py: T2
+  # Coverage-scoring helpers split out of schema_matching.py to keep both files
+  # under the 500-line cap once the registry-integrated entry point was added
+  # (issue #42, plan P4-T1). Same T2-Core rationale as schema_matching.py.
+  src/_schema_matching_helpers.py: T2
+
   # I/O adapter boundary around pandas/openpyxl/SQLite (T3-Adapters).
   src/pandas_io.py: T3
 
