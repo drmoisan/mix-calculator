@@ -358,3 +358,8 @@ def test_build_mix_base_excludes_inactive() -> None:
 
     # Assert: the inactive SKU is dropped entirely.
     assert result.empty
+
+
+# Case-insensitive Customer join tests (issue #35) live in
+# ``tests/test_mix_lookups_casefold.py`` to keep both files under the 500-line
+# policy cap.
