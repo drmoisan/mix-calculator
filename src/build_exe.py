@@ -44,6 +44,11 @@ if TYPE_CHECKING:
 # is ``src/``, parents[1] is the repo root containing ``pyproject.toml``.
 REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
+# Name of the compiled Windows executable Nuitka emits. The constant is
+# referenced by ``src.build_velopack.resolve_pack_command`` so the Velopack
+# ``--mainExe`` value stays in sync with the Nuitka ``--output-filename``.
+EXE_NAME: Final[str] = "MixCalculator.exe"
+
 
 def build_argument_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser exposing ``--dry-run`` and ``--clean``.
@@ -91,7 +96,13 @@ def resolve_nuitka_command() -> list[str]:
         interpreter, enables the PySide6 plug-in, explicitly includes the
         pandas and openpyxl packages (rather than relying on module-graph
         auto-detection), pins the output tree to ``<REPO_ROOT>/dist/nuitka``,
-        and points Nuitka at ``src/gui/app.py`` as the compile entry point.
+        sets the output executable name to :data:`EXE_NAME`
+        (``MixCalculator.exe``), embeds the Windows ICO into the executable
+        via ``--windows-icon-from-ico``, bundles the same ICO into the
+        standalone tree root via
+        ``--include-data-file=<icon-abs-path>=icon.ico`` so the running GUI
+        can resolve it at runtime, and points Nuitka at ``src/gui/app.py``
+        as the compile entry point.
 
     Returns:
         The fully-resolved argv as a list of strings, in the exact order
@@ -106,7 +117,10 @@ def resolve_nuitka_command() -> list[str]:
     # The argv order is part of the function's contract. The leading
     # python+m+nuitka triple delegates to the active interpreter; the
     # flags follow in the order documented in the issue acceptance
-    # criteria; the trailing positional names the compile target.
+    # criteria; the trailing positional names the compile target. The
+    # icon path is absolute (anchored off REPO_ROOT) so Nuitka receives
+    # an unambiguous filesystem location regardless of the working dir.
+    icon_path = REPO_ROOT / "packaging" / "velopack" / "icon.ico"
     return [
         sys.executable,
         "-m",
@@ -116,6 +130,14 @@ def resolve_nuitka_command() -> list[str]:
         "--include-package=pandas",
         "--include-package=openpyxl",
         f"--output-dir={REPO_ROOT / 'dist' / 'nuitka'}",
+        f"--output-filename={EXE_NAME}",
+        f"--windows-icon-from-ico={icon_path}",
+        # ``--include-data-file=<src>=<dst>`` semantics: ``<dst>`` is a
+        # path RELATIVE to the standalone tree root. ``icon.ico`` places
+        # the ICO alongside the compiled executable so the helper
+        # ``src.gui._icon.resolve_icon_path`` finds it at runtime via
+        # ``Path(sys.executable).parent / "icon.ico"``.
+        f"--include-data-file={icon_path}=icon.ico",
         str(REPO_ROOT / "src" / "gui" / "app.py"),
     ]
 

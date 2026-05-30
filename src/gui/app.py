@@ -16,11 +16,15 @@ from __future__ import annotations
 import logging
 import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from src.gui._icon import resolve_icon_path
 from src.gui._import_dispatch_wiring import wire_import_dispatch
+from src.gui._main_window_view import MainWindowPipelineView
 from src.gui._render_exclusivity import wire_render_checkboxes
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
@@ -275,7 +279,28 @@ def build_application(
         Constructs Qt widgets and the (Pyside6) ``QApplication`` if none is
         supplied. Does not show the window and does not enter ``exec``.
     """
-    application = qt_app
+    # Resolve a QApplication to set the window icon on. Three cases:
+    #   1) Caller supplied qt_app (test path or main path) -> reuse it.
+    #   2) A QApplication singleton already exists (e.g. pytest-qt
+    #      managed instance) -> reuse it; constructing a second would
+    #      trigger "Please destroy the QApplication singleton" from
+    #      shiboken.
+    #   3) No QApplication exists -> construct a fresh one.
+    if qt_app is not None:
+        application: QApplication = qt_app
+    else:
+        existing = QCoreApplication.instance()
+        if existing is not None:
+            application = cast("QApplication", existing)
+        else:
+            application = QApplication([])
+
+    # Set the window icon on the QApplication so it propagates to the
+    # title bar, taskbar, and Alt-Tab preview. ``resolve_icon_path``
+    # probes the compiled-mode location first and falls back to the
+    # dev-mode location; a missing icon raises FileNotFoundError loudly.
+    application.setWindowIcon(QIcon(str(resolve_icon_path())))
+
     reader: WorkbookReaderProtocol = (
         workbook_reader if workbook_reader is not None else WorkbookReader()
     )
@@ -392,77 +417,6 @@ def build_application(
     )
 
 
-class MainWindowPipelineView:
-    """Thin adapter from :class:`MainWindow` to :class:`PipelineViewProtocol`.
-
-    Purpose:
-        Bridge the pipeline presenter's view contract onto the main window's
-        status bar and result/error surfaces without modifying ``MainWindow``.
-
-    Responsibilities:
-        Implement ``set_running``/``show_result``/``show_error`` by routing to
-        the main window's status bar.
-
-    Attributes:
-        _window: The wrapped main window.
-    """
-
-    def __init__(self, window: MainWindow) -> None:
-        """Initialize the adapter with the main window it routes to."""
-        self._window = window
-
-    def set_running(self, is_running: bool) -> None:
-        """Reflect the running flag in the main window's status bar."""
-        self._window.set_status("Working..." if is_running else "")
-
-    def show_result(self, summary: str) -> None:
-        """Show a success summary in the main window's status bar."""
-        self._window.set_status(summary)
-
-    def show_error(self, message: str) -> None:
-        """Show an error message in the main window's status bar."""
-        self._window.set_status(f"Error: {message}")
-
-    def set_import_button_enabled(self, key: str, enabled: bool) -> None:
-        """Route to the matching per-input import button and recompute Import-All.
-
-        Args ``key`` is ``"LE"``, ``"aop"``, or ``"sku_lu"``; ``enabled`` is
-        the new enabled state. Updates the keyed button and recomputes the
-        Import-All button as the disjunction over the three per-input
-        buttons (per spec section 2 / research Q3).
-        """
-        # Routing table for the three per-input import buttons. Import-All is
-        # set to True iff any of the three per-input buttons is currently
-        # enabled. An unknown key is a no-op so the adapter is permissive in
-        # the same way the presenter's _import_one_frame KeyError boundary is.
-        if key == "LE":
-            self._window.import_le_btn.setEnabled(enabled)
-        elif key == "aop":
-            self._window.import_aop_btn.setEnabled(enabled)
-        elif key == "sku_lu":
-            self._window.import_skulu_btn.setEnabled(enabled)
-        else:
-            return
-        any_enabled = (
-            self._window.import_le_btn.isEnabled()
-            or self._window.import_aop_btn.isEnabled()
-            or self._window.import_skulu_btn.isEnabled()
-        )
-        self._window.import_all_btn.setEnabled(any_enabled)
-
-    def set_run_button_enabled(self, enabled: bool) -> None:
-        """Set the Run button's enabled state on the wrapped main window."""
-        self._window.run_btn.setEnabled(enabled)
-
-    def set_save_button_enabled(self, enabled: bool) -> None:
-        """Set the Save button's enabled state on the wrapped main window."""
-        self._window.save_btn.setEnabled(enabled)
-
-    def set_export_button_enabled(self, enabled: bool) -> None:
-        """Set the Export button's enabled state on the wrapped main window."""
-        self._window.export_btn.setEnabled(enabled)
-
-
 def main(argv: list[str] | None = None) -> int:
     """Run the GUI: bootstrap Qt, build the wired components, show the window.
 
@@ -489,6 +443,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING)
     args = argv if argv is not None else sys.argv
     qt_app = QApplication(args)
+    # Set the window icon on the production QApplication so the title
+    # bar, taskbar, and Alt-Tab preview pick it up. The independent call
+    # in ``build_application`` covers the test/build-only paths.
+    qt_app.setWindowIcon(QIcon(str(resolve_icon_path())))
     wired = build_application(qt_app=qt_app)
     wired.window.show()
     return qt_app.exec()
