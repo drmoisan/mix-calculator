@@ -9,7 +9,6 @@ order/index for both bundled default schemas. Uses in-memory fixtures only.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -27,9 +26,8 @@ from src.schema_model import (
 )
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import le_fixtures  # noqa: E402
+# The in-memory fixtures live in the tests package and import as package modules.
+from tests import aop_fixtures, le_fixtures
 
 _MONTHS_A: list[float] = [
     10.0,
@@ -151,8 +149,6 @@ def test_le_output_column_order_matches_target() -> None:
 
 def test_aop_output_columns_present() -> None:
     """The AOP output contains every canonical column with KEY present (AC2)."""
-    import aop_fixtures
-
     from src.pandas_io import read_excel_sheet
 
     rows = [

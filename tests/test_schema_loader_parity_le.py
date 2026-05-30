@@ -10,7 +10,6 @@ totals fill quirk, and the PPG copy quirk. No temp files, no network.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,12 +21,11 @@ from src.pandas_io import read_excel_sheet
 from src.schema_loader import SchemaLoader
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
+# The in-memory fixtures live in the tests package and import as package modules.
+from tests import le_fixtures
+
 if TYPE_CHECKING:
     from src.schema_model import SchemaDefinition
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import le_fixtures  # noqa: E402
 
 _MONTHS_A: list[float] = [
     10.0,

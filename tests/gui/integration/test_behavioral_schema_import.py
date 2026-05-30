@@ -11,7 +11,6 @@ fixtures only; no temp files, no network, no real DB.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,17 +22,13 @@ from src.gui.pipeline_service import PipelineService
 from src.pandas_io import read_excel_sheet
 from src.schema_matching import MatchResult, MismatchReport, UnmatchedColumn
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
+
+# The in-memory fixtures live in the tests package and import as package modules.
+from tests import aop_fixtures, le_fixtures
 from tests.gui.fakes.fake_services import FakeSchemaService
 
 if TYPE_CHECKING:
     from src.schema_model import SchemaDefinition
-
-# The in-repo Excel fixtures live in tests/; add that directory to the path so
-# the fixture builders import the same way the loader integration tests do.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-import aop_fixtures  # noqa: E402
-import le_fixtures  # noqa: E402
 
 _MONTHS_A: list[float] = [
     10.0,

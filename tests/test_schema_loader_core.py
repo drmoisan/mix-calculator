@@ -9,7 +9,6 @@ files, no network.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
@@ -27,12 +26,8 @@ from src.schema_model import (
 )
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
-# The in-memory fixtures live in the tests package; ensure the directory is on
-# the path so they import cleanly regardless of the test runner's working dir.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-import aop_fixtures  # noqa: E402
-import le_fixtures  # noqa: E402
+# The in-memory fixtures live in the tests package and import as package modules.
+from tests import aop_fixtures, le_fixtures
 
 # Twelve monthly vectors reused across tests.
 _MONTHS_A: list[float] = [
