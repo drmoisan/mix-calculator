@@ -17,6 +17,7 @@ The shell exposes:
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -66,6 +67,8 @@ class MainWindow(QMainWindow):
         save_requested: Emitted on Save.
         open_db_requested: Emitted on Open.
         export_requested: Emitted on Export.
+        schema_builder_requested: Emitted when the "Schema Builder..." menu
+            action is triggered (Feature D, AC6).
     """
 
     import_one_requested: Signal = Signal(str)
@@ -74,6 +77,7 @@ class MainWindow(QMainWindow):
     save_requested: Signal = Signal()
     open_db_requested: Signal = Signal()
     export_requested: Signal = Signal()
+    schema_builder_requested: Signal = Signal()
 
     def __init__(self, preview_widget: PreviewWidget | None = None) -> None:
         """Build the main window UI.
@@ -134,6 +138,18 @@ class MainWindow(QMainWindow):
         central.setLayout(body)
         self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
+
+        # Additive menu surface (Feature D): a Tools menu with a "Schema
+        # Builder..." action that emits schema_builder_requested. The action is
+        # stored so tests can trigger it directly without driving the menu bar UI.
+        self.schema_builder_action = QAction("Schema Builder...", self)
+        tools_menu = self.menuBar().addMenu("Tools")
+        tools_menu.addAction(self.schema_builder_action)
+        self.schema_builder_action.triggered.connect(self.schema_builder_requested.emit)
+        # Holder for the schema-builder presenter retained while its dialog is
+        # open (set by the composition root's _schema_wiring). Declared here so
+        # the attribute is typed rather than dynamically attached.
+        self.schema_builder_presenter: object | None = None
 
         # Wire each widget-owned Import button to emit import_one_requested with
         # its key, and each global control button to its named signal, so the

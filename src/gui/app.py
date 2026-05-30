@@ -14,8 +14,10 @@ wired collaborators without entering the blocking event loop, while
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import QCoreApplication
@@ -26,6 +28,7 @@ from src.gui._icon import resolve_icon_path
 from src.gui._import_dispatch_wiring import wire_import_dispatch
 from src.gui._main_window_view import MainWindowPipelineView
 from src.gui._render_exclusivity import wire_render_checkboxes
+from src.gui._schema_wiring import wire_schema_builder
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
     default_export_runner,
@@ -39,16 +42,20 @@ from src.gui.main_window import MainWindow
 from src.gui.pipeline_service import ImportSpec, PipelineService
 from src.gui.presenters.export_presenter import ExportPresenter
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
+from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
 from src.gui.runners import RunnerProtocol, ThreadedRunner
 from src.gui.services.db_service import DbService
+from src.gui.services.schema_service import build_default_schema_service
 from src.gui.services.workbook_reader import WorkbookReader
 from src.gui.widgets.export_dialog import ExportDialog
+from src.gui.widgets.schema_builder_dialog import SchemaBuilderDialog
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from src.gui.pipeline_service import PipelineServiceProtocol
+    from src.gui.services.schema_service import SchemaServiceProtocol
     from src.gui.services.workbook_reader import WorkbookReaderProtocol
 
 __all__ = [
@@ -80,6 +87,9 @@ class WiredApplication:
         export_dialog: The export dialog used by ``export_presenter``.
         le_presenter, aop_presenter, skulu_presenter: The per-input source
             selection presenters, one per input widget.
+        schema_service: The schema-coordination service seam (Feature D). Wired
+            so the "Schema Builder..." action and import-flow discovery share one
+            injectable service; tests inject a fake.
     """
 
     qt_app: QApplication | None
@@ -93,6 +103,7 @@ class WiredApplication:
     aop_presenter: SourceSelectionPresenter
     skulu_presenter: SourceSelectionPresenter
     runner: RunnerProtocol
+    schema_service: SchemaServiceProtocol
 
 
 def _build_registry() -> ExporterRegistry:
@@ -246,6 +257,7 @@ def build_application(
     pipeline_service: PipelineServiceProtocol | None = None,
     workbook_reader: WorkbookReaderProtocol | None = None,
     exporter_registry: ExporterRegistry | None = None,
+    schema_service: SchemaServiceProtocol | None = None,
 ) -> WiredApplication:
     """Construct and wire every collaborator without entering the event loop.
 
@@ -271,6 +283,11 @@ def build_application(
             :func:`_build_registry`. Composition-root test seam so behavioral
             tests can inject a registry whose ``"CSV"`` entry captures writes
             in-memory; production ``main`` does not pass this keyword.
+        schema_service: Optional :class:`SchemaServiceProtocol` (Feature D).
+            Defaults to a disk-backed service from
+            :func:`~src.gui.services.schema_service.build_default_schema_service`;
+            tests inject a fake. Used by the "Schema Builder..." action and
+            import-flow schema discovery.
 
     Returns:
         A :class:`WiredApplication` carrying the assembled components.
@@ -312,6 +329,15 @@ def build_application(
     runner_resolved: RunnerProtocol = runner if runner is not None else ThreadedRunner()
     # Use the injected registry when supplied (test seam) else build production.
     registry = exporter_registry if exporter_registry is not None else _build_registry()
+    # Resolve the schema service (Feature D): use the injected fake when supplied,
+    # else build the production disk-backed service from the process environment.
+    schema_service_resolved: SchemaServiceProtocol = (
+        schema_service
+        if schema_service is not None
+        else build_default_schema_service(
+            env=os.environ, platform=sys.platform, home=Path.home()
+        )
+    )
 
     # Build the shell and bind one source-selection presenter per input widget;
     # pass the shared preview widget as the preview sink (research Q1 Option A)
@@ -402,6 +428,16 @@ def build_application(
         runner=runner_resolved,
     )
 
+    # Feature D (AC6): connect the "Schema Builder..." action to open the builder
+    # dialog driven by a fresh SchemaBuilderPresenter over the resolved service.
+    # Fresh dialog/presenter per open so the builder is repeatable.
+    wire_schema_builder(
+        window,
+        schema_service_resolved,
+        lambda: SchemaBuilderDialog(),
+        lambda dialog, service: SchemaBuilderPresenter(dialog, service),
+    )
+
     return WiredApplication(
         qt_app=application,
         window=window,
@@ -414,6 +450,7 @@ def build_application(
         aop_presenter=aop_presenter,
         skulu_presenter=skulu_presenter,
         runner=runner_resolved,
+        schema_service=schema_service_resolved,
     )
 
 

@@ -156,3 +156,23 @@ projects:
   # app.py to keep both modules under the 500-line cap. Same T4 scaffolding
   # tier as app.py; both are pure composition glue with no transform logic.
   src/gui/_wiring.py: T4
+
+  # GUI schema builder (issue #44, epic #40 Feature D). Additive integration of
+  # the configurable-schema subsystem into the GUI. Tier rationale per
+  # .claude/rules/quality-tiers.md:
+  #   T2 (Core) — the schema service seam, the new view Protocols, and the
+  #     plain-Python presenters that hold the presentation/assembly logic; bugs
+  #     cause feature regressions, not data loss.
+  #   T3 (Adapters & UI) — the passive Qt dialogs and their tab-construction
+  #     helpers (glue around Qt widgets the team does not own).
+  #   T4 (Scaffolding) — the composition-root schema wiring helper, sibling of
+  #     _import_dispatch_wiring/_wiring.
+  src/gui/services/schema_service.py: T2
+  src/gui/_schema_view_protocols.py: T2
+  src/gui/presenters/column_matching_presenter.py: T2
+  src/gui/presenters/schema_builder_presenter.py: T2
+  src/gui/presenters/_schema_builder_state.py: T2
+  src/gui/widgets/column_matching_dialog.py: T3
+  src/gui/widgets/schema_builder_dialog.py: T3
+  src/gui/widgets/_schema_builder_tabs.py: T3
+  src/gui/_schema_wiring.py: T4

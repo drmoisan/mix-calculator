@@ -12,10 +12,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.schema_loader import SchemaLoader
+
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     import pandas as pd
 
     from src.gui.pipeline_service import ImportSpec
+    from src.schema_matching import MatchResult
+    from src.schema_model import SchemaDefinition
 
 
 class FakeWorkbookReader:
@@ -191,6 +197,21 @@ class FakePipelineService:
         self.import_calls.append(("sku_lu", path, sheet))
         return self.import_result["sku_lu"]
 
+    def import_with_schema(
+        self, raw: pd.DataFrame, schema: SchemaDefinition
+    ) -> pd.DataFrame:
+        """Import a raw frame through a real schema-driven loader.
+
+        Args:
+            raw: The raw source frame.
+            schema: The schema whose loader transforms ``raw``.
+
+        Returns:
+            The schema's canonical output frame from a real
+            :class:`~src.schema_loader.SchemaLoader`.
+        """
+        return SchemaLoader(schema).load(raw)
+
     def run_pipeline(self, tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
         """Return the configured run result or raise the configured error.
 
@@ -285,3 +306,109 @@ class FakeDbService:
             The configured open result.
         """
         return dict(self.open_result)
+
+
+class FakeSchemaService:
+    """Fake :class:`SchemaServiceProtocol` returning controlled schema data.
+
+    Purpose:
+        Let presenter and wiring tests exercise the schema-coordination seam with
+        controlled return data and recorded calls, without real disk access or a
+        ``QApplication``.
+
+    Responsibilities:
+        Return configured schema names and a configured
+        :class:`~src.schema_matching.MatchResult`, look up stored schemas by name,
+        record every ``save_schema`` call, and build a real
+        :class:`~src.schema_loader.SchemaLoader` for the requested schema.
+
+    Attributes:
+        schema_names: The names ``list_schema_names`` returns.
+        schemas: Mapping of name to schema served by ``load_schema``.
+        match_result: The :class:`MatchResult` ``find_best_match`` returns.
+        saved: Recorded schemas passed to ``save_schema``, in call order.
+        match_calls: Recorded header sequences passed to ``find_best_match``.
+    """
+
+    def __init__(
+        self,
+        schema_names: list[str] | None = None,
+        schemas: dict[str, SchemaDefinition] | None = None,
+        match_result: MatchResult | None = None,
+    ) -> None:
+        """Initialize the fake with controlled schema data.
+
+        Args:
+            schema_names: The names ``list_schema_names`` returns (default empty).
+            schemas: Mapping of name to schema served by ``load_schema`` (default
+                empty).
+            match_result: The result ``find_best_match`` returns. When ``None``,
+                ``find_best_match`` raises if called, so tests that exercise
+                matching must supply one.
+        """
+        self.schema_names: list[str] = list(schema_names) if schema_names else []
+        self.schemas: dict[str, SchemaDefinition] = dict(schemas) if schemas else {}
+        self.match_result: MatchResult | None = match_result
+        self.saved: list[SchemaDefinition] = []
+        self.match_calls: list[list[str]] = []
+
+    def list_schema_names(self) -> list[str]:
+        """Return the configured schema names.
+
+        Returns:
+            The configured schema names.
+        """
+        return list(self.schema_names)
+
+    def load_schema(self, name: str) -> SchemaDefinition:
+        """Return the stored schema for ``name``.
+
+        Args:
+            name: The schema name to look up.
+
+        Returns:
+            The configured schema registered under ``name``.
+
+        Raises:
+            KeyError: If no schema was configured for ``name``.
+        """
+        return self.schemas[name]
+
+    def save_schema(self, schema: SchemaDefinition) -> None:
+        """Record a ``save_schema`` call.
+
+        Args:
+            schema: The schema being persisted (recorded).
+
+        Returns:
+            ``None``.
+        """
+        self.saved.append(schema)
+
+    def find_best_match(self, headers: Sequence[str]) -> MatchResult:
+        """Return the configured match result, recording the headers.
+
+        Args:
+            headers: The source headers (recorded).
+
+        Returns:
+            The configured :class:`MatchResult`.
+
+        Raises:
+            AssertionError: If no ``match_result`` was configured.
+        """
+        self.match_calls.append(list(headers))
+        assert self.match_result is not None, "FakeSchemaService.match_result not set"
+        return self.match_result
+
+    def build_loader(self, schema: SchemaDefinition) -> SchemaLoader:
+        """Return a real :class:`SchemaLoader` for ``schema``.
+
+        Args:
+            schema: The schema the returned loader applies.
+
+        Returns:
+            A real :class:`~src.schema_loader.SchemaLoader` over ``schema`` so the
+            preview path exercises genuine load behavior.
+        """
+        return SchemaLoader(schema)

@@ -47,6 +47,8 @@ from src.mix_transforms import pivot_aop, pivot_le
 if TYPE_CHECKING:
     import pandas as pd
 
+    from src.schema_model import SchemaDefinition
+
 __all__ = [
     "ImportSpec",
     "PipelineService",
@@ -145,6 +147,20 @@ class PipelineServiceProtocol(Protocol):
 
         Returns:
             The cleaned SKU lookup frame.
+        """
+        ...
+
+    def import_with_schema(
+        self, raw: pd.DataFrame, schema: SchemaDefinition
+    ) -> pd.DataFrame:
+        """Import a raw frame through a schema-driven loader.
+
+        Args:
+            raw: The raw source frame read at the schema's header row.
+            schema: The schema whose loader transforms ``raw``.
+
+        Returns:
+            The schema's canonical output frame.
         """
         ...
 
@@ -275,6 +291,38 @@ class PipelineService:
         """
         logger.info("Importing SKU_LU source from sheet %r.", sheet)
         return load_skulu.load_skulu(path, sheet=sheet)
+
+    def import_with_schema(
+        self, raw: pd.DataFrame, schema: SchemaDefinition
+    ) -> pd.DataFrame:
+        """Import a raw frame through a schema-driven loader (additive path).
+
+        Builds a :class:`~src.schema_loader.SchemaLoader` for ``schema`` and
+        returns ``loader.load(raw)``. This is the additive schema-driven import
+        path used only when discovery selects a non-default (registry/user-built)
+        schema; the known-file path continues to use the dedicated loaders
+        (``import_le``/``import_aop``/``import_skulu``) unchanged.
+
+        Args:
+            raw: The raw source frame read at the schema's header row. Not mutated.
+            schema: The schema whose loader transforms ``raw``.
+
+        Returns:
+            The schema's canonical output frame.
+
+        Raises:
+            ValueError: Propagated from the loader on a column/KEY resolution
+                failure.
+            FormulaError: Propagated from the loader on a derived-column formula
+                failure.
+        """
+        # Import the loader locally so the service module's import surface is
+        # unchanged for callers that never use the schema path.
+        from src.schema_loader import SchemaLoader
+
+        logger.info("Importing a source via schema %r.", schema.name)
+        loader = SchemaLoader(schema)
+        return loader.load(raw)
 
     def import_sources(self, spec: ImportSpec) -> dict[str, pd.DataFrame]:
         """Import all three inputs from a spec and return the import frames.
