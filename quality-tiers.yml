@@ -55,6 +55,21 @@ projects:
   src/mix_bottomsup.py: T2
   src/_mix_bottomsup_helpers.py: T2
 
+  # Configurable-schema model and registry (issue #41, epic #40 Feature A) —
+  # the typed schema-definition dataclasses, the JSON serialization adapter, the
+  # pure registry-directory resolution, and the registry with its injectable
+  # file-I/O boundary. Classified T2-Core with the same rationale as the ETL
+  # core: these modules define the serializable schema contract later features
+  # consume, so bugs cause feature regressions rather than silent data loss, and
+  # the __post_init__ structural invariants are the correctness gate. The
+  # default real-disk file store lives inside src/schema_registry.py (no separate
+  # helper module was needed to stay under the 500-line limit).
+  src/schema_model.py: T2
+  src/schema_serialization.py: T2
+  src/_schema_json_helpers.py: T2
+  src/schema_settings.py: T2
+  src/schema_registry.py: T2
+
   # I/O adapter boundary around pandas/openpyxl/SQLite (T3-Adapters).
   src/pandas_io.py: T3
 
