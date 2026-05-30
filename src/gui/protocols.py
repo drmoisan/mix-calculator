@@ -19,10 +19,21 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+# The two Feature D view protocols are defined in a sibling module and re-exported
+# here so callers continue to import every GUI view protocol from one place. The
+# split keeps this file under the repository's 500-line cap without moving any of
+# the existing four protocols defined below.
+from src.gui._schema_view_protocols import (
+    ColumnMatchingViewProtocol,
+    SchemaBuilderViewProtocol,
+)
+
 __all__ = [
+    "ColumnMatchingViewProtocol",
     "ExportViewProtocol",
     "PipelineViewProtocol",
     "PreviewSinkProtocol",
+    "SchemaBuilderViewProtocol",
     "SourceSelectionViewProtocol",
 ]
 

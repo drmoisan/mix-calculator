@@ -55,6 +55,51 @@ projects:
   src/mix_bottomsup.py: T2
   src/_mix_bottomsup_helpers.py: T2
 
+  # Configurable-schema model and registry (issue #41, epic #40 Feature A) —
+  # the typed schema-definition dataclasses, the JSON serialization adapter, the
+  # pure registry-directory resolution, and the registry with its injectable
+  # file-I/O boundary. Classified T2-Core with the same rationale as the ETL
+  # core: these modules define the serializable schema contract later features
+  # consume, so bugs cause feature regressions rather than silent data loss, and
+  # the __post_init__ structural invariants are the correctness gate. The
+  # default real-disk file store lives inside src/schema_registry.py (no separate
+  # helper module was needed to stay under the 500-line limit).
+  src/schema_model.py: T2
+  src/schema_serialization.py: T2
+  src/_schema_json_helpers.py: T2
+  src/schema_settings.py: T2
+  src/schema_registry.py: T2
+
+  # Schema matching and discovery (issue #42, epic #40 Feature B) — pure logic
+  # built additively on Feature A and the ETL resolver helpers. Classified
+  # T2-Core with the same rationale as the schema model and ETL core: the
+  # non-raising column probe and the best-match scorer define behavior later
+  # features (configurable ETL, the GUI schema picker) consume, so bugs cause
+  # feature regressions rather than silent data loss, and the deterministic
+  # scoring/tie-break is the correctness gate.
+  src/etl_column_probe.py: T2
+  src/schema_matching.py: T2
+  # Coverage-scoring helpers split out of schema_matching.py to keep both files
+  # under the 500-line cap once the registry-integrated entry point was added
+  # (issue #42, plan P4-T1). Same T2-Core rationale as schema_matching.py.
+  src/_schema_matching_helpers.py: T2
+
+  # Configurable ETL core and formula engine (issue #43, epic #40 Feature C).
+  # Tier rationale per .claude/rules/quality-tiers.md:
+  #   T1 (Critical) — the formula engine and the schema-driven loader core. These
+  #     evaluate sandboxed expressions and reproduce the as-built LE/AOP loaders
+  #     byte-for-equivalent; a behavior bug here causes silent data corruption in
+  #     every downstream measure, so they carry the Critical obligations
+  #     (>= 1 property test per pure function, mutation >= 75%).
+  src/schema_formula.py: T1
+  src/schema_loader.py: T1
+  #   T2 (Core) — the split-out phase/pure helpers that hold the formula and
+  #     loader logic kept under the 500-line cap. Same Core rationale as the ETL
+  #     core: bugs cause feature regressions, and the parity tests are the
+  #     correctness gate.
+  src/_schema_formula_helpers.py: T2
+  src/_schema_loader_helpers.py: T2
+
   # I/O adapter boundary around pandas/openpyxl/SQLite (T3-Adapters).
   src/pandas_io.py: T3
 
@@ -111,3 +156,23 @@ projects:
   # app.py to keep both modules under the 500-line cap. Same T4 scaffolding
   # tier as app.py; both are pure composition glue with no transform logic.
   src/gui/_wiring.py: T4
+
+  # GUI schema builder (issue #44, epic #40 Feature D). Additive integration of
+  # the configurable-schema subsystem into the GUI. Tier rationale per
+  # .claude/rules/quality-tiers.md:
+  #   T2 (Core) — the schema service seam, the new view Protocols, and the
+  #     plain-Python presenters that hold the presentation/assembly logic; bugs
+  #     cause feature regressions, not data loss.
+  #   T3 (Adapters & UI) — the passive Qt dialogs and their tab-construction
+  #     helpers (glue around Qt widgets the team does not own).
+  #   T4 (Scaffolding) — the composition-root schema wiring helper, sibling of
+  #     _import_dispatch_wiring/_wiring.
+  src/gui/services/schema_service.py: T2
+  src/gui/_schema_view_protocols.py: T2
+  src/gui/presenters/column_matching_presenter.py: T2
+  src/gui/presenters/schema_builder_presenter.py: T2
+  src/gui/presenters/_schema_builder_state.py: T2
+  src/gui/widgets/column_matching_dialog.py: T3
+  src/gui/widgets/schema_builder_dialog.py: T3
+  src/gui/widgets/_schema_builder_tabs.py: T3
+  src/gui/_schema_wiring.py: T4

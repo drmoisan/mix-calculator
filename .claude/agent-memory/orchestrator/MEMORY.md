@@ -12,3 +12,6 @@
 - [Remediation loop strict handoff](remediation-loop-strict-handoff.md) — remediation cycles must run atomic-planner -> atomic-executor -> feature-review only; no direct typed-engineer worker calls; five required artifacts per cycle
 - [Remediation-plan em-dash required](remediation-plan-em-dash-required.md) — the plan validator rejects `### Phase N (continued) — <Title>`; only canonical `### Phase N — <Title>` passes
 - [PySide6 CI system libs](pyside6-ci-system-libs.md) — Ubuntu runner needs libegl1/libgl1/libxkbcommon0/libdbus-1-3/libfontconfig1 plus QT_QPA_PLATFORM=offscreen for pytest-qt to collect
+- [asteval approved for formula engine](asteval-approved-for-formula-engine.md) — user approved asteval dependency for the configurable-schema formula engine; no need to re-ask for that specific use
+- [new_active_feature_folder date prefix](new-active-feature-folder-date-prefix.md) — epic folders get a YYYY-MM-DD- prefix, feature folders don't; git mv child folders to add it
+- [orchestrator-state validator divergence](orchestrator-state-validator-divergence.md) — MCP orchestrator-state check is stricter than the real SubagentStop hook; conform to the canonical schema's remediation_loop shape

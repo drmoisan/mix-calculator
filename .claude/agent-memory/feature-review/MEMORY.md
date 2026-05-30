@@ -7,3 +7,4 @@
 - [policy-audit required structure](policy-audit-required-structure.md) — validator needs Appendix A heading, all 4 TS/PS coverage checklist lines, and a numeric Baseline/Post-change/Disposition comparison line
 - [code-review findings table header](code-review-findings-table-header.md) — code-review validator requires the exact 7-column `| Severity | File | Location | Finding | Recommendation | Rationale | Evidence |` header
 - [policy-audit comparison-line schema](policy-audit-comparison-line-schema.md) — per-language bullets under `### 1.2.1` need labelled `Baseline:` `Post-change:` `Change:` `Disposition:` `Evidence:` (and `New/changed-code coverage:` when row is non-N/A)
+- [E402 fixture-import unauthorized](e402-fixture-import-unauthorized.md) — `# noqa: E402` on test sys.path fixture imports is not pre-authorized; gate as PARTIAL/procedural like pyright:ignore. S101 blanket-allowed in tests; S108/ARG002 pattern-authorized
