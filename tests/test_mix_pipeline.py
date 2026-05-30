@@ -261,6 +261,34 @@ def test_mix_pipeline_loader_error_returns_one(
     assert exit_code == 1
 
 
+def test_mix_pipeline_nrr_summary_check_ok(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The end-to-end nrr_summary Check row reconciles to "CHECK" (issue #35 AC7).
+
+    Regression guard for the case-insensitive Customer join: the in-memory
+    pipeline must persist an ``nrr_summary`` whose ``Check`` row carries
+    ``"CHECK"``. This complements the synthetic Winco/WINCO unit fixtures by
+    verifying the full pipeline still reconciles end-to-end after the pivot
+    rework.
+    """
+    # Arrange: shared in-memory database and combined workbook.
+    con: PersistentConnection = patch_connect(monkeypatch)
+    buffer = _build_combined_workbook()
+    _patch_loaders(monkeypatch, buffer)
+
+    # Act
+    exit_code = mix_pipeline.main(["--input", "ignored.xlsx", "--output", "ignored.db"])
+
+    # Assert: pipeline ran clean and the Check row carries "CHECK".
+    assert exit_code == 0
+    nrr_summary = read_table(con, "nrr_summary")
+    check_rows = nrr_summary[nrr_summary["metric"] == "Check"]
+    assert len(check_rows) == 1, "expected exactly one Check row in nrr_summary"
+    assert check_rows.iloc[0]["check"] == "CHECK"
+    con.real_close()
+
+
 def test_sqlite_connection_helper_is_in_memory() -> None:
     """The test database is in-memory (no runtime temp files are created)."""
     # Arrange / Act: a bare in-memory connection round-trips a trivial table.

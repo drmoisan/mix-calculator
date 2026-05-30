@@ -59,6 +59,24 @@ _AOP_DROP: list[str] = [
 _LE_DROP: list[str] = ["Super Category", "PPG", "SKU Descripiton"]
 
 
+def _customer_join_key(s: pd.Series[str]) -> pd.Series[str]:
+    """Return the canonical Customer join key (strip + casefold).
+
+    Pure function: applies ``.str.strip()`` and ``.str.casefold()`` to produce
+    a key suitable for case-insensitive and whitespace-insensitive joins. The
+    input casing is not preserved on the returned series; the displayed
+    Customer column must be re-attached by the caller.
+
+    Args:
+        s: A string-typed pandas Series of Customer names.
+
+    Returns:
+        A pandas Series of the same length with whitespace-trimmed,
+        casefolded values.
+    """
+    return s.str.strip().str.casefold()
+
+
 def build_customer_lu(aop_raw: pd.DataFrame) -> pd.DataFrame:
     """Build the distinct ``{Customer, Customer Master}`` lookup (research §4.3).
 
@@ -71,9 +89,16 @@ def build_customer_lu(aop_raw: pd.DataFrame) -> pd.DataFrame:
 
     Returns:
         A two-column DataFrame ``{Customer, Customer Master}`` with one row per
-        distinct pair, in first-appearance order.
+        distinct pair, in first-appearance order. Customer values are stripped
+        of leading/trailing whitespace so whitespace-equivalent pairs collapse
+        to a single row; original casing is preserved.
     """
-    distinct = aop_raw[["Customer", "Customer Master"]].drop_duplicates()
+    distinct = aop_raw[["Customer", "Customer Master"]].copy()
+    # Strip whitespace before deduping so 'Winco ' and 'Winco' collapse to one
+    # row, keeping the displayed lookup consistent with the case-insensitive
+    # join in ``build_aop_vs_le``.
+    distinct["Customer"] = distinct["Customer"].astype(str).str.strip()
+    distinct = distinct.drop_duplicates()
     return distinct.reset_index(drop=True)
 
 
@@ -93,6 +118,9 @@ def build_aop_norm(aop_long: pd.DataFrame) -> pd.DataFrame:
     """
     drop_present = [column for column in _AOP_DROP if column in aop_long.columns]
     reduced = aop_long.drop(columns=drop_present).copy()
+    # Strip leading/trailing whitespace so equivalent-up-to-whitespace Customer
+    # values join later in build_aop_vs_le; casing is preserved.
+    reduced["Customer"] = reduced["Customer"].astype(str).str.strip()
     reduced["Scenario"] = "AOP"
     return reduced[["Customer", "SKU #", "Attribute", "Scenario", "Value"]]
 
@@ -113,6 +141,9 @@ def build_le_norm(le_long: pd.DataFrame) -> pd.DataFrame:
     """
     drop_present = [column for column in _LE_DROP if column in le_long.columns]
     reduced = le_long.drop(columns=drop_present).copy()
+    # Strip leading/trailing whitespace so equivalent-up-to-whitespace Customer
+    # values join later in build_aop_vs_le; casing is preserved.
+    reduced["Customer"] = reduced["Customer"].astype(str).str.strip()
     reduced["Scenario"] = "LE"
     return reduced[["Customer", "SKU #", "Attribute", "Scenario", "Value"]]
 
@@ -135,11 +166,22 @@ def build_aop_vs_le(
 
     Returns:
         A DataFrame ``{Customer, SKU #, Attribute, AOP, LE, Diff,
-        Classification}``.
+        Classification}``. The ``Customer`` column carries the AOP-side casing
+        when both sides match a casefolded key; LE-side casing is preserved on
+        LE-only orphans.
     """
     combined = pd.concat([aop_norm, le_norm], ignore_index=True)
+
+    # WARNING: ``astype(str)`` converts NaN ``Customer`` values to the literal
+    # string ``"nan"``. This matches the pre-change pivot's behavior (no row
+    # filter is applied for missing Customer values), so the contract is
+    # preserved.
+    combined["_customer_key"] = _customer_join_key(combined["Customer"].astype(str))
+
+    # Pivot on the casefolded join key (not on the raw Customer string) so AOP
+    # and LE rows that differ only by case or whitespace collapse to one row.
     wide = combined.pivot_table(
-        index=["Customer", "SKU #", "Attribute"],
+        index=["_customer_key", "SKU #", "Attribute"],
         columns="Scenario",
         values="Value",
         aggfunc="sum",
@@ -158,6 +200,30 @@ def build_aop_vs_le(
     wide = wide[wide["Attribute"] != "Cases"].copy()
 
     wide["Diff"] = wide["LE"] - wide["AOP"]
+
+    # Re-attach the displayed Customer column. AOP wins on display because AOP
+    # is the planning baseline; LE fills LE-only orphans.
+    # WARNING: if a single Customer key appears under multiple casings on the
+    # AOP side, ``drop_duplicates(..., keep="first")`` retains the first
+    # observed casing as the display value.
+    aop_display = combined.loc[
+        combined["Scenario"] == "AOP", ["_customer_key", "Customer"]
+    ].drop_duplicates(subset="_customer_key", keep="first")
+    le_display = combined.loc[
+        combined["Scenario"] == "LE", ["_customer_key", "Customer"]
+    ].drop_duplicates(subset="_customer_key", keep="first")
+    le_display = le_display.rename(columns={"Customer": "_customer_le"})
+
+    wide = wide.merge(aop_display, how="left", on="_customer_key")
+    wide = wide.merge(le_display, how="left", on="_customer_key")
+    wide["Customer"] = wide["Customer"].fillna(wide["_customer_le"])
+
+    # Drop the join-key helper columns so the public contract is unchanged.
+    wide = wide.drop(columns=["_customer_key", "_customer_le"])
+
+    # Reorder to the canonical column layout before classification.
+    wide = wide[["Customer", "SKU #", "Attribute", "AOP", "LE", "Diff"]]
+
     return classify_table(wide)
 
 
