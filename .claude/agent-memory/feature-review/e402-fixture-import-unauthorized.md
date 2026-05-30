@@ -32,3 +32,11 @@ pre-authorized list. S101 is blanket-allowed in tests via pyproject per-file-ign
 S108/S105/ARG002 are pattern-authorized; E402 is NOT. See [[pyright-ignore-authorization-scope]]
 for the same procedural-gate reasoning and [[policy-audit-required-structure]] for
 the artifact structure.
+
+**Epic #40 outcome (cycle 1, head 0ddfc53, verified 2026-05-30):** the preferred
+refactor (option 1) was applied — fixtures moved to top-of-file package imports
+(`from tests import aop_fixtures` / `from tests.le_fixtures import ...`), all 9 E402
+directives and all fixture-only `sys.path.insert` lines removed, no policy edit, no
+new suppression (ruff per-file-ignores still only `tests/**/* = ["S101"]`). Re-audit
+verdict FULLY COMPLIANT. The gating rule above still stands for future diffs; this
+note just records that the epic #40 instance is closed.
