@@ -19,10 +19,10 @@ contract the downstream mix pipeline requires. Outcomes:
 
 ## Decomposition (Child Features/Workstreams)
 
-- **Feature A — Schema model + shared-registry persistence + bundled defaults** - `../<A-folder>/`
-- **Feature B — Configurable matching + best-match discovery + mismatch explanation** - `../<B-folder>/`
-- **Feature C — Configurable ETL core (dedup policy + column builder + asteval formula engine + ratio recompute)** - `../<C-folder>/`
-- **Feature D — GUI schema builder + manual column-matching + runtime formula entry** - `../<D-folder>/`
+- **Feature A — Schema model + shared-registry persistence + bundled defaults** (Issue #41) - `../2026-05-30-schema-model-and-registry-41/`
+- **Feature B — Configurable matching + best-match discovery + mismatch explanation** (Issue #42) - `../2026-05-30-schema-matching-and-discovery-42/`
+- **Feature C — Configurable ETL core (dedup policy + column builder + asteval formula engine + ratio recompute)** (Issue #43) - `../2026-05-30-configurable-etl-core-43/`
+- **Feature D — GUI schema builder + manual column-matching + runtime formula entry** (Issue #44) - `../2026-05-30-gui-schema-builder-44/`
 
 Dependencies: strictly linear. A → B → C → D. Each builds on the prior; they
 ship together under epic #40 on a single integration branch.
