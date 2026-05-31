@@ -3,7 +3,7 @@
 - **Issue:** #46
 - **Parent (optional):** none
 - **Owner:** drmoisan
-- **Last Updated:** 2026-05-31T02-43
+- **Last Updated:** 2026-05-31T03-25
 - **Status:** Implemented (pending review)
 - **Version:** 1.0
 
@@ -224,6 +224,7 @@ Structural fixes (small file footprint; user has selected the large audit path f
 
 - [x] **AC-12 (file-size cap).** No production file in the diff exceeds 500 lines.
   - Remediation cycle 1: `src/gui/app.py` reduced from 503 to 499 lines by extracting the crash-handler bootstrap into the new `src/gui/_crash_handler_bootstrap.py` (94 lines). Post-fix counts captured in `evidence/qa-gates/phase8/file-sizes.md`.
+  - Remediation cycle 2 (R5): the cross-cutting 500-line cap defined in `.claude/rules/general-code-change.md` (applies to production code, test code, and reusable scripts) is now also enforced on test code. `tests/gui/test_crash_handler.py` was 549 lines after cycle-1 R4 added closure-pinning tests; split into `tests/gui/test_crash_handler.py` (332 lines) and a new sibling `tests/gui/test_crash_handler_closures.py` (258 lines). AC-12's spec text scope (production-only) remains satisfied. Verification: `evidence/qa-gates/phase8/file-sizes.md`.
 
 ## Risks & Mitigations
 - Technical or operational risks:

@@ -1,9 +1,11 @@
-# Phase 8 — File Sizes (Post-Fix State)
+# Phase 8 — File Sizes (Post-Fix State, Cycle 2)
 
-- Timestamp: 2026-05-31T02-43
+- Timestamp: 2026-05-31T03-25
+- Last Updated: 2026-05-31T03-25
 - Command:
   - `wc -l <path>` (per file)
-  - `awk 'END{print NR}' <path>` (per file; both counters cross-verified)
+  - `awk 'END{print NR}' <path>` (per file; cross-verified with `wc -l`)
+  - `pwsh -NoProfile -Command "(Get-Content <path>).Count"` (per file; third-counter triple-verification)
 - EXIT_CODE: 0
 
 ## Results
@@ -15,10 +17,17 @@
 | src/gui/runners.py | 156 | 270 | PASS |
 | src/gui/workers/pipeline_worker.py | 79 | 116 | PASS |
 | src/gui/app.py | 493 | 499 | PASS |
+| tests/gui/test_crash_handler.py | 549 | 332 | PASS |
+| tests/gui/test_crash_handler_closures.py | 0 (NEW) | 258 | PASS |
+| tests/gui/test_runners_threaded.py | unchanged in this branch | 151 | PASS |
+| tests/gui/test_pipeline_worker.py | unchanged in this branch | 244 | PASS |
+| tests/gui/test_app_composition.py | unchanged in this branch | 480 | PASS |
 
-Every row is under the 500-line cap. AC-12 satisfied for all modified production files at the post-R1 / post-R4 state. `src/gui/app.py` was reduced from 503 (pre-R1, over cap) to 499 (post-R1, under cap by 1 line) via extraction of the crash-handler bootstrap into the new `src/gui/_crash_handler_bootstrap.py` (94 lines) plus a minor inline-comment reduction at the call site.
+Every row is under the 500-line cap. AC-12's spec text (production-only scope) is satisfied for all modified production files at the post-R1 / post-R4 state. The cycle-2 R5 remediation extends the same cap enforcement to the test code at issue (`tests/gui/test_crash_handler.py`), as required by `.claude/rules/general-code-change.md`.
 
 ## Notes
 
-- This artifact captures the post-fix state corresponding to the corrected phase4 artifact at `docs/features/active/2026-05-30-gui-silent-crash-crash-visibility-46/evidence/qa-gates/phase4/file-sizes.md`. The phase4 artifact has been corrected in place (see its `Correction Note`) and continues to show the pre-R1 state with `src/gui/app.py` at 503 lines (FAIL). The phase8 artifact records the post-R1 state in which `src/gui/app.py` is 499 lines (PASS).
-- Both `wc -l` and `awk 'END{print NR}'` agree on every line count above.
+- Cap policy reference: `.claude/rules/general-code-change.md` — the 500-line file size limit applies to production code, test code, and reusable script files.
+- Cycle-2 driver: R5 (Blocking) — split `tests/gui/test_crash_handler.py` (was 549, over cap by 49) into `tests/gui/test_crash_handler.py` (now 332, retains installer-contract tests) and a new sibling `tests/gui/test_crash_handler_closures.py` (258, contains `_FakePath`/`_FakeHandle` fixtures and the three R4 closure-invocation tests).
+- Back-reference: this artifact extends the cycle-1 corrected file-sizes artifact at `evidence/qa-gates/phase4/file-sizes.md` by adding rows for the four test files and the bootstrap module; the cycle-1 production rows are unchanged.
+- All ten rows have `wc -l`, `awk 'END{print NR}'`, and `(Get-Content).Count` in agreement (verified independently for every file in this table; see also `evidence/qa-gates/phase5/file-sizes-verification.md`).
