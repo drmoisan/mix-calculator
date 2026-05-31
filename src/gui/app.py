@@ -24,7 +24,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from src.gui._crash_handler import install_crash_handlers
+from src.gui._crash_handler_bootstrap import install_for_main
 from src.gui._icon import resolve_icon_path
 from src.gui._import_dispatch_wiring import wire_import_dispatch
 from src.gui._main_window_view import MainWindowPipelineView
@@ -481,12 +481,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING)
 
     # Crash-visibility installer (issue #46, AC-8): install the four crash
-    # hooks (faulthandler, sys.excepthook, threading.excepthook, Qt message
-    # handler) BEFORE QApplication is constructed so the hooks are alive for
-    # every Qt-related call that follows. The returned installation must be
-    # held so its file-handle anchor stays alive for the process lifetime.
-    _crash_installation = install_crash_handlers(app_name="mix-calculator")
-    del _crash_installation  # value is anchored on the installer's _State
+    # hooks BEFORE QApplication is constructed. See ``_crash_handler_bootstrap``.
+    install_for_main()
 
     args = argv if argv is not None else sys.argv
     qt_app = QApplication(args)

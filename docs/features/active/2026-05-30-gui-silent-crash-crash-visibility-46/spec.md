@@ -3,7 +3,7 @@
 - **Issue:** #46
 - **Parent (optional):** none
 - **Owner:** drmoisan
-- **Last Updated:** 2026-05-30T23-30
+- **Last Updated:** 2026-05-31T02-43
 - **Status:** Implemented (pending review)
 - **Version:** 1.0
 
@@ -100,7 +100,7 @@ A new `src/gui/_crash_handler.py` module owns the four crash hooks and the log-p
 
 #### Functions/classes/CLI commands impacted:
 - New: `install_crash_handlers(*, app_name: str, log_dir: Path | None = None) -> CrashHandlerInstallation` and a small `CrashHandlerInstallation` value object recording what was installed and where logs go.
-- New: `_resolve_log_dir(app_name: str, platform_system: str, env: Mapping[str, str]) -> Path` (pure, testable).
+- New: `resolve_log_dir(app_name: str, platform_system: str, env: Mapping[str, str]) -> Path` (pure, testable).
 - Modified: `ThreadedRunner.run` (or its helper) in `src/gui/runners.py` to dispatch callbacks via a queued connection.
 - Modified: `PipelineWorker.run` in `src/gui/workers/pipeline_worker.py`.
 
@@ -173,11 +173,11 @@ Structural fixes (small file footprint; user has selected the large audit path f
   - Integration / behavioral test that injects a worker-thread exception and asserts a log file is written and the error signal reaches the GUI thread.
 
 - Regression tests to add or update:
-  - `tests/gui/test_crash_handler.py` (new) — covers AC-1 through AC-4 and AC-7 with the pure `_resolve_log_dir` paths, the installer return-value contract, idempotency, and the Qt message-handler routing.
+  - `tests/gui/test_crash_handler.py` (new) — covers AC-1 through AC-4 and AC-7 with the pure `resolve_log_dir` paths, the installer return-value contract, idempotency, and the Qt message-handler routing.
   - `tests/gui/test_runners_threaded.py` (new or augmented) — covers AC-6 by asserting the worker-signal connection type is `Qt.ConnectionType.QueuedConnection` and that callbacks reach the GUI thread.
   - `tests/gui/test_pipeline_worker.py` (existing; extended) — covers AC-5 by injecting an exception inside `PipelineWorker.run` and asserting the traceback is logged (`exc_info=True`) and the error signal fires.
   - `tests/gui/test_app_composition.py` (existing or new) — covers AC-8 by patching `install_crash_handlers` in the composition root and asserting it is called exactly once with `app_name="mix-calculator"`.
-- Unit tests (pytest) for the fixed behavior and boundaries: all of the above plus targeted unit tests for `_resolve_log_dir` parameterized over `("Windows", env_with_LOCALAPPDATA)`, `("Darwin", env_with_HOME)`, `("Linux", env_without_XDG_STATE_HOME)`, `("Linux", env_with_XDG_STATE_HOME)`.
+- Unit tests (pytest) for the fixed behavior and boundaries: all of the above plus targeted unit tests for `resolve_log_dir` parameterized over `("Windows", env_with_LOCALAPPDATA)`, `("Darwin", env_with_HOME)`, `("Linux", env_without_XDG_STATE_HOME)`, `("Linux", env_with_XDG_STATE_HOME)`.
 - Edge cases and negative scenarios:
   - Missing `LOCALAPPDATA` env var on Windows → fall back to `~/AppData/Local/mix-calculator/logs/`.
   - Log directory does not exist → installer creates it (parents=True, exist_ok=True).
@@ -199,11 +199,11 @@ Structural fixes (small file footprint; user has selected the large audit path f
 
 ## Acceptance Criteria
 
-- [x] **AC-1 (crash-handler module exists).** A new module `src/gui/_crash_handler.py` exists and exposes a single `install_crash_handlers(*, app_name: str, log_dir: Path | None = None) -> CrashHandlerInstallation` entry point plus a pure `_resolve_log_dir(app_name, platform_system, env)` helper. The module is Pyright-clean with full type hints and contains no broad bare `except:` clauses.
+- [x] **AC-1 (crash-handler module exists).** A new module `src/gui/_crash_handler.py` exists and exposes a single `install_crash_handlers(*, app_name: str, log_dir: Path | None = None) -> CrashHandlerInstallation` entry point plus a pure `resolve_log_dir(app_name, platform_system, env)` helper. The module is Pyright-clean with full type hints and contains no broad bare `except:` clauses.
 
 - [x] **AC-2 (four hooks installed).** Calling `install_crash_handlers` installs all four hooks: `faulthandler.enable(file=<crash-log>)`, `sys.excepthook`, `threading.excepthook`, and `qInstallMessageHandler`. A pytest test asserts each of the four hooks is in place after installation (state inspected through the returned `CrashHandlerInstallation` value object).
 
-- [x] **AC-3 (log-path resolution).** `_resolve_log_dir` is a pure function whose unit tests cover three platform branches (`Windows`, `Darwin`, `Linux`) with injected `env` mappings, and whose behavior matches the resolution table in the spec. No `tempfile` usage in tests; resolution is verified by string assertion on the returned `Path` against an injected `env`/`home`.
+- [x] **AC-3 (log-path resolution).** `resolve_log_dir` is a pure function whose unit tests cover three platform branches (`Windows`, `Darwin`, `Linux`) with injected `env` mappings, and whose behavior matches the resolution table in the spec. No `tempfile` usage in tests; resolution is verified by string assertion on the returned `Path` against an injected `env`/`home`.
 
 - [x] **AC-4 (idempotent install).** Calling `install_crash_handlers` a second time is a no-op (the prior handlers remain installed; no duplicate handler is registered). A pytest test asserts this.
 
@@ -218,10 +218,12 @@ Structural fixes (small file footprint; user has selected the large audit path f
 - [x] **AC-9 (toolchain green).** Full Python toolchain passes in a single uninterrupted loop: `poetry run black .`, `poetry run ruff check .`, `poetry run pyright`, `poetry run pytest --cov --cov-branch --cov-report=term-missing`. No new suppressions (`# noqa` / `# type: ignore`) are added unless they match a pre-authorized pattern.
 
 - [x] **AC-10 (coverage non-regressing).** Changed-line coverage on `src/gui/_crash_handler.py`, `src/gui/runners.py`, `src/gui/workers/pipeline_worker.py`, and `src/gui/app.py` is at or above the repo thresholds (>= 85% line, >= 75% branch). Coverage on unchanged files does not regress.
+  - Remediation cycle 1: three new direct-invocation tests added in `tests/gui/test_crash_handler.py` — `test_sys_excepthook_appends_traceback_record`, `test_threading_excepthook_appends_traceback_record`, `test_append_traceback_swallows_oserror` — bringing `_crash_handler.py` line coverage from 88% to 100%.
 
 - [x] **AC-11 (no new dependency).** `pyproject.toml` and `poetry.lock` are unchanged. The fix uses stdlib and `PySide6` only.
 
 - [x] **AC-12 (file-size cap).** No production file in the diff exceeds 500 lines.
+  - Remediation cycle 1: `src/gui/app.py` reduced from 503 to 499 lines by extracting the crash-handler bootstrap into the new `src/gui/_crash_handler_bootstrap.py` (94 lines). Post-fix counts captured in `evidence/qa-gates/phase8/file-sizes.md`.
 
 ## Risks & Mitigations
 - Technical or operational risks:

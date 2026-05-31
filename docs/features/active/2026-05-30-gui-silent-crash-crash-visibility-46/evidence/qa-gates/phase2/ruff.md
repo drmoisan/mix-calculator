@@ -1,9 +1,9 @@
-# Phase 2 — Ruff
+# Phase 2 — Ruff (Remediation Cycle 1, Post-R1)
 
-Timestamp: 2026-05-30T23-08
+Timestamp: 2026-05-31T02-43
 
 Command: `poetry run ruff check .`
 
 EXIT_CODE: 0
 
-Output Summary: All checks passed. (Initial run auto-fixed 4 errors — 2 × UP017, 1 × I001, 1 × F401 — and reported 1 TC003 that required moving `Mapping` into the `TYPE_CHECKING` block. Manual fix applied; black re-checked clean afterward; ruff re-run shows zero remaining issues.)
+Output Summary: All checks passed. Zero lint findings after R1 (post crash-handler-bootstrap extraction).

@@ -420,6 +420,7 @@ def test_composition_root_calls_install_crash_handlers_once_with_expected_app_na
 
     from PySide6.QtWidgets import QApplication
 
+    from src.gui import _crash_handler_bootstrap as crash_bootstrap_module
     from src.gui import app as app_module
 
     raw_instance = QApplication.instance()
@@ -457,7 +458,12 @@ def test_composition_root_calls_install_crash_handlers_once_with_expected_app_na
     monkeypatch.setattr(QApplication, "exec", _instant_exec)
     monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
     monkeypatch.setattr(app_module, "run_velopack_bootstrap", _no_op_velopack)
-    monkeypatch.setattr(app_module, "install_crash_handlers", _record_install)
+    # ``main()`` now invokes the installer indirectly through
+    # ``_crash_handler_bootstrap.install_for_main()``, so the patch site is
+    # the bootstrap module where ``install_crash_handlers`` is imported.
+    monkeypatch.setattr(
+        crash_bootstrap_module, "install_crash_handlers", _record_install
+    )
 
     # Act
     exit_code = app_module.main([])

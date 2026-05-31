@@ -1,9 +1,9 @@
-# Phase 2 — Black
+# Phase 2 — Black (Remediation Cycle 1, Post-R1)
 
-Timestamp: 2026-05-30T23-07
+Timestamp: 2026-05-31T02-43
 
-Command: `poetry run black --check .`
+Command: `poetry run black .`
 
 EXIT_CODE: 0
 
-Output Summary: All formatted. 173 files would be left unchanged (two new files added: `src/gui/_crash_handler.py` and `tests/gui/test_runners_threaded.py`). On the first run black reformatted 2 files; this re-check confirms a clean state.
+Output Summary: All 174 files left unchanged. New `src/gui/_crash_handler_bootstrap.py` recognized by black; no reformatting required.
