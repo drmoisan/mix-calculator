@@ -1,0 +1,180 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.12, pytest-9.0.3, pluggy-1.6.0
+PySide6 6.11.1 -- Qt runtime 6.11.1 -- Qt compiled 6.11.1
+rootdir: C:\Users\DanMoisan\repos\mix-calculator
+configfile: pyproject.toml
+testpaths: tests
+plugins: hypothesis-6.152.11, cov-7.1.0, qt-4.5.0
+collected 734 items
+
+tests\gui\integration\test_behavioral_composition.py ..                  [  0%]
+tests\gui\integration\test_behavioral_dialogs.py .......                 [  1%]
+tests\gui\integration\test_behavioral_import_buttons.py ...............  [  3%]
+tests\gui\integration\test_behavioral_pipeline_run.py ..                 [  3%]
+tests\gui\integration\test_behavioral_preview.py .....                   [  4%]
+tests\gui\integration\test_behavioral_schema_import.py ...               [  4%]
+tests\gui\test_app_composition.py .........                              [  5%]
+tests\gui\test_app_wiring.py ............................                [  9%]
+tests\gui\test_app_wiring_defaults.py ........                           [ 10%]
+tests\gui\test_app_wiring_dispatch.py ..                                 [ 11%]
+tests\gui\test_app_wiring_render.py ......                               [ 11%]
+tests\gui\test_app_wiring_schema.py ....                                 [ 12%]
+tests\gui\test_column_matching_dialog.py .......                         [ 13%]
+tests\gui\test_column_matching_presenter.py .......                      [ 14%]
+tests\gui\test_crash_handler.py ..........                               [ 15%]
+tests\gui\test_csv_exporter.py .........                                 [ 16%]
+tests\gui\test_db_service.py ....                                        [ 17%]
+tests\gui\test_excel_exporter.py ...                                     [ 17%]
+tests\gui\test_export_dialog.py ......                                   [ 18%]
+tests\gui\test_export_presenter.py ........                              [ 19%]
+tests\gui\test_exporter_registry.py .....                                [ 20%]
+tests\gui\test_gui_integration.py .                                      [ 20%]
+tests\gui\test_icon.py ...                                               [ 20%]
+tests\gui\test_main_window.py .........                                  [ 22%]
+tests\gui\test_pipeline_presenter.py ........................            [ 25%]
+tests\gui\test_pipeline_presenter_v2.py ...................              [ 28%]
+tests\gui\test_pipeline_service.py .........                             [ 29%]
+tests\gui\test_pipeline_worker.py .......                                [ 30%]
+tests\gui\test_preview_widget.py ....                                    [ 30%]
+tests\gui\test_runners.py .....                                          [ 31%]
+tests\gui\test_runners_threaded.py ...                                   [ 31%]
+tests\gui\test_schema_builder_dialog.py .........                        [ 33%]
+tests\gui\test_schema_builder_presenter.py ...........                   [ 34%]
+tests\gui\test_schema_service.py .......                                 [ 35%]
+tests\gui\test_source_input_widget.py ..............                     [ 37%]
+tests\gui\test_source_selection_presenter.py .............               [ 39%]
+tests\gui\test_workbook_reader.py .......                                [ 40%]
+tests\test_build_exe.py ..............                                   [ 42%]
+tests\test_build_velopack.py ..............................              [ 46%]
+tests\test_calculator.py ..                                              [ 46%]
+tests\test_convert_icon.py ...                                           [ 46%]
+tests\test_default_schemas.py ............                               [ 48%]
+tests\test_etl_column_probe.py ..........                                [ 49%]
+tests\test_etl_columns.py ...............                                [ 51%]
+tests\test_etl_key.py .............                                      [ 53%]
+tests\test_load_aop.py ..............................                    [ 57%]
+tests\test_load_aop_io.py ......................                         [ 60%]
+tests\test_load_skulu.py ......                                          [ 61%]
+tests\test_mix_bottomsup.py ...................                          [ 64%]
+tests\test_mix_lookups.py .........                                      [ 65%]
+tests\test_mix_lookups_casefold.py .........                             [ 66%]
+tests\test_mix_nrr_summary.py ..............                             [ 68%]
+tests\test_mix_pipeline.py .....                                         [ 69%]
+tests\test_mix_pivots.py .....                                           [ 69%]
+tests\test_mix_q1.py .....                                               [ 70%]
+tests\test_mix_rate_impacts.py .......                                   [ 71%]
+tests\test_mix_rollups.py ........                                       [ 72%]
+tests\test_mix_rollups_tieout.py ...                                     [ 73%]
+tests\test_mix_transforms.py ..............                              [ 74%]
+tests\test_normalize_le.py ............................                  [ 78%]
+tests\test_normalize_le_io.py ................                           [ 80%]
+tests\test_normalize_le_totals.py ...                                    [ 81%]
+tests\test_schema_formula.py ....................................        [ 86%]
+tests\test_schema_loader_core.py .........                               [ 87%]
+tests\test_schema_loader_derived.py .........                            [ 88%]
+tests\test_schema_loader_integration.py ..                               [ 88%]
+tests\test_schema_loader_parity_aop.py ....                              [ 89%]
+tests\test_schema_loader_parity_le.py .....                              [ 90%]
+tests\test_schema_matching_best.py .......                               [ 91%]
+tests\test_schema_matching_property.py .                                 [ 91%]
+tests\test_schema_matching_registry.py ..                                [ 91%]
+tests\test_schema_matching_report.py ......                              [ 92%]
+tests\test_schema_model.py ....................                          [ 95%]
+tests\test_schema_registry.py ...........                                [ 96%]
+tests\test_schema_serialization.py ...................                   [ 99%]
+tests\test_schema_settings.py ......                                     [100%]
+
+============================== warnings summary ===============================
+tests/test_mix_lookups_casefold.py::test_build_aop_vs_le_le_only_keeps_le_casing
+  C:\Users\DanMoisan\repos\mix-calculator\src\mix_lookups.py:173: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+    combined = pd.concat([aop_norm, le_norm], ignore_index=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.13.12-final-0 _______________
+
+Name                                               Stmts   Miss Branch BrPart  Cover   Missing
+----------------------------------------------------------------------------------------------
+src\__init__.py                                        0      0      0      0   100%
+src\_load_aop_helpers.py                              79      0     20      0   100%
+src\_mix_bottomsup_helpers.py                         39      0      2      0   100%
+src\_mix_nrr_summary_helpers.py                       41      0     10      0   100%
+src\_mix_rollups_helpers.py                           30      0      0      0   100%
+src\_mix_transforms_helpers.py                        97      0     26      0   100%
+src\_schema_formula_helpers.py                        59      3     28      3    93%   136, 146, 184
+src\_schema_json_helpers.py                           70      1     38      1    98%   160
+src\_schema_loader_helpers.py                        116      5     50      8    92%   111->115, 112->111, 116, 121, 183, 284->290, 322, 407
+src\_schema_matching_helpers.py                       19      2     10      2    86%   59, 82
+src\build_exe.py                                      33      1      4      0    97%   160
+src\build_velopack.py                                 91      1     24      1    98%   407
+src\calculator.py                                      4      0      2      0   100%
+src\etl_column_probe.py                               45      0     20      0   100%
+src\etl_columns.py                                    48      0     22      0   100%
+src\etl_key.py                                        56      0     30      0   100%
+src\etl_totals.py                                     12      0      2      0   100%
+src\gui\__init__.py                                    0      0      0      0   100%
+src\gui\_crash_handler.py                             99     13      8      0    88%   254-263, 290-303, 374-383
+src\gui\_icon.py                                      14      0      4      0   100%
+src\gui\_import_dispatch_wiring.py                    33      0      4      0   100%
+src\gui\_main_window_view.py                          27      0      6      0   100%
+src\gui\_render_exclusivity.py                        32      0     14      0   100%
+src\gui\_schema_view_protocols.py                     28      0      0      0   100%
+src\gui\_schema_wiring.py                             21      0      2      0   100%
+src\gui\_velopack_bootstrap.py                        12      1      2      1    86%   50
+src\gui\_wiring.py                                    23      0      6      0   100%
+src\gui\app.py                                       138      1     12      1    99%   314
+src\gui\exporters\__init__.py                          0      0      0      0   100%
+src\gui\exporters\base.py                              8      0      0      0   100%
+src\gui\exporters\csv_exporter.py                     24      0      4      0   100%
+src\gui\exporters\excel_exporter.py                   15      0      2      0   100%
+src\gui\exporters\registry.py                         14      0      2      0   100%
+src\gui\main_window.py                                73      0      0      0   100%
+src\gui\pipeline_service.py                           73      0      0      0   100%
+src\gui\presenters\__init__.py                         0      0      0      0   100%
+src\gui\presenters\_schema_builder_state.py           25      0      0      0   100%
+src\gui\presenters\column_matching_presenter.py       54      0     12      0   100%
+src\gui\presenters\export_presenter.py                24      0      2      0   100%
+src\gui\presenters\import_dispatch.py                 79      0     14      0   100%
+src\gui\presenters\pipeline_presenter.py             146      0     10      0   100%
+src\gui\presenters\schema_builder_presenter.py        78      0      2      0   100%
+src\gui\presenters\source_selection_presenter.py      44      0      4      0   100%
+src\gui\protocols.py                                  26      0      0      0   100%
+src\gui\runners.py                                    46      0      0      0   100%
+src\gui\services\__init__.py                           0      0      0      0   100%
+src\gui\services\db_service.py                        26      0      2      0   100%
+src\gui\services\schema_service.py                    32      0      0      0   100%
+src\gui\services\workbook_reader.py                   26      0      4      0   100%
+src\gui\widgets\__init__.py                            0      0      0      0   100%
+src\gui\widgets\_schema_builder_tabs.py               83      0      0      0   100%
+src\gui\widgets\column_matching_dialog.py             72      0      6      0   100%
+src\gui\widgets\export_dialog.py                      39      0     10      0   100%
+src\gui\widgets\preview_widget.py                     27      0      6      0   100%
+src\gui\widgets\progress_dialog.py                    20      0      0      0   100%
+src\gui\widgets\schema_builder_dialog.py              91      2     10      2    96%   164, 272
+src\gui\widgets\source_input_widget.py                78      2     14      1    97%   206-207
+src\gui\workers\__init__.py                            0      0      0      0   100%
+src\gui\workers\pipeline_worker.py                    24      0      2      0   100%
+src\load_aop.py                                       89      0     26      0   100%
+src\load_skulu.py                                     32      0      4      0   100%
+src\mix_bottomsup.py                                  57      0      2      0   100%
+src\mix_lookups.py                                    58      0      4      0   100%
+src\mix_nrr_summary.py                                82      0      8      0   100%
+src\mix_pipeline.py                                   68      0      4      0   100%
+src\mix_pipeline_run.py                               26      0      0      0   100%
+src\mix_q1.py                                         20      0      4      0   100%
+src\mix_rate_impacts.py                               43      0      0      0   100%
+src\mix_rollups.py                                    59      0      0      0   100%
+src\mix_transforms.py                                 43      0     14      0   100%
+src\normalize_le.py                                  124      0     26      0   100%
+src\pandas_io.py                                      15      0      0      0   100%
+src\schema_formula.py                                 52      0     20      0   100%
+src\schema_loader.py                                  31      0      6      0   100%
+src\schema_matching.py                                92      1     28      3    97%   141->148, 148->152, 168
+src\schema_model.py                                  113      0     48      0   100%
+src\schema_registry.py                                47      0      6      0   100%
+src\schema_serialization.py                           66      0      4      0   100%
+src\schema_settings.py                                21      0      4      0   100%
+----------------------------------------------------------------------------------------------
+TOTAL                                               3651     33    660     23    99%
+Coverage LCOV written to file artifacts/python/lcov.info
+======================= 734 passed, 1 warning in 25.86s =======================
