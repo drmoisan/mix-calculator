@@ -399,3 +399,82 @@ def test_build_application_calls_set_window_icon_when_qt_app_constructed(
     assert Path(qicon_calls[0]) == fake_icon_path
     assert len(set_window_icon_args) == 1
     assert set_window_icon_args[0] is sentinel
+
+
+# AC-8 (issue #46): main() calls install_crash_handlers exactly once with the
+# expected app_name BEFORE QApplication is constructed.
+
+
+def test_composition_root_calls_install_crash_handlers_once_with_expected_app_name(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``main`` invokes ``install_crash_handlers(app_name="mix-calculator")`` once.
+
+    The call must happen before ``QApplication`` is constructed so the hooks
+    are live for the entire process lifetime. The test patches the
+    ``install_crash_handlers`` import in the app module to a recorder and
+    asserts both the call count and the ordering (the recorder appends a
+    sentinel to the shared event log).
+    """
+    del qtbot  # qtbot ensures a QApplication exists for pytest-qt
+
+    from PySide6.QtWidgets import QApplication
+
+    from src.gui import _crash_handler_bootstrap as crash_bootstrap_module
+    from src.gui import app as app_module
+
+    raw_instance = QApplication.instance()
+    assert raw_instance is not None
+    instance = cast("QApplication", raw_instance)
+
+    def _instant_exec(_self: QApplication) -> int:
+        return 0
+
+    events: list[str] = []
+    install_calls: list[dict[str, object]] = []
+
+    def _existing_qapp(_args: list[str]) -> QApplication:
+        events.append("qapplication_init")
+        return instance
+
+    def _no_op_velopack() -> None:
+        events.append("velopack_run")
+
+    class _InstallationStub:
+        """Stand-in for the ``CrashHandlerInstallation`` returned by the installer."""
+
+        installed_hooks: tuple[str, ...] = (
+            "faulthandler",
+            "sys.excepthook",
+            "threading.excepthook",
+            "qt.message_handler",
+        )
+
+    def _record_install(*, app_name: str) -> _InstallationStub:
+        events.append("install_crash_handlers")
+        install_calls.append({"app_name": app_name})
+        return _InstallationStub()
+
+    monkeypatch.setattr(QApplication, "exec", _instant_exec)
+    monkeypatch.setattr(app_module, "QApplication", _existing_qapp)
+    monkeypatch.setattr(app_module, "run_velopack_bootstrap", _no_op_velopack)
+    # ``main()`` now invokes the installer indirectly through
+    # ``_crash_handler_bootstrap.install_for_main()``, so the patch site is
+    # the bootstrap module where ``install_crash_handlers`` is imported.
+    monkeypatch.setattr(
+        crash_bootstrap_module, "install_crash_handlers", _record_install
+    )
+
+    # Act
+    exit_code = app_module.main([])
+
+    # Assert: exit was clean and the installer was invoked exactly once with
+    # the expected app name, before QApplication construction.
+    assert exit_code == 0
+    assert len(install_calls) == 1
+    assert install_calls[0] == {"app_name": "mix-calculator"}
+    # Ordering: install_crash_handlers must precede qapplication_init in the
+    # observable event log so the hooks are alive before any Qt widget exists.
+    assert "install_crash_handlers" in events
+    assert "qapplication_init" in events
+    assert events.index("install_crash_handlers") < events.index("qapplication_init")

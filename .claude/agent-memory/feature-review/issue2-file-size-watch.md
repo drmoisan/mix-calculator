@@ -56,3 +56,18 @@ path is the same Option B as #2: extract shared fixtures (`_mix_base_rows`,
 `_f`) to `tests/_mix_rollups_fixtures.py` and move the three issue #20 regression tests
 to a sibling `tests/test_mix_rollups_tieout.py`. Lesson: the `wc -l tests/*.py` watch
 applies feature-wide, not just to the normalize-le family.
+
+**Recurred on issue #46 cycle 1 (2026-05-31T03-25 reaudit, head `e17da56`):** The
+remediation for cycle-0 F4 (closure-coverage gap in `src/gui/_crash_handler.py`)
+added a `_FakePath`/`_FakeFileHandle` fixture pair plus three R4 tests
+(`test_sys_excepthook_appends_traceback_record`, `test_threading_excepthook_appends_traceback_record`,
+`test_append_traceback_swallows_oserror`) to `tests/gui/test_crash_handler.py`,
+growing it from **332 -> 549 lines** (49 over limit). The R4 work itself was correct
+(coverage 88% -> 100% line on `_crash_handler.py`, no new suppressions, vars-based
+private-symbol access pattern to avoid `# pyright: ignore`). Cycle-0 blockers F1-F4
+all cleared but cycle 1 introduced this new Blocking F5. Remediation: split into
+`tests/gui/test_crash_handler.py` (installer-contract / resolve_log_dir / Qt routing,
+~345 lines) and `tests/gui/test_crash_handler_closures.py` (fixture pair + 3 R4 tests).
+**Watch:** the phase-8 `file-sizes.md` artifact for #46 lists production files only;
+test files were not included. Future cycles should regenerate that artifact to include
+all `tests/**/*.py` rows for files modified or added on the branch.

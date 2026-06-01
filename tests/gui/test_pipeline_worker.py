@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, cast
 
 import pandas as pd
+import pytest
 from PySide6.QtCore import QThread
 
 from src.gui.workers.pipeline_worker import PipelineWorker
@@ -142,4 +143,102 @@ def test_run_on_main_thread_emits_error_on_failure() -> None:
 
     # Assert: the error was emitted and finished was not.
     assert errors == ["boom"]
+    assert finished == []
+
+
+# AC-5 (issue #46): the worker boundary must log the traceback via
+# ``logger.error(..., exc_info=True)`` so even caught Python exceptions surface
+# a traceback in the crash log, and the boundary must re-raise the two
+# BaseException subclasses (``KeyboardInterrupt``, ``SystemExit``).
+
+
+def test_pipeline_worker_run_logs_traceback_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worker logs the traceback (exc_info=True) when the task raises.
+
+    Asserts ``logger.error`` is called with ``exc_info=True`` so the crash log
+    receives a full traceback for the caught exception. Patches the worker's
+    module-level logger to a recorder so the assertion is independent of the
+    logging configuration in the test process.
+    """
+    # Arrange: a recorder that captures every logger.error call.
+    from src.gui.workers import pipeline_worker as worker_mod
+
+    error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class _Recorder:
+        """Stand-in logger that records every ``error`` invocation."""
+
+        def error(self, *args: object, **kwargs: object) -> None:
+            error_calls.append((args, kwargs))
+
+    monkeypatch.setattr(worker_mod, "logger", _Recorder())
+
+    def _task() -> dict[str, pd.DataFrame]:
+        raise ValueError("traceback please")
+
+    errors: list[str] = []
+    worker = PipelineWorker(_task)
+    worker.error.connect(errors.append)
+
+    # Act
+    worker.run()
+
+    # Assert: logger.error was called exactly once with exc_info=True so the
+    # crash log captures a traceback for the caught Python exception.
+    assert len(error_calls) == 1
+    _positional, kwargs = error_calls[0]
+    del _positional  # positional arguments are not asserted on here
+    assert kwargs.get("exc_info") is True
+    # Error signal still fires with the stringified message.
+    assert errors == ["traceback please"]
+
+
+def test_pipeline_worker_run_reraises_keyboard_interrupt() -> None:
+    """A ``KeyboardInterrupt`` raised by the task propagates (not captured).
+
+    Pins the ``BaseException`` widening contract: the boundary widens to
+    ``except BaseException`` but explicitly re-raises ``KeyboardInterrupt`` so
+    interpreter-level signals reach their normal handlers.
+    """
+
+    # Arrange
+    def _task() -> dict[str, pd.DataFrame]:
+        raise KeyboardInterrupt
+
+    errors: list[str] = []
+    finished: list[dict[str, pd.DataFrame]] = []
+    worker = PipelineWorker(_task)
+    worker.error.connect(errors.append)
+    worker.finished.connect(finished.append)
+
+    # Act / Assert: the worker re-raises and neither signal fires.
+    with pytest.raises(KeyboardInterrupt):
+        worker.run()
+    assert errors == []
+    assert finished == []
+
+
+def test_pipeline_worker_run_reraises_system_exit() -> None:
+    """A ``SystemExit`` raised by the task propagates (not captured).
+
+    Pins the ``BaseException`` widening contract: ``SystemExit`` reaches the
+    interpreter's exit path instead of being downgraded to an error signal.
+    """
+
+    # Arrange
+    def _task() -> dict[str, pd.DataFrame]:
+        raise SystemExit(2)
+
+    errors: list[str] = []
+    finished: list[dict[str, pd.DataFrame]] = []
+    worker = PipelineWorker(_task)
+    worker.error.connect(errors.append)
+    worker.finished.connect(finished.append)
+
+    # Act / Assert: the worker re-raises and neither signal fires.
+    with pytest.raises(SystemExit):
+        worker.run()
+    assert errors == []
     assert finished == []

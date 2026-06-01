@@ -88,15 +88,29 @@ class PipelineWorker(QObject):
 
         Side effects:
             Invokes the task and emits exactly one of ``finished`` (with the
-            result dict) or ``error`` (with the failure message).
+            result dict) or ``error`` (with the failure message). Caught
+            exceptions are logged with ``exc_info=True`` so the crash log
+            captures the full traceback (issue #46 / AC-5).
+
+        Boundary contract:
+            The boundary widens to ``except BaseException`` so a malicious or
+            buggy task cannot bypass the error signal by raising a non-
+            ``Exception`` subclass. ``KeyboardInterrupt`` and ``SystemExit``
+            are explicitly re-raised so interpreter-level signals reach their
+            normal handlers; only "ordinary" exceptions are reported via the
+            ``error`` signal.
         """
         # The broad except is the worker's failure boundary: any task error is
-        # reported to the UI thread via the error signal (and logged), not
-        # swallowed. This is the documented boundary, not a silent catch-all.
+        # reported to the UI thread via the error signal (and logged with a
+        # traceback), not swallowed. This is the documented boundary, not a
+        # silent catch-all. The widening to BaseException + explicit re-raise
+        # of KeyboardInterrupt/SystemExit is the AC-5 contract from issue #46.
         try:
             result = self._task()
-        except Exception as exc:
-            logger.error("Pipeline task failed: %s", exc)
+        except BaseException as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            logger.error("Pipeline task failed: %s", exc, exc_info=True)
             self.error.emit(str(exc))
             return
         self.finished.emit(result)

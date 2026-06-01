@@ -24,6 +24,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from src.gui._crash_handler_bootstrap import install_for_main
 from src.gui._icon import resolve_icon_path
 from src.gui._import_dispatch_wiring import wire_import_dispatch
 from src.gui._main_window_view import MainWindowPipelineView
@@ -470,14 +471,19 @@ def main(argv: list[str] | None = None) -> int:
         ``velopack.App().run()`` as the very first statement so the Velopack
         installer first-run and uninstall hooks fire correctly.
     """
-    # Velopack runtime SDK bootstrap (AC10): MUST be the first call in
-    # the entry point. The wrapper (in src.gui._velopack_bootstrap)
+    # Velopack runtime SDK bootstrap (AC10 of issue #19): MUST be the first
+    # call in the entry point. The wrapper (in src.gui._velopack_bootstrap)
     # isolates the untyped Velopack call behind a typed seam.
     run_velopack_bootstrap()
 
     # Configure logging at the entry point so collaborator info/error messages
     # reach stderr.
     logging.basicConfig(level=logging.WARNING)
+
+    # Crash-visibility installer (issue #46, AC-8): install the four crash
+    # hooks BEFORE QApplication is constructed. See ``_crash_handler_bootstrap``.
+    install_for_main()
+
     args = argv if argv is not None else sys.argv
     qt_app = QApplication(args)
     # Set the window icon on the production QApplication so the title
