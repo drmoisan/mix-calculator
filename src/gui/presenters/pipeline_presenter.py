@@ -296,16 +296,18 @@ class PipelinePresenter:
         import_dispatch.run_import_all_sync(self, spec)
 
     def can_run(self) -> bool:
-        """Return whether Run is permitted (non-empty working set, not running).
+        """Return whether Run is permitted (delegates to the gate predicate).
 
-        Per spec section 4: a successful Open populates the working set even
-        without a fresh import, so Run becomes available after Open too.
+        The gate semantics live in
+        :func:`import_dispatch.required_keys_present` so they are testable in
+        isolation; this method only forwards the presenter's current state.
 
         Returns:
-            ``True`` when the working-table set is non-empty and no job is
-            in flight.
+            ``True`` when the gate predicate is satisfied; ``False`` otherwise.
         """
-        return bool(self.working_tables) and not self._is_running
+        return import_dispatch.required_keys_present(
+            self._imported_tables, self._derived_tables, self._is_running
+        )
 
     def make_run_task(self) -> Callable[[], dict[str, pd.DataFrame]]:
         """Return a zero-argument task that runs the pipeline on current imports.

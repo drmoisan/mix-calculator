@@ -18,6 +18,7 @@ from src.gui.runners import SynchronousRunner
 from tests.gui.fakes.fake_services import FakePipelineService, FakeWorkbookReader
 
 if TYPE_CHECKING:
+    import pytest
     from PySide6.QtWidgets import QPushButton
     from pytestqt.qtbot import QtBot
 
@@ -96,3 +97,53 @@ def test_run_failure_surfaces_error_and_preserves_imports(qtbot: QtBot) -> None:
     # Assert: derived tables stay empty and imports are preserved.
     assert wired.pipeline_presenter.derived_tables == {}
     assert set(wired.pipeline_presenter.imported_tables) == {"LE", "aop", "sku_lu"}
+
+
+def test_partial_import_failure_shows_modal_run_disabled_no_keyerror(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: a failed AOP import shows the modal, disables Run, no KeyError.
+
+    LE and sku_lu import successfully but the AOP import fails. The modal must
+    surface the error, Run must stay disabled (WS3), and clicking Run must never
+    reach run_pipeline with a missing "aop" key (no cascading KeyError). Cross-
+    checks AC-6 and AC-7.
+    """
+    # Arrange: record the modal at the view's import location.
+    modal_calls: list[tuple[str, str]] = []
+
+    def _record_critical(_parent: object, title: str, message: str) -> None:
+        modal_calls.append((title, message))
+
+    monkeypatch.setattr(
+        "src.gui._main_window_view.QMessageBox.critical",
+        _record_critical,
+        raising=True,
+    )
+    # A service whose run_pipeline raises if reached, and whose AOP import fails.
+    service = FakePipelineService(import_result=_fake_imports())
+    service.raise_on_run = KeyError("aop")
+    wired = _wired_with(service, qtbot)
+    # Seed widget paths so the import handlers have something to read.
+    wired.window.le_widget.set_path("le.xlsx")
+    wired.window.aop_widget.set_path("aop.xlsx")
+    wired.window.skulu_widget.set_path("sku.xlsx")
+
+    # Import LE and sku_lu successfully; the AOP import fails.
+    wired.pipeline_presenter.on_import_one_success(
+        "LE", _import_spec(), {"LE": pd.DataFrame({"KEY": ["k1"]})}
+    )
+    wired.pipeline_presenter.on_import_one_success(
+        "sku_lu", _import_spec(), {"sku_lu": pd.DataFrame({"SKU": ["s1"]})}
+    )
+    wired.pipeline_presenter.on_import_one_error("AOP import failed")
+
+    # Act: attempt a Run on the partial import.
+    _click(qtbot, wired.window.run_btn)
+
+    # Assert: the modal surfaced the error, Run stayed disabled, and run_pipeline
+    # was never reached (no KeyError cascade; derived tables stay empty).
+    assert modal_calls == [("Error", "AOP import failed")]
+    assert wired.window.run_btn.isEnabled() is False
+    assert wired.pipeline_presenter.derived_tables == {}
+    assert service.run_calls == []

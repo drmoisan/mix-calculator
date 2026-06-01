@@ -140,14 +140,20 @@ def _patch_loaders(monkeypatch: pytest.MonkeyPatch, buffer: io.BytesIO) -> None:
     real_load_skulu = load_skulu.load_skulu
 
     def _fake_load_source(
-        _path: str, sheet: str, *, key_mismatch: str = "prompt"
+        _path: str, sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
     ) -> object:
+        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
         buffer.seek(0)
         return real_load_source(buffer, sheet, key_mismatch=key_mismatch)
 
     def _fake_load_aop(
-        _path: str, *, sheet: str = "AOP1", key_mismatch: str = "prompt"
+        _path: str,
+        *,
+        sheet: str = "AOP1",
+        key_mismatch: str = "prompt",
+        **_kwargs: object,
     ) -> object:
+        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
         buffer.seek(0)
         return real_load_aop(buffer, sheet=sheet, key_mismatch=key_mismatch)
 

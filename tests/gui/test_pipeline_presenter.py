@@ -57,6 +57,19 @@ def test_fake_view_satisfies_pipeline_protocol() -> None:
     assert isinstance(FakePipelineView(), PipelineViewProtocol)
 
 
+def test_show_dialog_error_is_part_of_pipeline_view_surface() -> None:
+    """show_dialog_error is declared on the protocol and the fake records it (WS4)."""
+    # Arrange: the protocol now carries the modal dialog-error contract.
+    assert hasattr(PipelineViewProtocol, "show_dialog_error")
+    view = FakePipelineView()
+
+    # Act: drive the modal dialog-error surface on the fake.
+    view.show_dialog_error("Import failed", "Full diagnostic detail")
+
+    # Assert: the fake records the (title, message) pair.
+    assert view.dialog_errors == [("Import failed", "Full diagnostic detail")]
+
+
 def test_import_all_populates_tables() -> None:
     """on_import_all records the service's import frames."""
     # Arrange
@@ -397,7 +410,12 @@ def test_on_import_one_success_records_frame_and_emits_message() -> None:
 
 
 def test_on_import_one_success_recomputes_run_save_export() -> None:
-    """on_import_one_success recomputes Run/Save/Export enable states."""
+    """on_import_one_success recomputes Run/Save/Export enable states (WS3).
+
+    Under the WS3 gate (issue #48), a single-key import leaves Run disabled
+    because not all three required keys are present, while a non-empty working
+    set still enables Save and Export.
+    """
     # Arrange
     view = FakePipelineView()
     service = FakePipelineService(import_result=_import_result())
@@ -406,8 +424,8 @@ def test_on_import_one_success_recomputes_run_save_export() -> None:
     # Act
     presenter.on_import_one_success("LE", _spec(), {"LE": pd.DataFrame({"K": [1]})})
 
-    # Assert: a non-empty working set enables Run, Save, and Export.
-    assert view.run_button_states[-1] is True
+    # Assert: a partial import keeps Run disabled (WS3) but enables Save/Export.
+    assert view.run_button_states[-1] is False
     assert view.save_button_states[-1] is True
     assert view.export_button_states[-1] is True
 

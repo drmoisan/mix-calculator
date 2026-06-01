@@ -27,9 +27,11 @@ from PySide6.QtWidgets import QApplication
 from src.gui._crash_handler_bootstrap import install_for_main
 from src.gui._icon import resolve_icon_path
 from src.gui._import_dispatch_wiring import wire_import_dispatch
+from src.gui._key_mismatch_dialog import build_key_mismatch_resolver
 from src.gui._main_window_view import MainWindowPipelineView
 from src.gui._render_exclusivity import wire_render_checkboxes
-from src.gui._schema_wiring import wire_schema_builder
+from src.gui._run_wiring import wire_run
+from src.gui._schema_wiring import wire_build_schema_buttons, wire_schema_builder
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
     default_export_runner,
@@ -43,14 +45,12 @@ from src.gui.main_window import MainWindow
 from src.gui.pipeline_service import ImportSpec, PipelineService
 from src.gui.presenters.export_presenter import ExportPresenter
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
-from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
 from src.gui.runners import RunnerProtocol, ThreadedRunner
 from src.gui.services.db_service import DbService
 from src.gui.services.schema_service import build_default_schema_service
 from src.gui.services.workbook_reader import WorkbookReader
 from src.gui.widgets.export_dialog import ExportDialog
-from src.gui.widgets.schema_builder_dialog import SchemaBuilderDialog
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -174,27 +174,11 @@ def wire_control_signals(
         presenters.
     """
 
-    # Import-one/import-all dispatch is wired in a dedicated helper module so
-    # this file stays under the 500-line cap; both signals route through the
-    # injected runner there (spec section 4).
+    # Import-one/import-all dispatch and Run dispatch are wired in dedicated
+    # helper modules so this file stays under the 500-line cap; all three signals
+    # route through the injected runner there (spec section 4).
     wire_import_dispatch(window, pipeline_presenter, runner, _current_import_spec)
-
-    def _handle_run() -> None:
-        """Dispatch the run task through the injected runner.
-
-        Per spec section 4 / research Q6: the run task is built by the
-        presenter and dispatched off the UI thread by the runner; the runner
-        routes success/error back to the presenter callbacks.
-        """
-        if not pipeline_presenter.can_run():
-            pipeline_presenter.on_run()
-            return
-        task = pipeline_presenter.make_run_task()
-        runner.run(
-            task,
-            pipeline_presenter.on_run_success,
-            pipeline_presenter.on_run_error,
-        )
+    wire_run(window, pipeline_presenter, runner)
 
     def _handle_save() -> None:
         """Prompt for a destination path and route the save through the presenter.
@@ -239,8 +223,8 @@ def wire_control_signals(
 
     # Connect each control-button signal to its handler closure. The closures
     # bind the presenters and choosers without exposing them on the window.
-    # Import-one/import-all are connected by wire_import_dispatch above.
-    window.run_requested.connect(_handle_run)
+    # Import-one/import-all are connected by wire_import_dispatch and run by
+    # wire_run above.
     window.save_requested.connect(_handle_save)
     window.open_db_requested.connect(_handle_open_db)
     window.export_requested.connect(_handle_export)
@@ -322,10 +306,17 @@ def build_application(
     reader: WorkbookReaderProtocol = (
         workbook_reader if workbook_reader is not None else WorkbookReader()
     )
+    # WS1a (AC-1/AC-2): the production pipeline service resolves a diverging
+    # source KEY through a Qt modal (default "Keep existing" -> trust) injected
+    # here, so a GUI session never reaches the loaders' stdin input() path. Tests
+    # inject their own pipeline_service and bypass this resolver entirely.
     pipeline_service_resolved: PipelineServiceProtocol = (
         pipeline_service
         if pipeline_service is not None
-        else PipelineService(db_service=DbService())
+        else PipelineService(
+            db_service=DbService(),
+            key_mismatch_resolver=build_key_mismatch_resolver(),
+        )
     )
     runner_resolved: RunnerProtocol = runner if runner is not None else ThreadedRunner()
     # Use the injected registry when supplied (test seam) else build production.
@@ -343,15 +334,19 @@ def build_application(
     # Build the shell and bind one source-selection presenter per input widget;
     # pass the shared preview widget as the preview sink (research Q1 Option A)
     # so each render request renders into the main-window preview.
+    # WS2: each source presenter receives the resolved schema service so a tab's
+    # header preview can auto-select a matching import schema (issue #48).
     window = MainWindow()
+    _sink = window.preview_widget
+    _svc = schema_service_resolved
     le_presenter = SourceSelectionPresenter(
-        window.le_widget, reader, preview_sink=window.preview_widget
+        window.le_widget, reader, preview_sink=_sink, schema_service=_svc
     )
     aop_presenter = SourceSelectionPresenter(
-        window.aop_widget, reader, preview_sink=window.preview_widget
+        window.aop_widget, reader, preview_sink=_sink, schema_service=_svc
     )
     skulu_presenter = SourceSelectionPresenter(
-        window.skulu_widget, reader, preview_sink=window.preview_widget
+        window.skulu_widget, reader, preview_sink=_sink, schema_service=_svc
     )
 
     # Wire the per-input file_selected and render_tab_requested signals to
@@ -431,13 +426,13 @@ def build_application(
 
     # Feature D (AC6): connect the "Schema Builder..." action to open the builder
     # dialog driven by a fresh SchemaBuilderPresenter over the resolved service.
-    # Fresh dialog/presenter per open so the builder is repeatable.
-    wire_schema_builder(
-        window,
-        schema_service_resolved,
-        lambda: SchemaBuilderDialog(),
-        lambda dialog, service: SchemaBuilderPresenter(dialog, service),
-    )
+    # The default factories (fresh dialog/presenter per open) live in the wiring
+    # module so app.py stays thin.
+    wire_schema_builder(window, schema_service_resolved)
+
+    # WS2 (issue #48, AC-13): connect each source tab's "Build new schema" button
+    # to the same builder dialog so a per-tab build opens the existing builder.
+    wire_build_schema_buttons(window, schema_service_resolved)
 
     return WiredApplication(
         qt_app=application,

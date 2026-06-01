@@ -33,9 +33,92 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SchemaDiscoveryDecision",
+    "default_schema_builder_factories",
     "discover_schema",
+    "open_schema_builder",
+    "wire_build_schema_buttons",
     "wire_schema_builder",
 ]
+
+
+def default_schema_builder_factories() -> tuple[
+    Callable[[], SchemaBuilderDialog],
+    Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object],
+]:
+    """Return the production dialog/presenter factories for the schema builder.
+
+    The concrete :class:`SchemaBuilderDialog` and :class:`SchemaBuilderPresenter`
+    are imported lazily here so the composition root does not need to import them
+    directly, keeping ``app.py`` smaller. Tests inject their own recording
+    factories instead of using these defaults.
+
+    Returns:
+        A ``(dialog_factory, presenter_factory)`` pair. ``dialog_factory`` builds
+        a fresh :class:`SchemaBuilderDialog`; ``presenter_factory`` builds a
+        :class:`SchemaBuilderPresenter` over a given dialog and service.
+    """
+    # Import the concrete UI classes lazily so importing this wiring module does
+    # not pull in the dialog/presenter at module load (and so app.py need not).
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+    from src.gui.widgets.schema_builder_dialog import (
+        SchemaBuilderDialog as _SchemaBuilderDialog,
+    )
+
+    def _dialog_factory() -> SchemaBuilderDialog:
+        """Build a fresh schema-builder dialog per open."""
+        return _SchemaBuilderDialog()
+
+    def _presenter_factory(
+        dialog: SchemaBuilderDialog, service: SchemaServiceProtocol
+    ) -> object:
+        """Build a schema-builder presenter over the given dialog and service."""
+        return SchemaBuilderPresenter(dialog, service)
+
+    return _dialog_factory, _presenter_factory
+
+
+def open_schema_builder(
+    window: MainWindow,
+    service: SchemaServiceProtocol,
+    *,
+    dialog_factory: Callable[[], SchemaBuilderDialog] | None = None,
+    presenter_factory: (
+        Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object] | None
+    ) = None,
+) -> None:
+    """Open the schema-builder dialog driven by a fresh presenter.
+
+    This is the imperative open path shared by the ``schema_builder_requested``
+    menu action and the per-tab "Build new schema" button (WS2). A new dialog and
+    presenter are built per open so the builder is repeatable; the presenter is
+    retained on the window to keep it alive for the lifetime of the (modeless)
+    dialog.
+
+    Args:
+        window: The shell the presenter is retained on.
+        service: The schema service the builder presenter drives.
+        dialog_factory: Optional dialog factory; defaults to the production
+            :class:`SchemaBuilderDialog` factory.
+        presenter_factory: Optional presenter factory; defaults to the production
+            :class:`SchemaBuilderPresenter` factory.
+
+    Returns:
+        ``None``.
+
+    Side effects:
+        Builds and shows a dialog, retaining the presenter on ``window``.
+    """
+    # Resolve the factories: callers (tests) may inject recording factories;
+    # otherwise use the lazy production defaults so app.py stays thin.
+    if dialog_factory is None or presenter_factory is None:
+        default_dialog, default_presenter = default_schema_builder_factories()
+        dialog_factory = dialog_factory or default_dialog
+        presenter_factory = presenter_factory or default_presenter
+    dialog = dialog_factory()
+    # Retain the presenter on the window so it outlives this call while the dialog
+    # is open; without a reference it would be collected immediately.
+    window.schema_builder_presenter = presenter_factory(dialog, service)
+    dialog.show()
 
 
 @dataclass(frozen=True)
@@ -97,21 +180,27 @@ def discover_schema(
 def wire_schema_builder(
     window: MainWindow,
     service: SchemaServiceProtocol,
-    dialog_factory: Callable[[], SchemaBuilderDialog],
-    presenter_factory: Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object],
+    dialog_factory: Callable[[], SchemaBuilderDialog] | None = None,
+    presenter_factory: (
+        Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object] | None
+    ) = None,
 ) -> None:
     """Connect ``schema_builder_requested`` to open the schema builder (AC6).
+
+    The actual open is delegated to :func:`open_schema_builder` so the same path
+    is reused by the per-tab "Build new schema" button (WS2). The factory
+    arguments are optional: the composition root omits them to use the production
+    defaults (keeping ``app.py`` thin), while tests inject recording factories.
 
     Args:
         window: The shell whose ``schema_builder_requested`` signal is wired.
         service: The schema service the builder presenter drives.
-        dialog_factory: Builds a fresh :class:`SchemaBuilderDialog` per open so
-            the builder is launchable repeatedly; tests inject a recording
-            factory.
-        presenter_factory: Builds the :class:`SchemaBuilderPresenter` for a given
-            dialog and service; tests inject a recording factory. The returned
-            presenter is retained on the window so it is not garbage-collected
-            while the dialog is open.
+        dialog_factory: Optional factory building a fresh
+            :class:`SchemaBuilderDialog` per open; defaults to the production
+            factory. Tests inject a recording factory.
+        presenter_factory: Optional factory building the
+            :class:`SchemaBuilderPresenter` for a given dialog and service;
+            defaults to the production factory. Tests inject a recording factory.
 
     Returns:
         ``None``.
@@ -122,16 +211,61 @@ def wire_schema_builder(
     """
 
     def _open_schema_builder() -> None:
-        """Open the schema-builder dialog driven by a fresh presenter.
-
-        A new dialog and presenter are built per open so the builder is
-        repeatable; the presenter is retained on the window to keep it alive for
-        the lifetime of the (modeless) dialog.
-        """
-        dialog = dialog_factory()
-        # Retain the presenter on the window so it outlives this closure while the
-        # dialog is open; without a reference it would be collected immediately.
-        window.schema_builder_presenter = presenter_factory(dialog, service)
-        dialog.show()
+        """Open the schema-builder dialog via the shared open path."""
+        open_schema_builder(
+            window,
+            service,
+            dialog_factory=dialog_factory,
+            presenter_factory=presenter_factory,
+        )
 
     window.schema_builder_requested.connect(_open_schema_builder)
+
+
+def wire_build_schema_buttons(
+    window: MainWindow,
+    service: SchemaServiceProtocol,
+    *,
+    dialog_factory: Callable[[], SchemaBuilderDialog] | None = None,
+    presenter_factory: (
+        Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object] | None
+    ) = None,
+) -> None:
+    """Wire each source tab's "Build new schema" button to the builder (WS2).
+
+    Connects the three source widgets' ``build_schema_requested`` signals to the
+    shared :func:`open_schema_builder` path so the per-tab "Build new schema"
+    button opens the same existing schema builder dialog as the
+    ``Tools > Schema Builder...`` menu action (AC-13). The factories are optional
+    so the composition root uses the production defaults while tests inject
+    recording factories.
+
+    Args:
+        window: The shell whose three source widgets carry the build buttons.
+        service: The schema service the builder presenter drives.
+        dialog_factory: Optional dialog factory; defaults to the production
+            factory.
+        presenter_factory: Optional presenter factory; defaults to the production
+            factory.
+
+    Returns:
+        ``None``.
+
+    Side effects:
+        Connects each source widget's ``build_schema_requested`` signal to a
+        handler that opens the schema builder dialog.
+    """
+
+    def _open() -> None:
+        """Open the schema builder via the shared open path."""
+        open_schema_builder(
+            window,
+            service,
+            dialog_factory=dialog_factory,
+            presenter_factory=presenter_factory,
+        )
+
+    # Wire all three per-tab build buttons to the same shared open path so any
+    # tab's "Build new schema" button opens the existing builder dialog.
+    for widget in (window.le_widget, window.aop_widget, window.skulu_widget):
+        widget.build_schema_requested.connect(_open)

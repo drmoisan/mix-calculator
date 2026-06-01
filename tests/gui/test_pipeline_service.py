@@ -220,14 +220,20 @@ def _patch_loaders(monkeypatch: pytest.MonkeyPatch, buffer: io.BytesIO) -> None:
     real_load_skulu = load_skulu.load_skulu
 
     def _fake_load_source(
-        _path: str, sheet: str, *, key_mismatch: str = "prompt"
+        _path: str, sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
     ) -> object:
+        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
         buffer.seek(0)
         return real_load_source(buffer, sheet, key_mismatch=key_mismatch)
 
     def _fake_load_aop(
-        _path: str, *, sheet: str = "AOP1", key_mismatch: str = "prompt"
+        _path: str,
+        *,
+        sheet: str = "AOP1",
+        key_mismatch: str = "prompt",
+        **_kwargs: object,
     ) -> object:
+        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
         buffer.seek(0)
         return real_load_aop(buffer, sheet=sheet, key_mismatch=key_mismatch)
 
@@ -311,6 +317,44 @@ def test_import_sources_returns_all_three_keys(
     assert set(tables) == {"LE", "aop", "sku_lu"}
 
 
+def test_default_import_path_is_additive_and_independent_of_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """WS2/AC-14: the default import path uses the known-file loaders unchanged.
+
+    Schema selection (WS2) is additive: with no non-default schema selected, the
+    service's ``import_sources`` continues to call ``import_le``/``import_aop``/
+    ``import_skulu`` and produces the same three-key frame set, never the
+    schema-driven ``import_with_schema`` path. This pins the default path so the
+    dropdown does not alter default behavior.
+    """
+    # Arrange: a combined workbook and a service with no schema involvement.
+    _patch_loaders(monkeypatch, _build_combined_workbook())
+    service = PipelineService()
+    spec = ImportSpec(
+        le_path="combined.xlsx",
+        le_sheet="LE-8 + 4",
+        aop_path="combined.xlsx",
+        aop_sheet="AOP1",
+        skulu_path="combined.xlsx",
+        skulu_sheet="SKU_LU",
+    )
+
+    # Guard: import_with_schema must never be reached by the default path; patch
+    # it to fail loudly if the default import ever routed through the schema path.
+    def _fail_schema(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("default import must not use the schema-driven path")
+
+    monkeypatch.setattr(service, "import_with_schema", _fail_schema)
+
+    # Act: the default import path.
+    tables = service.import_sources(spec)
+
+    # Assert: the same three-key default frame set, produced without the schema
+    # path (additive selection leaves default behavior unchanged).
+    assert set(tables) == {"LE", "aop", "sku_lu"}
+
+
 def test_import_sources_defaults_skulu_to_le_workbook(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -355,7 +399,10 @@ def test_import_le_propagates_loader_value_error(
     # Arrange: patch the LE loader to raise the kind of ValueError loaders emit.
     import pytest as _pytest
 
-    def _raise(_path: str, _sheet: str, *, key_mismatch: str = "prompt") -> object:
+    def _raise(
+        _path: str, _sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
+    ) -> object:
+        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
         raise ValueError("Source schema mismatch: could not resolve column")
 
     monkeypatch.setattr("src.normalize_le.load_source", _raise)

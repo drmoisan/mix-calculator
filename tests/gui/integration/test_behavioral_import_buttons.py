@@ -17,6 +17,7 @@ from src.gui.runners import SynchronousRunner
 from tests.gui.fakes.fake_services import FakePipelineService, FakeWorkbookReader
 
 if TYPE_CHECKING:
+    import pytest
     from PySide6.QtWidgets import QPushButton
     from pytestqt.qtbot import QtBot
 
@@ -247,3 +248,36 @@ def test_import_all_success_shows_completion_message(qtbot: QtBot) -> None:
 
     # Assert: the import-all completion message reaches the status bar.
     assert wired.window.statusBar().currentMessage() == "Imported all 3 sources."
+
+
+def test_import_failure_shows_modal_and_leaves_run_disabled(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-7: an import failure shows the modal AND leaves Run disabled (WS4).
+
+    Records ``QMessageBox.critical`` to prove the full diagnostic reaches the
+    modal surface, and asserts the Run button stays disabled because the failed
+    import left the working set incomplete (WS3 gate).
+    """
+    # Arrange: record the modal at the view's import location (overrides the
+    # conftest no-op stub, whose patch runs before this test-body patch).
+    modal_calls: list[tuple[str, str]] = []
+
+    def _record_critical(_parent: object, title: str, message: str) -> None:
+        modal_calls.append((title, message))
+
+    monkeypatch.setattr(
+        "src.gui._main_window_view.QMessageBox.critical",
+        _record_critical,
+        raising=True,
+    )
+    service = FakePipelineService(import_result=_fake_imports())
+    service.raise_on_import = ValueError("bad LE")
+    wired = _wired(qtbot, service=service)
+
+    # Act: the LE import fails.
+    _click(qtbot, wired.window.import_le_btn)
+
+    # Assert: the modal carried the full diagnostic and Run stays disabled.
+    assert modal_calls == [("Error", "bad LE")]
+    assert wired.window.run_btn.isEnabled() is False

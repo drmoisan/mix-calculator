@@ -23,10 +23,14 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from src.etl_totals import total_vs_months_violations
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +182,43 @@ def coerce_numeric(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def build_per_row_checks(columns: Sequence[str]) -> dict[str, list[str]]:
+    """Build the per-row total-identity check map for the given column set.
+
+    Pure helper extracted from :func:`validate_aop` so the corrected YTD/YTG
+    identity is testable in isolation. The mapping pairs each total column with
+    the month columns whose row-wise sum it must equal.
+
+    The YTD identity depends on whether the optional ``YTG`` column is present:
+
+    - When ``"YTG"`` is in ``columns`` (a partial-year "8+4" sheet), ``YTD``
+      covers only the complementary months that are NOT in
+      :data:`YTG_MONTHS` (May..Dec), i.e. Jan..Apr; ``YTG`` covers
+      :data:`YTG_MONTHS` (May..Dec). Together they reconstitute the full year.
+    - When ``"YTG"`` is absent (a full-year sheet), ``YTD`` covers the full
+      :data:`MONTHS` (Jan..Dec), matching the historical full-year behavior.
+
+    The quarter identities (``Q1..Q4`` each equal the sum of their three months)
+    are always included and are independent of ``YTG``.
+
+    Args:
+        columns: The frame's column labels. Only the presence of ``"YTG"`` is
+            consulted; the order and other labels are ignored.
+
+    Returns:
+        A mapping from each total column name to the list of month columns whose
+        row-wise sum it must equal within :data:`TIEOUT_TOL`.
+    """
+    # Decision: the YTD month set is the complementary (non-YTG) months when YTG
+    # is present, and the full year otherwise. This is the corrected identity
+    # (research: YTD == sum(Jan..Apr) and YTG == sum(May..Dec) on the 8+4 sheet);
+    # older full-year sheets lack YTG and keep YTD == sum(Jan..Dec).
+    if "YTG" in columns:
+        ytd_months = [month for month in MONTHS if month not in YTG_MONTHS]
+        return {"YTD": ytd_months, "YTG": list(YTG_MONTHS), **QUARTER_TO_MONTHS}
+    return {"YTD": list(MONTHS), **QUARTER_TO_MONTHS}
+
+
 def validate_aop(frame: pd.DataFrame) -> None:
     """Validate AOP per-row total identities, raising on any failure.
 
@@ -187,10 +228,15 @@ def validate_aop(frame: pd.DataFrame) -> None:
 
     Checks:
         - At least one data row remains.
-        - ``YTD == sum(Jan..Dec)`` within :data:`TIEOUT_TOL`.
+        - When the optional ``YTG`` column is present (a partial-year "8+4"
+          sheet): ``YTD == sum(months not in YTG_MONTHS)`` (Jan..Apr) AND
+          ``YTG == sum(YTG_MONTHS)`` (May..Dec), each within :data:`TIEOUT_TOL`.
+        - When ``YTG`` is absent (a full-year sheet): ``YTD == sum(MONTHS)``
+          (Jan..Dec), the historical full-year behavior.
         - Each ``Q1..Q4`` equals the sum of its three months.
-        - ``YTG == sum(May..Dec)``, but only when the optional ``YTG`` column is
-          present in the frame; an absent ``YTG`` is neither derived nor checked.
+
+    The per-row identity map is built by :func:`build_per_row_checks` so the
+    corrected YTD/YTG identity lives in one pure, testable place.
 
     Args:
         frame: The coerced working frame with an established ``KEY`` column.
@@ -213,15 +259,10 @@ def validate_aop(frame: pd.DataFrame) -> None:
         failures.append("no data rows remain after dropping blank-Customer rows")
 
     # Per-row identity checks: the grand total and each quarter must equal the
-    # row-wise sum of their constituent months. The year-to-go (YTG) identity is
-    # included only when the optional YTG column is present; older sheets predate
-    # it, so its absence must not fail validation.
-    per_row_checks: dict[str, list[str]] = {
-        "YTD": MONTHS,
-        **QUARTER_TO_MONTHS,
-    }
-    if "YTG" in frame.columns:
-        per_row_checks["YTG"] = YTG_MONTHS
+    # row-wise sum of their constituent months. The YTD/YTG split depends on
+    # whether the optional YTG column is present (corrected 8+4 identity); the
+    # pure helper encapsulates that decision so it is testable in isolation.
+    per_row_checks = build_per_row_checks(list(frame.columns))
     # Only run identity checks when rows exist; on an empty frame the row-count
     # failure above already explains the problem and the column math is moot.
     if len(frame) >= 1:

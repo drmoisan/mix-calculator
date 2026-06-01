@@ -289,3 +289,87 @@ def test_no_import_label_constructs_no_import_button(qtbot: QtBot) -> None:
     # Act / Assert: accessing import_btn raises the documented AttributeError.
     with pytest.raises(AttributeError, match="without an import_label"):
         _ = widget.import_btn
+
+
+def test_schema_combo_starts_with_placeholder(qtbot: QtBot) -> None:
+    """WS2: the schema dropdown's first/selected item is the placeholder."""
+    # Arrange / Act
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    # Assert: the placeholder is the current (unselected) selection.
+    assert widget.current_schema() == "<Choose Schema>"
+
+
+def test_set_schema_list_populates_combo_with_placeholder_first(qtbot: QtBot) -> None:
+    """WS2: set_schema_list keeps the placeholder first and adds the names."""
+    # Arrange
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    # Act
+    widget.set_schema_list(["aop_v1", "le_v1"])
+
+    # Assert: placeholder remains the current selection and names are present.
+    assert widget.current_schema() == "<Choose Schema>"
+    widget.set_selected_schema("le_v1")
+    assert widget.current_schema() == "le_v1"
+
+
+def test_set_selected_schema_selects_name(qtbot: QtBot) -> None:
+    """WS2: set_selected_schema selects the named schema in the combo."""
+    # Arrange
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["aop_v1", "le_v1"])
+
+    # Act
+    widget.set_selected_schema("aop_v1")
+
+    # Assert
+    assert widget.current_schema() == "aop_v1"
+
+
+def test_changing_schema_emits_schema_selected(qtbot: QtBot) -> None:
+    """WS2: selecting a real schema emits schema_selected with the name."""
+    # Arrange
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["aop_v1", "le_v1"])
+
+    # Act / Assert: selecting a real schema emits the signal with the name.
+    with qtbot.waitSignal(
+        widget.schema_selected, timeout=_SIGNAL_TIMEOUT_MS
+    ) as blocker:
+        widget.set_selected_schema("le_v1")
+    args = cast("_SignalBlockerView", blocker).args
+    assert args is not None
+    assert cast("str", args[0]) == "le_v1"
+
+
+def test_selecting_placeholder_does_not_emit_schema_selected(qtbot: QtBot) -> None:
+    """WS2: returning to the placeholder does not emit schema_selected."""
+    # Arrange: select a real schema first, then a recorder.
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["aop_v1"])
+    widget.set_selected_schema("aop_v1")
+    received: list[str] = []
+    widget.schema_selected.connect(received.append)
+
+    # Act: re-populate the list, which resets the selection to the placeholder.
+    widget.set_schema_list(["aop_v1"])
+
+    # Assert: the placeholder reset did not emit a schema selection.
+    assert received == []
+
+
+def test_build_schema_button_emits_build_request(qtbot: QtBot) -> None:
+    """WS2: clicking 'Build new schema' emits build_schema_requested."""
+    # Arrange
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    # Act / Assert: the button click emits the build-request signal.
+    with qtbot.waitSignal(widget.build_schema_requested, timeout=_SIGNAL_TIMEOUT_MS):
+        widget.build_schema_btn.click()

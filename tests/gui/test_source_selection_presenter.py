@@ -15,8 +15,43 @@ from hypothesis import strategies as st
 
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
 from src.gui.protocols import SourceSelectionViewProtocol
-from tests.gui.fakes.fake_services import FakeWorkbookReader
+from src.schema_matching import MatchResult, MismatchReport, UnmatchedColumn
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
 from tests.gui.fakes.fake_views import FakeSourceSelectionView
+
+
+def _schema() -> SchemaDefinition:
+    """Return a small valid schema used as the matched candidate."""
+    return SchemaDefinition(
+        name="aop_like",
+        version="1.0",
+        columns=(
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+            ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
+        ),
+        key=KeySpec(columns=("Customer",)),
+    )
+
+
+def _full_match() -> MatchResult:
+    """Return a full-coverage match result (score 1.0) selecting ``_schema``."""
+    return MatchResult(
+        schema=_schema(),
+        score=1.0,
+        report=MismatchReport(unmatched_required=(), unrecognized_actual=()),
+    )
+
+
+def _no_match() -> MatchResult:
+    """Return a below-threshold match result with an unmatched required column."""
+    report = MismatchReport(
+        unmatched_required=(
+            UnmatchedColumn(canonical_name="Sales", aliases=(), candidates=()),
+        ),
+        unrecognized_actual=("Net Sales",),
+    )
+    return MatchResult(schema=_schema(), score=0.0, report=report)
 
 
 def test_fake_view_satisfies_source_selection_protocol() -> None:
@@ -26,6 +61,22 @@ def test_fake_view_satisfies_source_selection_protocol() -> None:
 
     # Assert: the runtime-checkable Protocol confirms structural compatibility.
     assert isinstance(view, SourceSelectionViewProtocol)
+
+
+def test_source_selection_protocol_declares_schema_view_methods() -> None:
+    """The protocol declares the WS2 schema-view methods and the fake records them."""
+    # Arrange: the protocol now carries the schema list/select contract.
+    assert hasattr(SourceSelectionViewProtocol, "set_schema_list")
+    assert hasattr(SourceSelectionViewProtocol, "set_selected_schema")
+    view = FakeSourceSelectionView()
+
+    # Act: drive the two schema-view methods on the fake.
+    view.set_schema_list(["aop_v1", "le_v1"])
+    view.set_selected_schema("aop_v1")
+
+    # Assert: the fake records both calls.
+    assert view.schema_lists == [["aop_v1", "le_v1"]]
+    assert view.selected_schemas == ["aop_v1"]
 
 
 def test_file_selection_populates_tab_list() -> None:
@@ -219,3 +270,80 @@ def test_on_clear_preview_without_sink_only_clears_view() -> None:
 
     # Assert
     assert view.previews == [[]]
+
+
+def test_on_schema_discovery_proceed_selects_matched_schema() -> None:
+    """WS2: a suitable match auto-selects the matched schema name (AC-11)."""
+    # Arrange: a reader returning a header row and a service that proceeds.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Sales"]])
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: the matched schema name was auto-selected in the view.
+    assert view.selected_schemas == ["aop_like"]
+
+
+def test_on_schema_discovery_resolve_leaves_placeholder() -> None:
+    """WS2: a no-match leaves the placeholder and does not auto-select (AC-12)."""
+    # Arrange: a reader returning a header row and a service that resolves.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Net Sales"]])
+    service = FakeSchemaService(match_result=_no_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: no schema was auto-selected; the placeholder remains.
+    assert view.selected_schemas == []
+
+
+def test_on_schema_discovery_no_service_is_noop() -> None:
+    """WS2: without an injected schema service, discovery is a no-op."""
+    # Arrange: no schema service injected.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Sales"]])
+    presenter = SourceSelectionPresenter(view, reader)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: nothing was selected and no error surfaced.
+    assert view.selected_schemas == []
+    assert view.errors == []
+
+
+def test_on_schema_discovery_empty_header_leaves_placeholder() -> None:
+    """WS2: an empty header preview leaves the placeholder (no match attempted)."""
+    # Arrange: a reader returning no rows.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[])
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: no schema selected because there was no header to match.
+    assert view.selected_schemas == []
+
+
+def test_on_schema_discovery_reader_value_error_routes_to_show_error() -> None:
+    """WS2: a reader ValueError during discovery routes to show_error, no select."""
+    # Arrange: a reader that raises on preview, and a service that would proceed.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader()
+    reader.raise_on_preview = ValueError("unreadable header")
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: the error surfaced and no schema was auto-selected.
+    assert view.errors == ["unreadable header"]
+    assert view.selected_schemas == []

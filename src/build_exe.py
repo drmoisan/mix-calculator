@@ -101,8 +101,10 @@ def resolve_nuitka_command() -> list[str]:
         via ``--windows-icon-from-ico``, bundles the same ICO into the
         standalone tree root via
         ``--include-data-file=<icon-abs-path>=icon.ico`` so the running GUI
-        can resolve it at runtime, and points Nuitka at ``src/gui/app.py``
-        as the compile entry point.
+        can resolve it at runtime, disables the Windows console window via
+        ``--windows-console-mode=disable`` so the packaged build launches with
+        no console (WS1b, AC-4), and points Nuitka at ``src/gui/app.py`` as the
+        compile entry point.
 
     Returns:
         The fully-resolved argv as a list of strings, in the exact order
@@ -138,6 +140,11 @@ def resolve_nuitka_command() -> list[str]:
         # ``src.gui._icon.resolve_icon_path`` finds it at runtime via
         # ``Path(sys.executable).parent / "icon.ico"``.
         f"--include-data-file={icon_path}=icon.ico",
+        # WS1b (issue #48, AC-4): disable the Windows console window so the
+        # packaged GUI launches without an attached console. All user
+        # interaction goes through Qt dialogs (WS1a), so no stdin console is
+        # needed; this makes the packaged build a non-console ("gui") app.
+        "--windows-console-mode=disable",
         str(REPO_ROOT / "src" / "gui" / "app.py"),
     ]
 

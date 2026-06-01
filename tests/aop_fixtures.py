@@ -79,7 +79,12 @@ def make_aop_row(
         blank_totals: When ``True``, leave the ``YTD``/``Q1``..``Q4``/``YTG``
             cells blank (``None``) to reproduce the source quirk where totals are
             omitted while the monthly columns are populated. When ``False`` (the
-            default), each total is set to the sum of its constituent months.
+            default), each total is set under the corrected 8+4 identity (issue
+            #48 / WS5): ``YTD`` is the sum of Jan..Apr (the non-YTG months) and
+            ``YTG`` is the sum of May..Dec. When the row is later written into a
+            no-YTG (full-year) workbook, :func:`build_aop_workbook` rewrites the
+            ``YTD`` cell to the full-year month sum so the row ties out under the
+            full-year identity.
 
     Returns:
         A dict mapping every AOP source column to a cell value.
@@ -99,12 +104,15 @@ def make_aop_row(
         record[month] = months[index]
 
     # Either omit the totals (blank-cell quirk) or set each to its month sum so a
-    # well-formed row ties out under the per-row identity checks.
+    # well-formed row ties out under the corrected per-row identity checks. For a
+    # YTG-bearing row (this fixture's default shape), YTD is the partial-year
+    # Jan..Apr sum and YTG is the May..Dec sum (issue #48 / WS5). A no-YTG
+    # full-year workbook rewrites YTD in build_aop_workbook.
     if blank_totals:
         for total in ("YTD", "Q1", "Q2", "Q3", "Q4", "YTG"):
             record[total] = None
     else:
-        record["YTD"] = _month_sum(months)
+        record["YTD"] = _month_sum(months[0:4])
         record["Q1"] = _month_sum(months[0:3])
         record["Q2"] = _month_sum(months[3:6])
         record["Q3"] = _month_sum(months[6:9])
@@ -125,6 +133,48 @@ def _month_sum(values: Sequence[float | None]) -> float:
     """
     # Blank monthly cells contribute 0, matching the load-time fill semantics.
     return float(sum(value for value in values if value is not None))
+
+
+def _rewrite_ytd_for_full_year(
+    rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Return rows whose well-formed ``YTD`` equals the full-year month sum.
+
+    Used when a no-YTG (full-year) workbook is built: the no-YTG validation path
+    checks ``YTD == sum(Jan..Dec)``, but :func:`make_aop_row` builds ``YTD`` as
+    the partial-year Jan..Apr sum for the default YTG-bearing shape. This helper
+    produces copies whose ``YTD`` is the full-year month sum so the rows tie out
+    under the full-year identity. Rows with a blank (``None``) ``YTD`` are left
+    untouched so the blank-totals quirk is preserved.
+
+    Args:
+        rows: The source-row dicts (see :func:`make_aop_row`).
+
+    Returns:
+        A new list of row-dict copies with ``YTD`` rewritten to the full-year
+        month sum for every row whose ``YTD`` is not ``None``.
+    """
+    rewritten: list[dict[str, object]] = []
+    # Recompute YTD from the twelve monthly cells only for rows whose YTD still
+    # equals the unmodified make_aop_row default (the partial-year Jan..Apr sum).
+    # A row whose YTD was deliberately overridden by a test (for example to a
+    # broken value) is left untouched so negative-path tests still exercise the
+    # full-year identity violation. Blank-YTD rows also pass through unchanged.
+    for record in rows:
+        updated = dict(record)
+        month_values = [updated.get(month) for month in MONTHS]
+        numeric_months = [
+            float(value) for value in month_values if isinstance(value, (int, float))
+        ]
+        partial_year_default = float(sum(numeric_months[0:4]))
+        current_ytd = updated.get("YTD")
+        # Only the unmodified default (Jan..Apr) is promoted to the full-year sum.
+        if isinstance(current_ytd, (int, float)) and (
+            float(current_ytd) == partial_year_default
+        ):
+            updated["YTD"] = float(sum(numeric_months))
+        rewritten.append(updated)
+    return rewritten
 
 
 def build_aop_workbook(
@@ -164,6 +214,12 @@ def build_aop_workbook(
         if header is not None
         else aop_header_without_key(include_ytg=include_ytg)
     )
+    # A no-YTG (full-year) sheet validates YTD against the full Jan..Dec sum,
+    # whereas make_aop_row builds YTD as the partial-year Jan..Apr sum for the
+    # default YTG-bearing shape. When the resolved header omits YTG, rewrite each
+    # well-formed row's YTD to the full-year month sum so the row ties out under
+    # the corrected full-year identity (issue #48 / WS5).
+    emit_rows = _rewrite_ytd_for_full_year(rows) if "YTG" not in columns else rows
     workbook = Workbook()
     worksheet = workbook.active
     assert worksheet is not None
@@ -176,7 +232,7 @@ def build_aop_workbook(
 
     # Append each data row in the chosen header's column order so the on-sheet
     # layout matches the (possibly reordered/pruned) header exactly.
-    for record in rows:
+    for record in emit_rows:
         worksheet.append([record.get(column) for column in columns])
 
     buffer = io.BytesIO()
