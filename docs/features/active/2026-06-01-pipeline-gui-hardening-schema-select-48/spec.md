@@ -335,3 +335,16 @@ temporary files, or external services.
       (Evidence: P4-T2
       `tests/test_schema_registry.py::test_additivity_bundled_default_and_user_round_trip_unchanged`
       and the full suite at P5-T4: 811 passed, 0 failed.)
+- [x] R-AC-7 — `ThreadedRunner` performs no cross-thread `QObject` destruction:
+      the worker is wired to `deleteLater` on `thread.finished`; a second dispatch
+      does not drop a still-running prior thread; application-shutdown teardown
+      quits and waits all active worker threads; and the existing queued-connection
+      success/error delivery on the GUI thread is preserved. (Cycle 2 / issue #48
+      Finding F1. Evidence:
+      `tests/gui/test_runners_threaded_lifecycle.py::test_worker_deletelater_wired_to_thread_finished` (a),
+      `::test_second_dispatch_does_not_drop_running_prior_thread` (b),
+      `::test_await_active_quits_and_waits_then_no_running_thread` and
+      `tests/gui/test_shutdown_wiring.py::test_about_to_quit_calls_await_active` /
+      `::test_wire_shutdown_cleanup_noop_for_runner_without_await_active` (c),
+      `::test_queued_outcome_still_delivers_on_gui_thread` (d); full suite at P4-T4:
+      818 passed, 0 failed; runners.py 100% line/branch.)

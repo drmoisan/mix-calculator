@@ -33,6 +33,7 @@ from src.gui._render_exclusivity import wire_render_checkboxes
 from src.gui._run_wiring import wire_run
 from src.gui._schema_list_wiring import populate_schema_lists
 from src.gui._schema_wiring import wire_build_schema_buttons, wire_schema_builder
+from src.gui._shutdown_wiring import wire_shutdown_cleanup
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
     default_export_runner,
@@ -282,13 +283,10 @@ def build_application(
         Constructs Qt widgets and the (Pyside6) ``QApplication`` if none is
         supplied. Does not show the window and does not enter ``exec``.
     """
-    # Resolve a QApplication to set the window icon on. Three cases:
-    #   1) Caller supplied qt_app (test path or main path) -> reuse it.
-    #   2) A QApplication singleton already exists (e.g. pytest-qt
-    #      managed instance) -> reuse it; constructing a second would
-    #      trigger "Please destroy the QApplication singleton" from
-    #      shiboken.
-    #   3) No QApplication exists -> construct a fresh one.
+    # Resolve a QApplication to set the window icon on: reuse the caller's
+    # qt_app, else an existing singleton (e.g. the pytest-qt instance — building
+    # a second triggers shiboken's "Please destroy the QApplication singleton"),
+    # else construct a fresh one.
     if qt_app is not None:
         application: QApplication = qt_app
     else:
@@ -298,10 +296,9 @@ def build_application(
         else:
             application = QApplication([])
 
-    # Set the window icon on the QApplication so it propagates to the
-    # title bar, taskbar, and Alt-Tab preview. ``resolve_icon_path``
-    # probes the compiled-mode location first and falls back to the
-    # dev-mode location; a missing icon raises FileNotFoundError loudly.
+    # Set the window icon so it propagates to the title bar/taskbar/Alt-Tab.
+    # ``resolve_icon_path`` probes the compiled-mode location then the dev-mode
+    # one and raises FileNotFoundError loudly if neither exists.
     application.setWindowIcon(QIcon(str(resolve_icon_path())))
 
     reader: WorkbookReaderProtocol = (
@@ -430,10 +427,13 @@ def build_application(
         runner=runner_resolved,
     )
 
-    # Feature D (AC6): connect the "Schema Builder..." action to open the builder
-    # dialog driven by a fresh SchemaBuilderPresenter over the resolved service.
-    # The default factories (fresh dialog/presenter per open) live in the wiring
-    # module so app.py stays thin.
+    # Issue #48 (R-AC-7): drain the runner's worker threads at app shutdown so
+    # no running QThread is destroyed (cross-thread QObject teardown abort).
+    wire_shutdown_cleanup(application, runner_resolved)
+
+    # Feature D (AC6): connect the "Schema Builder..." action to a builder dialog
+    # driven by a fresh SchemaBuilderPresenter per open over the resolved service;
+    # the default factories live in the wiring module so app.py stays thin.
     wire_schema_builder(window, schema_service_resolved)
 
     # WS2 (issue #48, AC-13): connect each source tab's "Build new schema" button
