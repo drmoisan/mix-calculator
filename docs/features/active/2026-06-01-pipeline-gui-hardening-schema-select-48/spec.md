@@ -304,3 +304,34 @@ temporary files, or external services.
       their default behavior is unchanged. (WS2)
 - [x] AC-15: No confidential workbook figures appear in any committed artifact
       (spec, tests, fixtures, or evidence); WS5 tests use synthetic values. (WS5)
+
+### Remediation Acceptance Criteria (cycle 2026-06-01T23-31, Issue #48 / PR #49)
+
+- [x] R-AC-1: On a profile with an empty user registry directory and no
+      `MIX_CALCULATOR_SCHEMA_DIR` override, the set of selectable schema names
+      exposed to the GUI includes both `default_aop` and `default_le`.
+      (Evidence: P4-T1 `tests/gui/test_schema_service.py::test_service_lists_and_loads_bundled_defaults_when_user_dir_empty`.)
+- [x] R-AC-2: A user-saved schema whose name collides with a bundled default name
+      takes precedence over the bundled default of the same name (user override
+      wins; no duplicate name appears in the list). (Evidence: P1-T4
+      `tests/test_schema_registry.py::test_list_schemas_user_override_appears_once_and_resolves_to_user`.)
+- [x] R-AC-3: Each source tab's schema dropdown is populated at application startup
+      (and/or on tab activation) with the available schema names from the schema
+      service; `set_schema_list` has at least one production caller and the
+      populated names include the bundled defaults per R-AC-1. (Evidence: P3-T4/P3-T5
+      `tests/gui/test_app_wiring_schema_list.py`.)
+- [x] R-AC-4: `discover_schema` / `find_best_match` consider the bundled defaults as
+      candidates, so a source whose headers match a bundled default yields
+      `action="proceed"` and auto-selects that schema (restores AC-11 for the
+      shipped defaults). (Evidence: P2-T1
+      `tests/test_schema_matching_registry.py::test_find_best_match_and_discover_see_bundled_defaults`.)
+- [x] R-AC-5: Loading a selected schema by name (`SchemaService.load_schema` / the
+      import-with-schema path) succeeds for a bundled-default name even when no
+      user-saved file of that name exists. (Evidence: P4-T1
+      `tests/gui/test_schema_service.py::test_service_lists_and_loads_bundled_defaults_when_user_dir_empty`.)
+- [x] R-AC-6: The change is additive: the existing known-file loaders
+      (`import_le`/`import_aop`/`import_skulu`) and the existing user-registry
+      persistence behavior are unchanged. Existing AC-1..AC-15 remain PASS.
+      (Evidence: P4-T2
+      `tests/test_schema_registry.py::test_additivity_bundled_default_and_user_round_trip_unchanged`
+      and the full suite at P5-T4: 811 passed, 0 failed.)

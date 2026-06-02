@@ -31,6 +31,7 @@ from src.gui._key_mismatch_dialog import build_key_mismatch_resolver
 from src.gui._main_window_view import MainWindowPipelineView
 from src.gui._render_exclusivity import wire_render_checkboxes
 from src.gui._run_wiring import wire_run
+from src.gui._schema_list_wiring import populate_schema_lists
 from src.gui._schema_wiring import wire_build_schema_buttons, wire_schema_builder
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
@@ -348,6 +349,11 @@ def build_application(
     skulu_presenter = SourceSelectionPresenter(
         window.skulu_widget, reader, preview_sink=_sink, schema_service=_svc
     )
+
+    # WS2 (issue #48, R-AC-3): populate each tab's schema dropdown at startup with
+    # the available names (incl. bundled defaults); logic lives in the wiring module.
+    _source_views = [window.le_widget, window.aop_widget, window.skulu_widget]
+    populate_schema_lists(_source_views, _svc)
 
     # Wire the per-input file_selected and render_tab_requested signals to
     # their presenters so file selection populates the tab dropdown and

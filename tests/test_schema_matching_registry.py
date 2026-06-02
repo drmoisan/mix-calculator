@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.gui._schema_wiring import discover_schema
+from src.gui.services.schema_service import SchemaService
 from src.schema_matching import find_best_match_in_registry
 from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
-from src.schema_registry import SchemaRegistry
+from src.schema_registry import SCHEMA_SUFFIX, SchemaRegistry
+from src.schema_serialization import schema_to_json
 
 
 class InMemoryFileStore:
@@ -142,3 +145,41 @@ def test_find_best_match_in_registry_empty_registry_returns_none() -> None:
     assert result.schema is None
     assert result.score == 0.0
     assert result.report.unmatched_required == ()
+
+
+def test_find_best_match_and_discover_see_bundled_defaults() -> None:
+    """A bundled default is a match candidate and yields a proceed decision (R-AC-4).
+
+    With an empty user registry directory, a bundled default seeded under the
+    registry's ``bundled_dir`` must be considered by
+    :func:`find_best_match_in_registry` (over the Phase 1 union seam), and
+    :func:`discover_schema` over a :class:`SchemaService` must return
+    ``action="proceed"`` when the supplied headers cover the default's required
+    columns. No production change is made in this phase; this pins the behavior of
+    the union seam introduced in Phase 1.
+    """
+    # Arrange: seed one bundled default whose single required column the headers
+    # fully cover; the user registry directory is left empty.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=bundled_dir)
+    bundled = _schema(
+        "default_aop",
+        (ColumnSpec(canonical_name="Customer", role="dimension", required=True),),
+    )
+    store.write_text(
+        bundled_dir / f"default_aop{SCHEMA_SUFFIX}", schema_to_json(bundled)
+    )
+    headers = ["Customer"]
+
+    # Act: match directly over the registry, and through the service-backed
+    # discovery decision used by the import flow.
+    result = find_best_match_in_registry(headers, registry)
+    service = SchemaService(registry)
+    decision = discover_schema(service, headers)
+
+    # Assert: the bundled default is selected with full coverage and proceeds.
+    assert result.schema == bundled
+    assert result.score == 1.0
+    assert decision.action == "proceed"
+    assert decision.result.schema == bundled

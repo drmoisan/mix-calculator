@@ -84,24 +84,24 @@ plus one missing capability were identified (research:
 The authoritative, numbered acceptance criteria are maintained in `spec.md`
 (AC-1 through AC-15). The user-facing summary below maps to those criteria.
 
-- [ ] No stdin prompt ever occurs in a GUI session; the KEY-mismatch decision is
+- [x] No stdin prompt ever occurs in a GUI session; the KEY-mismatch decision is
       a Qt modal defaulting to "Keep existing" (trust), applied to both the AOP
       and LE import paths. (spec AC-1, AC-2, AC-3)
-- [ ] Packaged builds open no console window; interaction is dialog-only, and a
+- [x] Packaged builds open no console window; interaction is dialog-only, and a
       developer console is for logs only. (spec AC-4)
-- [ ] A partial import leaves Run disabled and produces no cascading `KeyError`;
+- [x] A partial import leaves Run disabled and produces no cascading `KeyError`;
       Run is permitted only when all three required keys are present. (spec AC-5,
       AC-6)
-- [ ] All import and run errors are surfaced to the user via a modal plus a
+- [x] All import and run errors are surfaced to the user via a modal plus a
       status-bar summary. (spec AC-7)
-- [ ] `validate_aop` accepts the 8+4 workbook (YTD = Jan..Apr when YTG present),
+- [x] `validate_aop` accepts the 8+4 workbook (YTD = Jan..Apr when YTG present),
       leaves full-year sheets unaffected, and still rejects genuine identity
       violations. (spec AC-8, AC-9, AC-10)
-- [ ] Each source tab shows a schema dropdown with auto-select, a
+- [x] Each source tab shows a schema dropdown with auto-select, a
       `<Choose Schema>` placeholder when none matches, and a working "Build new
       schema" button; schema selection is additive to the known-file loaders.
       (spec AC-11, AC-12, AC-13, AC-14)
-- [ ] No confidential workbook figures appear in any committed artifact.
+- [x] No confidential workbook figures appear in any committed artifact.
       (spec AC-15)
 
 ## Non-Goals
