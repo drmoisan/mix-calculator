@@ -10,3 +10,4 @@
 - [policy-audit comparison-line schema](policy-audit-comparison-line-schema.md) — per-language bullets under `### 1.2.1` need labelled `Baseline:` `Post-change:` `Change:` `Disposition:` `Evidence:` (and `New/changed-code coverage:` when row is non-N/A)
 - [E402 fixture-import unauthorized](e402-fixture-import-unauthorized.md) — `# noqa: E402` on test sys.path fixture imports is not pre-authorized; gate as PARTIAL/procedural like pyright:ignore. S101 blanket-allowed in tests; S108/ARG002 pattern-authorized
 - [PowerShell line-count undercount](powershell-measure-object-line-undercount.md) — `(Get-Content | Measure-Object -Line).Lines` undercounts vs `awk NR`/`wc -l`; on issue #46 hid an app.py 503-line AC-12 violation reported as 439
+- [pytest --cov module-vs-path arg](pytest-cov-module-vs-path-arg.md) — use dotted `--cov=src.gui.runners`; path form `src/gui/runners` reports "module not imported / no data" despite passing tests
