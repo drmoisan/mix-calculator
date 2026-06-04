@@ -27,15 +27,15 @@ _SIGNAL_TIMEOUT_MS = 5000
 
 
 def _join_runner_thread(runner: ThreadedRunner) -> None:
-    """Wait for the runner's QThread to finish so the test does not leak it.
+    """Wait for the runner's worker thread(s) to finish so the test leaks none.
 
-    Reaches for the thread via :func:`getattr` so the test does not refer to
-    a protected attribute name directly. A live QThread when a pytest-qt
-    test returns can trigger Qt warnings or a Windows process abort.
+    Drains the runner through its public shutdown seam
+    (:meth:`ThreadedRunner.await_active`), which quits and waits every live
+    worker thread. A live QThread when a pytest-qt test returns can trigger Qt
+    warnings or a Windows process abort, so this drains via the public method
+    rather than reaching for a protected attribute.
     """
-    thread = getattr(runner, "_thread", None)
-    if thread is not None:
-        thread.wait(5000)
+    runner.await_active(5000)
 
 
 def test_threaded_runner_success_callback_runs_on_gui_thread(qtbot: QtBot) -> None:
@@ -114,10 +114,10 @@ def test_threaded_runner_uses_queued_connection_for_finished_and_error(
 ) -> None:
     """The runner exposes a ``QObject`` receiver and uses queued connections.
 
-    Structural assertion: after ``run`` returns, the runner has a private
-    ``_receiver`` attribute that is a ``QObject`` bound to the GUI thread.
-    Holding the receiver on the runner is required so it is not garbage
-    collected before the worker emits.
+    Structural assertion: after ``run`` returns, the runner tracks the dispatch
+    as an active record whose ``receiver`` is a ``QObject`` bound to the GUI
+    thread. Holding the receiver on the runner (now inside the active-dispatch
+    record) is required so it is not garbage collected before the worker emits.
     """
     # Arrange
     from PySide6.QtCore import QObject
@@ -130,6 +130,17 @@ def test_threaded_runner_uses_queued_connection_for_finished_and_error(
     runner = ThreadedRunner()
     runner.run(_task, success_results.append, lambda _m: None)
 
+    # Capture the receiver from the tracked active-dispatch record immediately
+    # after run, while the dispatch is still live (before the queued finished
+    # handler discards the record). This is the documented reach into the
+    # active-dispatch collection introduced by the lifecycle refactor.
+    # Read the tracked active-dispatch records through the runner's public
+    # snapshot seam so the test sees the refactored storage with full typing
+    # and no protected-attribute reference.
+    active_records = runner.active_dispatches()
+    assert len(active_records) == 1
+    receiver = active_records[0].receiver
+
     # Wait for the worker's success callback so we know the queued connection
     # delivered the outcome and the thread has been told to quit. This avoids
     # leaving a live QThread when the test returns (which can trigger Qt
@@ -139,7 +150,6 @@ def test_threaded_runner_uses_queued_connection_for_finished_and_error(
     # Assert: the runner held a QObject receiver on the GUI thread. The
     # receiver class lives in `src.gui.runners`; its presence is the AC-6
     # structural fingerprint.
-    receiver = getattr(runner, "_receiver", None)
     assert (
         receiver is not None
     ), "ThreadedRunner must hold a QObject receiver on the GUI thread"

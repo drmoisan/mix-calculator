@@ -125,6 +125,36 @@ class SourceSelectionViewProtocol(Protocol):
         """
         ...
 
+    def set_schema_list(self, names: list[str]) -> None:
+        """Populate the import-schema dropdown with the placeholder plus names (WS2).
+
+        Args:
+            names: The schema names to offer, in display order. The
+                ``<Choose Schema>`` placeholder is always present as the first
+                item so the dropdown can return to "no schema selected".
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's schema dropdown.
+        """
+        ...
+
+    def set_selected_schema(self, name: str) -> None:
+        """Select a schema by name in the import-schema dropdown (WS2 auto-select).
+
+        Args:
+            name: The schema name to select.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's schema dropdown selection.
+        """
+        ...
+
 
 @runtime_checkable
 class PipelineViewProtocol(Protocol):
@@ -182,6 +212,27 @@ class PipelineViewProtocol(Protocol):
 
         Side effects:
             Updates the view's error surface.
+        """
+        ...
+
+    def show_dialog_error(self, title: str, message: str) -> None:
+        """Display a modal error dialog carrying the full diagnostic (WS4).
+
+        The contract pairs with :meth:`show_error`: the modal dialog carries the
+        full diagnostic message so the user can read the complete failure detail,
+        while the status bar (driven by :meth:`show_error`) carries a concise
+        summary. Implementations surface a blocking, acknowledgement-style modal
+        (for example ``QMessageBox.critical``).
+
+        Args:
+            title: The dialog title (a short failure category).
+            message: The full human-readable diagnostic text shown in the modal.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Shows a modal dialog the user must acknowledge.
         """
         ...
 

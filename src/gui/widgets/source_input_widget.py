@@ -33,6 +33,11 @@ __all__ = ["SourceInputWidget"]
 # File dialog filter restricting selection to Excel workbooks.
 _EXCEL_FILTER = "Excel Workbooks (*.xlsx)"
 
+# Placeholder shown as the first item of the schema dropdown when no schema is
+# selected (WS2 / issue #48). Auto-select replaces the current selection; the
+# no-match path leaves this placeholder selected.
+_SCHEMA_PLACEHOLDER = "<Choose Schema>"
+
 
 class SourceInputWidget(QWidget):
     """Passive view for selecting one input's workbook file and worksheet tab.
@@ -56,6 +61,11 @@ class SourceInputWidget(QWidget):
             picked.
         render_tab_requested: Emitted with ``(path, sheet)`` when the render-tab
             checkbox is checked with a selected tab.
+        schema_selected: Emitted with the selected schema name when the user
+            picks a real schema (not the ``<Choose Schema>`` placeholder) in the
+            schema dropdown (WS2 / issue #48).
+        build_schema_requested: Emitted when the user clicks the per-tab "Build
+            new schema" button (WS2 / issue #48).
         _import_button: The optional per-input Import button, constructed only
             when an ``import_label`` is supplied (issue #27 AC11). ``None`` when
             the widget is built without an import button.
@@ -63,6 +73,11 @@ class SourceInputWidget(QWidget):
 
     file_selected: Signal = Signal(str)
     render_tab_requested: Signal = Signal(str, str)
+    # WS2 (issue #48): emitted with the selected schema name when the user picks
+    # a schema in the dropdown (the placeholder selection is suppressed).
+    schema_selected: Signal = Signal(str)
+    # WS2: emitted when the user clicks the per-tab "Build new schema" button.
+    build_schema_requested: Signal = Signal()
 
     def __init__(
         self,
@@ -104,6 +119,12 @@ class SourceInputWidget(QWidget):
         if default_sheet:
             self._tab_combo.addItem(default_sheet)
         self._render_checkbox = QCheckBox("Render tab")
+        # WS2: the schema dropdown with the placeholder as its first item, plus
+        # the "Build new schema" button. The combo starts at the placeholder so
+        # no schema is auto-selected until discovery proceeds.
+        self._schema_combo = QComboBox()
+        self._schema_combo.addItem(_SCHEMA_PLACEHOLDER)
+        self._build_schema_button = QPushButton("Build new schema")
         self._error_label = QLabel("")
         # Construct the per-input Import button only when the caller opts in by
         # supplying an import label (issue #27 AC11); otherwise leave it None so
@@ -120,6 +141,9 @@ class SourceInputWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(file_row)
         layout.addWidget(self._tab_combo)
+        # WS2: the schema selector and build button live below the tab dropdown.
+        layout.addWidget(self._schema_combo)
+        layout.addWidget(self._build_schema_button)
         layout.addWidget(self._render_checkbox)
         # Place the optional Import button beside the render checkbox so the
         # per-input import control lives inside this widget (issue #27 AC11).
@@ -133,6 +157,9 @@ class SourceInputWidget(QWidget):
         # v2 (AC-1): when the user changes the worksheet tab while the render
         # checkbox is checked, re-request a preview for the new sheet.
         self._tab_combo.currentTextChanged.connect(self._on_tab_changed)
+        # WS2: forward schema selection and build-new requests as signals.
+        self._schema_combo.currentTextChanged.connect(self._on_schema_changed)
+        self._build_schema_button.clicked.connect(self.build_schema_requested.emit)
 
     @property
     def import_btn(self) -> QPushButton:
@@ -157,6 +184,19 @@ class SourceInputWidget(QWidget):
             )
             raise AttributeError(msg)
         return self._import_button
+
+    @property
+    def build_schema_btn(self) -> QPushButton:
+        """Return the per-tab "Build new schema" button (WS2).
+
+        Exposed read-only so the composition root can connect the button (in
+        addition to the ``build_schema_requested`` signal) and tests can click it
+        deterministically.
+
+        Returns:
+            The "Build new schema" :class:`QPushButton` owned by this widget.
+        """
+        return self._build_schema_button
 
     @property
     def render_checkbox(self) -> QCheckBox:
@@ -257,6 +297,60 @@ class SourceInputWidget(QWidget):
         self._tab_combo.clear()
         self._tab_combo.addItems(tabs)
 
+    def set_schema_list(self, names: list[str]) -> None:
+        """Populate the schema dropdown with the placeholder plus ``names`` (WS2).
+
+        The ``<Choose Schema>`` placeholder is always the first item so the combo
+        can return to "no schema selected"; the supplied schema names follow.
+
+        Args:
+            names: The schema names to offer, in display order.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Replaces the dropdown items with the placeholder followed by
+            ``names`` and leaves the placeholder selected.
+        """
+        # Rebuild the list with the placeholder first so the no-match path can
+        # always return to the unselected state.
+        self._schema_combo.clear()
+        self._schema_combo.addItem(_SCHEMA_PLACEHOLDER)
+        self._schema_combo.addItems(names)
+        self._schema_combo.setCurrentIndex(0)
+
+    def set_selected_schema(self, name: str) -> None:
+        """Select a schema by name in the dropdown (WS2 auto-select).
+
+        Args:
+            name: The schema name to select. Appended to the dropdown when not
+                already present so the selection always takes effect.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the dropdown selection, which emits ``schema_selected`` when
+            the selected name is not the placeholder.
+        """
+        # Find the matching index; append the name if missing so the selection
+        # always reflects the requested schema.
+        index = self._schema_combo.findText(name)
+        if index < 0:
+            self._schema_combo.addItem(name)
+            index = self._schema_combo.findText(name)
+        self._schema_combo.setCurrentIndex(index)
+
+    def current_schema(self) -> str:
+        """Return the currently selected schema name (the placeholder if none).
+
+        Returns:
+            The selected schema name, or ``"<Choose Schema>"`` when no schema is
+            selected.
+        """
+        return self._schema_combo.currentText()
+
     def show_preview(self, rows: list[list[str]]) -> None:
         """No-op preview sink for protocol completeness.
 
@@ -353,3 +447,26 @@ class SourceInputWidget(QWidget):
         # here, so this slot only fires the positive-flow re-render request.
         if self._render_checkbox.isChecked() and self._path and sheet:
             self.render_tab_requested.emit(self._path, sheet)
+
+    def _on_schema_changed(self, name: str) -> None:
+        """Emit ``schema_selected`` when a real schema (not the placeholder) is picked.
+
+        Per WS2: selecting the ``<Choose Schema>`` placeholder is the unselected
+        state and must not emit a selection; only a real schema name is
+        forwarded so downstream wiring acts on an actual choice.
+
+        Args:
+            name: The newly-selected dropdown text (the placeholder or a schema
+                name).
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Emits ``schema_selected`` with ``name`` only when ``name`` is a real
+            schema (not the placeholder and non-empty).
+        """
+        # Suppress the placeholder selection so only a genuine schema choice
+        # propagates to the presenter/composition root.
+        if name and name != _SCHEMA_PLACEHOLDER:
+            self.schema_selected.emit(name)

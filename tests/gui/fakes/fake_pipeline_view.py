@@ -16,6 +16,8 @@ class FakePipelineView:
         running_states: Each ``set_running`` flag, in call order.
         results: Each ``show_result`` summary, in call order.
         errors: Each ``show_error`` message, in call order.
+        dialog_errors: Each ``show_dialog_error`` call recorded as
+            ``(title, message)`` in call order.
         import_button_states: Each ``set_import_button_enabled`` call recorded
             as ``(key, enabled)`` in call order.
         run_button_states: Each ``set_run_button_enabled`` flag, in call order.
@@ -30,6 +32,7 @@ class FakePipelineView:
         self.running_states: list[bool] = []
         self.results: list[str] = []
         self.errors: list[str] = []
+        self.dialog_errors: list[tuple[str, str]] = []
         self.import_button_states: list[tuple[str, bool]] = []
         self.run_button_states: list[bool] = []
         self.save_button_states: list[bool] = []
@@ -67,6 +70,18 @@ class FakePipelineView:
             ``None``.
         """
         self.errors.append(message)
+
+    def show_dialog_error(self, title: str, message: str) -> None:
+        """Record a modal dialog-error call (WS4).
+
+        Args:
+            title: The dialog title.
+            message: The full diagnostic message.
+
+        Returns:
+            ``None``.
+        """
+        self.dialog_errors.append((title, message))
 
     def set_import_button_enabled(self, key: str, enabled: bool) -> None:
         """Record a per-input import-button enable transition.

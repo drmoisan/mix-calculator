@@ -13,6 +13,7 @@ from src.gui.runners import SynchronousRunner
 from tests.gui.fakes.fake_services import FakePipelineService, FakeWorkbookReader
 
 if TYPE_CHECKING:
+    import pytest
     from pytestqt.qtbot import QtBot
 
 
@@ -88,3 +89,102 @@ def test_composition_clicking_run_save_open_export_does_not_raise(
     wired.window.aop_widget.set_path("aop.xlsx")
     wired.window.skulu_widget.set_path("sku.xlsx")
     wired.window.import_all_btn.click()
+
+
+def test_composed_import_path_never_reaches_stdin(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: the composed GUI import path never reaches stdin (AC-1/AC-3).
+
+    Builds the production pipeline service (no injected service) so the
+    composition root's injected KEY-mismatch resolver is in force, then imports
+    AOP and LE through it. The loaders are patched to record the forwarded
+    policy and ``builtins.input`` is patched to fail, proving no GUI import path
+    reaches the stdin prompt.
+    """
+    import pandas as pd
+
+    # Arrange: record the policy each loader receives and fail on any stdin read.
+    recorded: list[tuple[str, str]] = []
+
+    def _input(_prompt: str = "") -> str:
+        raise AssertionError("real stdin input() was reached in a GUI session")
+
+    def _fake_load_aop(
+        _path: str,
+        *,
+        sheet: str = "AOP1",
+        key_mismatch: str = "prompt",
+        **_kwargs: object,
+    ) -> pd.DataFrame:
+        recorded.append(("aop", key_mismatch))
+        return pd.DataFrame({"KEY": ["k1"]})
+
+    def _fake_load_source(
+        _path: str, _sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
+    ) -> pd.DataFrame:
+        recorded.append(("LE", key_mismatch))
+        return pd.DataFrame({"KEY": ["k1"]})
+
+    def _passthrough_normalize(frame: pd.DataFrame) -> pd.DataFrame:
+        return frame
+
+    def _noop_validate(_source: pd.DataFrame, _output: pd.DataFrame) -> None:
+        return None
+
+    monkeypatch.setattr("builtins.input", _input)
+    monkeypatch.setattr("src.load_aop.load_aop", _fake_load_aop)
+    monkeypatch.setattr("src.normalize_le.load_source", _fake_load_source)
+    monkeypatch.setattr("src.normalize_le.normalize", _passthrough_normalize)
+    monkeypatch.setattr("src.normalize_le.validate_tieouts", _noop_validate)
+
+    # Build the production service (no injected pipeline_service) under the
+    # composition root's modal resolver, forced to "Keep existing" -> trust.
+    from src.gui import _key_mismatch_dialog
+
+    class _AutoKeepBox:
+        class Icon:
+            Question = object()
+
+        class ButtonRole:
+            AcceptRole = object()
+            DestructiveRole = object()
+
+        def __init__(self, _parent: object) -> None:
+            self._keep: object | None = None
+
+        def setWindowTitle(self, _title: str) -> None:
+            return None
+
+        def setText(self, _text: str) -> None:
+            return None
+
+        def setIcon(self, _icon: object) -> None:
+            return None
+
+        def addButton(self, label: str, _role: object) -> object:
+            button = object()
+            if label == _key_mismatch_dialog.KEEP_EXISTING_LABEL:
+                self._keep = button
+            return button
+
+        def setDefaultButton(self, _button: object) -> None:
+            return None
+
+        def exec(self) -> None:
+            return None
+
+        def clickedButton(self) -> object | None:
+            return self._keep
+
+    monkeypatch.setattr(_key_mismatch_dialog, "QMessageBox", _AutoKeepBox, raising=True)
+    wired = build_application(runner=SynchronousRunner())
+    qtbot.addWidget(wired.window)
+
+    # Act: import AOP and LE through the composed production service.
+    wired.pipeline_service.import_aop("aop.xlsx", "AOP1")
+    wired.pipeline_service.import_le("le.xlsx", "LE-8 + 4")
+
+    # Assert: both loaders received the trust policy; stdin was never reached.
+    assert ("aop", "trust") in recorded
+    assert ("LE", "trust") in recorded

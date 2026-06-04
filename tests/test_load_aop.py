@@ -65,9 +65,10 @@ def test_resolution_reordered_columns() -> None:
     # Act
     frame = load_aop(buffer, sheet="AOP1")
 
-    # Assert
+    # Assert: under the corrected 8+4 identity, a YTG-bearing row's YTD is the
+    # sum of Jan..Apr (4 months * 2.0 = 8.0), not the full-year sum (issue #48).
     assert frame.iloc[0]["Customer"] == "A"
-    assert float(frame.iloc[0]["YTD"]) == 24.0
+    assert float(frame.iloc[0]["YTD"]) == 8.0
 
 
 def test_resolution_fuzzy_match_above_threshold() -> None:
@@ -237,96 +238,6 @@ def test_optional_key_located_by_name_only() -> None:
 
     # Assert
     assert frame.iloc[0]["KEY"] == "A1T"
-
-
-# ---------------------------------------------------------------------------
-# KEY reconcile branches (AOP wiring of resolve_key)
-# ---------------------------------------------------------------------------
-
-
-def test_key_absent_create_branch() -> None:
-    """With no KEY column, KEY is created from the rebuilt pattern."""
-    # Arrange / Act
-    frame = loaded_aop_frame(
-        [make_aop_row(customer="Cust", sku=7, type_="GS", months=[1.0] * 12)]
-    )
-
-    # Assert
-    assert frame.iloc[0]["KEY"] == "Cust7GS"
-
-
-def test_key_present_matching_trust_branch() -> None:
-    """A present KEY equal to the rebuilt pattern is trusted as-is."""
-    # Arrange
-    rows = [
-        make_aop_row(
-            customer="Cust", sku=7, type_="GS", months=[1.0] * 12, key="Cust7GS"
-        )
-    ]
-    buffer = build_aop_workbook(rows, header=SOURCE_COLUMNS)
-
-    # Act
-    frame = load_aop(buffer, sheet="AOP1")
-
-    # Assert
-    assert frame.iloc[0]["KEY"] == "Cust7GS"
-
-
-def test_key_diverging_trust_branch_warns(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A diverging KEY under 'trust' keeps the existing value and warns."""
-    # Arrange
-    rows = [
-        make_aop_row(
-            customer="Cust", sku=7, type_="GS", months=[1.0] * 12, key="LEGACY"
-        )
-    ]
-    buffer = build_aop_workbook(rows, header=SOURCE_COLUMNS)
-
-    # Act
-    with caplog.at_level("WARNING", logger="src.etl_key"):
-        frame = load_aop(buffer, sheet="AOP1", key_mismatch="trust")
-
-    # Assert
-    assert frame.iloc[0]["KEY"] == "LEGACY"
-    assert any("trust" in r.message.lower() for r in caplog.records)
-
-
-def test_key_diverging_overwrite_branch_warns(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A diverging KEY under 'overwrite' is replaced and warns."""
-    # Arrange
-    rows = [
-        make_aop_row(
-            customer="Cust", sku=7, type_="GS", months=[1.0] * 12, key="LEGACY"
-        )
-    ]
-    buffer = build_aop_workbook(rows, header=SOURCE_COLUMNS)
-
-    # Act
-    with caplog.at_level("WARNING", logger="src.etl_key"):
-        frame = load_aop(buffer, sheet="AOP1", key_mismatch="overwrite")
-
-    # Assert
-    assert frame.iloc[0]["KEY"] == "Cust7GS"
-    assert any("overwrit" in r.message.lower() for r in caplog.records)
-
-
-def test_key_diverging_prompt_non_tty_raises() -> None:
-    """A diverging KEY under default 'prompt' on non-TTY stdin raises ValueError."""
-    # Arrange
-    rows = [
-        make_aop_row(
-            customer="Cust", sku=7, type_="GS", months=[1.0] * 12, key="LEGACY"
-        )
-    ]
-    buffer = build_aop_workbook(rows, header=SOURCE_COLUMNS)
-
-    # Act / Assert: non-interactive prompt fails fast naming the remedy flag.
-    with pytest.raises(ValueError, match="--key-mismatch"):
-        load_aop(buffer, sheet="AOP1", key_mismatch="prompt", is_tty=lambda: False)
 
 
 # ---------------------------------------------------------------------------

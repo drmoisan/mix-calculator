@@ -192,6 +192,39 @@ def test_resolve_nuitka_command_ends_with_app_entry() -> None:
     assert argv[-1] == str(REPO_ROOT / "src" / "gui" / "app.py")
 
 
+def test_resolve_nuitka_command_disables_windows_console() -> None:
+    """WS1b/AC-4: the argv disables the Windows console for the packaged build.
+
+    The packaged GUI must open no console window; the console-disable flag makes
+    the build a non-console ("gui") application so no launch mode allocates a
+    console for stdin interaction.
+    """
+    from src.build_exe import resolve_nuitka_command
+
+    argv = resolve_nuitka_command()
+
+    # The console-disable flag must be present so the packaged exe is console-less.
+    assert "--windows-console-mode=disable" in argv
+
+
+def test_packaged_entry_is_gui_main_with_no_stdin_launch_mode() -> None:
+    """WS1b/AC-4: the packaged entry is the GUI main and no launch mode uses stdin.
+
+    The compile target is ``src/gui/app.py`` (whose ``main`` runs the Qt event
+    loop), and the console-disable flag guarantees the packaged artifact has no
+    console allocation. Combined with the WS1a seam (which keeps every launch
+    mode off stdin), no launch mode performs stdin interaction.
+    """
+    from src.build_exe import REPO_ROOT, resolve_nuitka_command
+
+    argv = resolve_nuitka_command()
+
+    # The packaged entry resolves to the GUI main module (not a console CLI).
+    assert argv[-1] == str(REPO_ROOT / "src" / "gui" / "app.py")
+    # The console-disable flag ensures the packaged artifact allocates no console.
+    assert "--windows-console-mode=disable" in argv
+
+
 def test_resolve_nuitka_command_starts_with_python_nuitka_invocation() -> None:
     """The argv must begin with ``[sys.executable, "-m", "nuitka"]``.
 

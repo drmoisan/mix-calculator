@@ -192,6 +192,141 @@ def test_list_schemas_ignores_non_schema_files() -> None:
     assert names == ["real"]
 
 
+def _seed_bundled(
+    store: InMemoryFileStore, bundled_dir: Path, name: str
+) -> SchemaDefinition:
+    """Write a bundled-default fixture through the fake under ``bundled_dir``.
+
+    Args:
+        store: The in-memory file store to seed.
+        bundled_dir: The bundled-defaults directory the registry will query.
+        name: The bundled schema name to seed.
+
+    Returns:
+        The seeded ``SchemaDefinition`` so callers can assert against it.
+    """
+    fixture = _sample_schema(name)
+    store.write_text(bundled_dir / f"{name}{SCHEMA_SUFFIX}", schema_to_json(fixture))
+    return fixture
+
+
+def test_list_schemas_includes_bundled_when_user_dir_empty() -> None:
+    """list_schemas returns bundled names when the user registry is empty."""
+    # Arrange: seed two bundled defaults; leave the user registry directory empty.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=bundled_dir)
+    _seed_bundled(store, bundled_dir, "default_aop")
+    _seed_bundled(store, bundled_dir, "default_le")
+
+    # Act
+    names = registry.list_schemas()
+
+    # Assert
+    assert names == ["default_aop", "default_le"]
+
+
+def test_list_schemas_user_override_appears_once_and_resolves_to_user() -> None:
+    """A user name colliding with a bundled name appears once and is the user one."""
+    # Arrange: a bundled default and a user-saved schema share the same name.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=bundled_dir)
+    bundled = _seed_bundled(store, bundled_dir, "default_aop")
+    user_schema = SchemaDefinition(
+        name="default_aop",
+        version="2.0",
+        columns=(ColumnSpec(canonical_name="Region", role="dimension"),),
+        key=KeySpec(columns=("Region",)),
+    )
+    registry.save(user_schema)
+
+    # Act
+    names = registry.list_schemas()
+    loaded = registry.load("default_aop")
+
+    # Assert: the colliding name appears exactly once and resolves to the user copy.
+    assert names == ["default_aop"]
+    assert names.count("default_aop") == 1
+    assert loaded == user_schema
+    assert loaded != bundled
+
+
+def test_load_bundled_only_name_returns_bundled_schema() -> None:
+    """load of a bundled-only name returns the bundled schema as a fallback."""
+    # Arrange: a bundled default with no matching user-saved file.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=bundled_dir)
+    bundled = _seed_bundled(store, bundled_dir, "default_le")
+
+    # Act
+    loaded = registry.load("default_le")
+
+    # Assert
+    assert loaded == bundled
+
+
+def test_load_colliding_name_returns_user_saved_schema() -> None:
+    """load of a colliding name prefers the user-saved schema over bundled."""
+    # Arrange: both a bundled default and a user-saved schema for the same name.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=bundled_dir)
+    _seed_bundled(store, bundled_dir, "default_le")
+    user_schema = SchemaDefinition(
+        name="default_le",
+        version="9.9",
+        columns=(ColumnSpec(canonical_name="Segment", role="dimension"),),
+        key=KeySpec(columns=("Segment",)),
+    )
+    registry.save(user_schema)
+
+    # Act
+    loaded = registry.load("default_le")
+
+    # Assert
+    assert loaded == user_schema
+
+
+def test_load_unknown_name_raises_when_in_neither_location() -> None:
+    """load of a name absent from both user and bundled dirs raises."""
+    # Arrange: an empty user registry and an empty bundled directory.
+    store = InMemoryFileStore()
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=Path("/bundled"))
+
+    # Act / Assert
+    with pytest.raises(SchemaRegistryError, match="schema 'ghost' not found"):
+        registry.load("ghost")
+
+
+def test_additivity_bundled_default_and_user_round_trip_unchanged() -> None:
+    """load_bundled_default and user save/load remain unchanged (R-AC-6).
+
+    The union-aware listing/loading must be additive: ``load_bundled_default``
+    still returns the bundled schema directly from the bundled directory, and a
+    user ``save`` followed by ``load`` of that name still round-trips through the
+    user registry directory with no behavior change.
+    """
+    # Arrange: a registry with a bundled fixture and a separately user-saved schema.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(Path("/reg"), store, bundled_dir=bundled_dir)
+    bundled = _seed_bundled(store, bundled_dir, "default_aop")
+    user_schema = _sample_schema("my_user_schema")
+    registry.save(user_schema)
+
+    # Act
+    bundled_loaded = registry.load_bundled_default("default_aop")
+    user_loaded = registry.load("my_user_schema")
+
+    # Assert: bundled-default loading is unchanged and the user save/load round-trips.
+    assert bundled_loaded == bundled
+    assert user_loaded == user_schema
+    # The user-saved file lives under the user registry directory, not bundled.
+    assert store.exists(Path("/reg") / f"my_user_schema{SCHEMA_SUFFIX}")
+
+
 # --- DiskSchemaFileStore (real-disk implementation, exercised via a typed seam) ---
 #
 # These tests cover the production file store without touching the real

@@ -40,6 +40,7 @@ __all__ = [
     "handle_import_one_error",
     "handle_import_one_success",
     "import_one_frame",
+    "required_keys_present",
     "resolve_path_for_key",
     "run_import_all_sync",
     "run_import_one_sync",
@@ -48,6 +49,45 @@ __all__ = [
 # The three import-table keys the pipeline consumes. Mirrors the presenter's
 # private constant so the import-all success path can disable every keyed button.
 _IMPORT_KEYS = ("LE", "aop", "sku_lu")
+
+
+def required_keys_present(
+    imported: dict[str, pd.DataFrame],
+    derived: dict[str, pd.DataFrame],
+    is_running: bool,
+) -> bool:
+    """Return whether the Run gate is open for the given working state (WS3).
+
+    Pure Run-gate predicate so the gate semantics live in one testable place.
+    The gate is open only when the run can complete without a cascading
+    ``KeyError`` from a missing import key:
+
+    - All three required import keys (``"LE"``, ``"aop"``, ``"sku_lu"``) are
+      present in ``imported`` (a complete fresh import), OR
+    - A non-empty ``derived`` set exists (a prior successful run, so a re-run is
+      permitted even though the imports may have been cleared),
+
+    AND no pipeline/import job is currently in flight.
+
+    A partial import (one or two keys present) therefore leaves Run disabled, so
+    ``run_pipeline`` is never reached with a missing key (issue #48 / WS3,
+    AC-5/AC-6).
+
+    Args:
+        imported: The in-memory imported frames keyed by table name.
+        derived: The derived frames produced by the last successful run.
+        is_running: Whether a pipeline or import job is currently in flight.
+
+    Returns:
+        ``True`` when all three import keys are present (or a non-empty derived
+        set exists) and no job is in flight; ``False`` otherwise.
+    """
+    # A complete import requires every key the pipeline consumes; a non-empty
+    # derived set means a prior run already produced downstream tables, so a
+    # re-run is allowed. Either condition, with no in-flight job, opens the gate.
+    all_keys_present = all(key in imported for key in _IMPORT_KEYS)
+    has_derived = bool(derived)
+    return (all_keys_present or has_derived) and not is_running
 
 
 def resolve_path_for_key(key: str, spec: ImportSpec) -> str:
@@ -259,11 +299,16 @@ def handle_import_one_error(context: ImportDispatchContext, message: str) -> Non
         ``None``.
 
     Side effects:
-        Clears busy, then routes the message to ``view.show_error`` (busy is
-        cleared first so the status surface ends on the error, not the idle
-        clear). The keyed import button is left enabled so the user can retry.
+        Clears busy, recomputes the Run button from the WS3 gate so a partial
+        import leaves Run disabled (AC-6), then routes the message to
+        ``view.show_error`` (busy is cleared first so the status surface ends on
+        the error, not the idle clear). The keyed import button is left enabled
+        so the user can retry.
     """
     context.set_busy(False)
+    # Recompute Run from the gate: a failed import keeps the working set
+    # incomplete, so Run stays disabled and the run path cannot cascade (AC-6).
+    context.view.set_run_button_enabled(context.can_run())
     context.view.show_error(message)
 
 
@@ -311,11 +356,15 @@ def handle_import_all_error(context: ImportDispatchContext, message: str) -> Non
         ``None``.
 
     Side effects:
-        Clears busy, then routes the message to ``view.show_error`` (busy is
-        cleared first so the status surface ends on the error, not the idle
-        clear). The prior button states are left in place.
+        Clears busy, recomputes the Run button from the WS3 gate so a failed
+        bulk import leaves Run disabled (AC-6), then routes the message to
+        ``view.show_error`` (busy is cleared first so the status surface ends on
+        the error, not the idle clear). The prior button states are otherwise
+        left in place.
     """
     context.set_busy(False)
+    # Recompute Run from the gate so a failed bulk import keeps Run disabled.
+    context.view.set_run_button_enabled(context.can_run())
     context.view.show_error(message)
 
 

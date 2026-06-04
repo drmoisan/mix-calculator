@@ -33,8 +33,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtWidgets import QMessageBox
+
 if TYPE_CHECKING:
     from src.gui.main_window import MainWindow
+
+# Maximum status-bar summary length; the full diagnostic lives in the modal so
+# the status bar stays a concise one-line summary (WS4).
+_STATUS_SUMMARY_MAX = 120
+
+# Dialog title used for the modal error surface (WS4).
+_ERROR_DIALOG_TITLE = "Error"
 
 
 class MainWindowPipelineView:
@@ -65,8 +74,64 @@ class MainWindowPipelineView:
         self._window.set_status(summary)
 
     def show_error(self, message: str) -> None:
-        """Show an error message in the main window's status bar."""
-        self._window.set_status(f"Error: {message}")
+        """Surface an error through BOTH a modal dialog and a status summary (WS4).
+
+        Per WS4 (issue #48): every import/run error is shown as a
+        ``QMessageBox.critical`` modal carrying the full diagnostic AND a concise
+        status-bar summary. This keeps the full detail readable while the status
+        bar reflects the last failure at a glance.
+
+        Args:
+            message: The full human-readable error text.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Shows a modal error dialog and writes a truncated summary to the
+            main window's status bar.
+        """
+        # Drive the modal with the full diagnostic, then write a concise summary
+        # to the status bar so both surfaces reflect the failure.
+        self.show_dialog_error(_ERROR_DIALOG_TITLE, message)
+        self._window.set_status(f"Error: {self._summarize(message)}")
+
+    def show_dialog_error(self, title: str, message: str) -> None:
+        """Show a modal error dialog carrying the full diagnostic (WS4).
+
+        Args:
+            title: The dialog title (a short failure category).
+            message: The full human-readable diagnostic text.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Shows a blocking ``QMessageBox.critical`` modal the user must
+            acknowledge.
+        """
+        QMessageBox.critical(self._window, title, message)
+
+    @staticmethod
+    def _summarize(message: str) -> str:
+        """Return a concise one-line status summary of an error message.
+
+        Collapses the message to its first line and truncates it to
+        :data:`_STATUS_SUMMARY_MAX` characters so the status bar stays a short
+        summary; the full text remains in the modal.
+
+        Args:
+            message: The full error message.
+
+        Returns:
+            A single-line, length-bounded summary suitable for the status bar.
+        """
+        # Use only the first line so a multi-line diagnostic does not overflow
+        # the status bar; the modal already carries the full text.
+        first_line = message.splitlines()[0] if message else ""
+        if len(first_line) > _STATUS_SUMMARY_MAX:
+            return first_line[: _STATUS_SUMMARY_MAX - 1] + "…"
+        return first_line
 
     def set_import_button_enabled(self, key: str, enabled: bool) -> None:
         """Route to the matching per-input import button and recompute Import-All.

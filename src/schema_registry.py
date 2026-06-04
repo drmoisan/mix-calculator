@@ -210,48 +210,102 @@ class SchemaRegistry:
         self.bundled_dir = bundled_dir
 
     def list_schemas(self) -> list[str]:
-        """Return the names of schemas saved in the registry directory.
+        """Return the deduplicated union of user-saved and bundled-default names.
+
+        The result is the union of the schema names saved in the user registry
+        directory and the names of the packaged bundled defaults, sorted for a
+        deterministic order. When a user-saved name collides with a bundled
+        default name, the name appears exactly once (user-saved entries take
+        precedence on collision; see :meth:`load`). This ensures the bundled
+        defaults are selectable on a fresh profile with an empty user registry.
 
         Returns:
-            The schema names (filename with the :data:`SCHEMA_SUFFIX` stripped)
-            for every ``*.schema.json`` file in the registry directory, sorted
-            for a deterministic order.
+            The sorted, deduplicated union of user-saved schema names and
+            bundled-default schema names, with no duplicate name.
 
         Side effects:
-            Lists the registry directory via the injected store.
+            Lists both the registry directory and the bundled directory via the
+            injected store.
         """
-        # Recover each schema name by stripping the suffix; non-schema files in
-        # the directory are ignored so unrelated files do not appear as schemas.
-        names = [
+        # Recover each user-saved schema name by stripping the suffix; non-schema
+        # files in the directory are ignored so unrelated files do not appear.
+        user_names = [
             filename[: -len(SCHEMA_SUFFIX)]
             for filename in self.store.list_files(self.registry_dir)
+            if filename.endswith(SCHEMA_SUFFIX)
+        ]
+        # Union user-saved names with bundled-default names. A set deduplicates
+        # collisions so a user override of a bundled name appears exactly once;
+        # precedence on load is handled by :meth:`load`.
+        union = set(user_names) | set(self._list_bundled_names())
+        return sorted(union)
+
+    def _list_bundled_names(self) -> list[str]:
+        """Return the names of bundled default schemas, sorted.
+
+        Purpose:
+            Enumerate the packaged bundled-default schema files so that listing
+            and matching can treat them as selectable schemas alongside the
+            user-saved ones. The bundled defaults are shipped with the product
+            and must be visible on a fresh profile with an empty user registry.
+
+        Returns:
+            The schema names (filename with :data:`SCHEMA_SUFFIX` stripped) for
+            every ``*.schema.json`` file in :attr:`bundled_dir`, sorted for a
+            deterministic order.
+
+        Side effects:
+            Lists the bundled directory via the injected store. No direct
+            ``pathlib`` I/O occurs; all access flows through ``self.store``.
+        """
+        # Recover each bundled schema name by stripping the suffix; non-schema
+        # files in the bundled directory are ignored.
+        names = [
+            filename[: -len(SCHEMA_SUFFIX)]
+            for filename in self.store.list_files(self.bundled_dir)
             if filename.endswith(SCHEMA_SUFFIX)
         ]
         return sorted(names)
 
     def load(self, name: str) -> SchemaDefinition:
-        """Load and parse a named schema from the registry directory.
+        """Load and parse a named schema, preferring the user registry.
+
+        Resolution order: a user-saved file in :attr:`registry_dir` takes
+        precedence; if no user-saved file exists for ``name``, the bundled
+        default file in :attr:`bundled_dir` is used as a fallback. This makes
+        the bundled defaults loadable by name on a fresh profile while
+        preserving user overrides of the same name.
 
         Args:
             name: The schema name (without the ``.schema.json`` suffix).
 
         Returns:
-            The parsed ``SchemaDefinition``.
+            The parsed ``SchemaDefinition`` from the user registry when present,
+            otherwise from the bundled defaults.
 
         Raises:
-            SchemaRegistryError: If no file exists for ``name`` in the registry.
+            SchemaRegistryError: If no file exists for ``name`` in either the
+                registry directory or the bundled-defaults directory.
             SchemaSerializationError: If the file contents are not valid schema
                 JSON (propagated from :mod:`src.schema_serialization`).
 
         Side effects:
             Reads the schema file via the injected store.
         """
-        path = self._path_for(self.registry_dir, name)
-        if not self.store.exists(path):
-            raise SchemaRegistryError(
-                f"schema '{name}' not found in registry '{self.registry_dir}'"
-            )
-        return schema_from_json(self.store.read_text(path))
+        # Prefer the user-saved schema so a user override of a bundled name wins.
+        user_path = self._path_for(self.registry_dir, name)
+        if self.store.exists(user_path):
+            return schema_from_json(self.store.read_text(user_path))
+        # Fall back to the bundled default so shipped schemas load by name even
+        # when no user-saved file of that name exists.
+        bundled_path = self._path_for(self.bundled_dir, name)
+        if self.store.exists(bundled_path):
+            return schema_from_json(self.store.read_text(bundled_path))
+        # The name exists in neither location: fail fast with a descriptive error.
+        raise SchemaRegistryError(
+            f"schema '{name}' not found in registry '{self.registry_dir}' "
+            f"or bundled defaults '{self.bundled_dir}'"
+        )
 
     def save(self, schema: SchemaDefinition) -> None:
         """Serialize and persist a schema to the registry directory.

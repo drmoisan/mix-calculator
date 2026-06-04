@@ -22,6 +22,7 @@ Boundaries:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from PySide6.QtCore import QObject, Qt, QThread, Slot
@@ -131,6 +132,45 @@ class _RunnerReceiver(QObject):
         self._on_error(message)
 
 
+@dataclass(eq=False)
+class _ActiveDispatch:
+    """One in-flight ``ThreadedRunner.run`` dispatch held until its thread ends.
+
+    Purpose:
+        Bundle the three Qt objects that make up a single off-thread dispatch
+        (the worker thread, the worker, and the GUI-thread receiver) so they
+        are tracked and kept alive together as one record in
+        :attr:`ThreadedRunner._active`.
+
+    Responsibilities:
+        Carry strong references to the dispatch's ``thread``/``worker``/
+        ``receiver`` so none is garbage-collected before the worker emits and
+        the thread finishes. Holds no behavior; lifecycle wiring lives on
+        :class:`ThreadedRunner`.
+
+    Usage:
+        Constructed in :meth:`ThreadedRunner.run`, added to
+        ``ThreadedRunner._active`` before ``thread.start()``, and removed by
+        the ``thread.finished`` handler once the thread has finished.
+
+    Key invariant:
+        A record remains in ``_active`` exactly while its thread is live. The
+        class uses ``eq=False`` so each record is identity-hashed, allowing
+        many concurrent dispatches to coexist in a ``set`` without value
+        collisions.
+
+    Attributes:
+        thread: The worker :class:`QThread` for this dispatch.
+        worker: The :class:`PipelineWorker` moved onto ``thread``.
+        receiver: The GUI-thread :class:`_RunnerReceiver` holding the queued
+            outcome slots.
+    """
+
+    thread: QThread
+    worker: PipelineWorker
+    receiver: _RunnerReceiver
+
+
 class ThreadedRunner:
     """Run the pipeline task on a worker :class:`QThread` (production default).
 
@@ -143,23 +183,38 @@ class ThreadedRunner:
         Construct a :class:`PipelineWorker` for the task, move it to a fresh
         :class:`QThread`, connect ``worker.finished`` / ``worker.error`` to a
         GUI-thread :class:`_RunnerReceiver` via
-        ``Qt.ConnectionType.QueuedConnection`` (AC-6), and start the thread.
+        ``Qt.ConnectionType.QueuedConnection`` (AC-6), track the dispatch, and
+        start the thread. Provide :meth:`await_active` for application-shutdown
+        teardown that quits and waits every live worker thread.
+
+    Lifecycle invariant:
+        Each ``run`` call is tracked as one :class:`_ActiveDispatch` record in
+        :attr:`_active` for exactly as long as its worker thread is live. The
+        worker is a :class:`QObject` whose event affinity is the worker thread,
+        so it MUST be destroyed on that thread: ``thread.finished`` is wired to
+        ``worker.deleteLater`` (and ``thread.deleteLater``) so destruction
+        happens on the worker thread, not by GUI-thread Python GC (which raises
+        ``QBasicTimer::stop`` aborts). Because each dispatch is a distinct
+        record in a collection (not a single overwriteable attribute), a second
+        dispatch cannot drop a still-running prior thread.
 
     Attributes:
-        _thread: The active worker thread, or ``None`` before the first run.
-        _worker: The active worker, or ``None`` before the first run.
-        _receiver: The GUI-thread QObject receiver that holds the queued slots,
-            or ``None`` before the first run. Held here so the receiver is not
-            garbage-collected before the worker emits.
+        _active: The set of live :class:`_ActiveDispatch` records. A record is
+            added before its thread starts and removed when its thread emits
+            ``finished``. Holding the records keeps the thread/worker/receiver
+            alive across the asynchronous handoff and tracks every concurrent
+            dispatch so shutdown can quit and wait all of them.
     """
 
     def __init__(self) -> None:
-        """Initialize with no active thread, worker, or receiver yet."""
-        # Hold references to keep the thread/worker/receiver alive across the
-        # asynchronous handoff; without these the GC would tear them down.
-        self._thread: QThread | None = None
-        self._worker: PipelineWorker | None = None
-        self._receiver: _RunnerReceiver | None = None
+        """Initialize with an empty active-dispatch collection.
+
+        The set starts empty; each :meth:`run` call adds exactly one
+        :class:`_ActiveDispatch` record and the ``thread.finished`` handler
+        removes it. Holding records here keeps the thread/worker/receiver alive
+        across the asynchronous handoff so the GC cannot tear them down early.
+        """
+        self._active: set[_ActiveDispatch] = set()
 
     def run(
         self,
@@ -190,8 +245,11 @@ class ThreadedRunner:
             Creates a :class:`QThread`, constructs a :class:`PipelineWorker`,
             moves the worker to the thread, constructs a
             :class:`_RunnerReceiver` on the GUI thread, connects the worker
-            signals to the receiver via queued connections, and starts the
-            thread.
+            signals to the receiver via queued connections, registers the
+            dispatch as a :class:`_ActiveDispatch` record in :attr:`_active`
+            (before starting), wires ``thread.finished`` to destroy the worker
+            and thread on the worker thread and to remove the record from
+            :attr:`_active`, and starts the thread.
         """
         thread = QThread()
         worker = PipelineWorker(task)
@@ -215,13 +273,101 @@ class ThreadedRunner:
         # direct connection from the worker thread is acceptable here.
         worker.finished.connect(thread.quit)
         worker.error.connect(thread.quit)
+        # The worker is a QObject with worker-thread affinity, so it MUST be
+        # destroyed on its own thread. Wiring deleteLater to thread.finished
+        # schedules destruction on the worker thread's event loop, which is
+        # what prevents the cross-thread QObject teardown that raises
+        # "QBasicTimer::stop: Failed. Possibly trying to stop from a different
+        # thread". The thread object itself is also cleaned up after it stops.
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
         # Drive the worker's run slot from the thread's started signal so the
         # task actually executes on the worker thread.
         thread.started.connect(worker.run)
-        self._thread = thread
-        self._worker = worker
-        self._receiver = receiver
+        # Register the dispatch as one record before starting the thread so a
+        # fast worker cannot finish (and try to remove its record) before the
+        # record is tracked. Using a set of records — not a single overwriteable
+        # attribute — means a later run() cannot drop a still-running dispatch.
+        record = _ActiveDispatch(thread=thread, worker=worker, receiver=receiver)
+        self._active.add(record)
+
+        def _discard_record() -> None:
+            """Remove this dispatch's record once its thread has finished.
+
+            Guarded with ``discard`` so a double-emit of ``thread.finished``
+            cannot raise; the record is released only after the thread has
+            actually finished, so the thread/worker are not GC'd while live.
+            """
+            self._active.discard(record)
+
+        thread.finished.connect(_discard_record)
         thread.start()
+
+    def await_active(self, timeout_ms: int = 5000) -> None:
+        """Quit and wait every live worker thread (application-shutdown hook).
+
+        Iterates a snapshot of the active dispatches and, for each, asks the
+        thread to quit its event loop and blocks until it finishes (or the
+        timeout elapses). This is the teardown contract used at application
+        shutdown so no worker thread is left running when the process exits,
+        which would otherwise risk a cross-thread QObject destruction abort.
+
+        Args:
+            timeout_ms: Per-thread maximum wait in milliseconds for each
+                thread to finish after being asked to quit. Defaults to 5000.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Calls ``quit`` then ``wait`` on every currently-active worker
+            thread. Safe to call when no dispatch is active (no-op). Threads
+            that finish during teardown remove their own records via the
+            ``thread.finished`` handler; iterating a snapshot keeps that
+            concurrent mutation from disturbing the loop.
+        """
+        # Iterate a snapshot so finished-time record removal (which mutates
+        # self._active from the finished handler) cannot change the set under
+        # the loop. quit() asks the thread's event loop to exit; wait() blocks
+        # until the thread has actually stopped so shutdown leaves none running.
+        for record in list(self._active):
+            # Waiting on one thread spins the event loop, which can process a
+            # pending thread.deleteLater for another already-finished thread in
+            # this snapshot. Operating on that deleted C++ QThread raises
+            # RuntimeError from shiboken. A deleted thread has already finished
+            # and been cleaned up — the desired end state — so this defined Qt
+            # object-lifetime boundary skips it rather than failing teardown.
+            try:
+                record.thread.quit()
+                record.thread.wait(timeout_ms)
+            except RuntimeError:  # pragma: no cover - defensive Qt-lifetime guard
+                # The C++ QThread was already deleted (it finished and its
+                # deleteLater ran); nothing left to quit or wait on. This branch
+                # is excluded from coverage because the only way to force it
+                # deterministically is to delete a live C++ QThread object
+                # (shiboken6.delete), which aborts the interpreter; the guard
+                # exists solely to keep production shutdown robust against the
+                # deleteLater/await_active race.
+                self._active.discard(record)
+                continue
+
+    def active_dispatches(self) -> tuple[_ActiveDispatch, ...]:
+        """Return a snapshot of the currently-tracked active dispatch records.
+
+        Public read seam over :attr:`_active` so callers (notably the
+        lifecycle tests) can observe how many dispatches are live and inspect
+        each record's thread/worker/receiver without reaching for the
+        protected collection. The returned tuple is a copy, so mutating it
+        does not affect the runner's tracking.
+
+        Returns:
+            A tuple of the live :class:`_ActiveDispatch` records, in arbitrary
+            order. Empty when no dispatch is active.
+
+        Side effects:
+            None. Reads the tracked set without mutating it.
+        """
+        return tuple(self._active)
 
 
 class SynchronousRunner:

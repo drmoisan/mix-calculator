@@ -154,3 +154,21 @@ def test_wire_schema_builder_uses_injected_factories(qtbot: QtBot) -> None:
     # Assert: one dialog opened and the presenter was retained on the window.
     assert len(opened) == 1
     assert window.schema_builder_presenter is sentinel
+
+
+def test_wire_schema_builder_uses_default_factories(qtbot: QtBot) -> None:
+    """wire_schema_builder with no factories opens the production builder dialog."""
+    # Arrange: wire with the production default factories (no injected factories),
+    # matching the trimmed app.py call site after the P1-T2 extraction.
+    window = MainWindow()
+    qtbot.addWidget(window)
+    service = FakeSchemaService()
+    wire_schema_builder(window, service)
+
+    # Act: trigger the wired signal exactly as the menu action would.
+    window.schema_builder_requested.emit()
+
+    # Assert: a real SchemaBuilderPresenter was built and retained on the window.
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+
+    assert isinstance(window.schema_builder_presenter, SchemaBuilderPresenter)

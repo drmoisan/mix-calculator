@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.gui.pipeline_service import ImportSpec
     from src.gui.protocols import PreviewSinkProtocol, SourceSelectionViewProtocol
+    from src.gui.services.schema_service import SchemaServiceProtocol
     from src.gui.services.workbook_reader import WorkbookReaderProtocol
 
 from src.gui.pipeline_service import ImportSpec as _ImportSpec
@@ -34,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 # Default preview row cap, matching the spec preview bound.
 _PREVIEW_MAX_ROWS = 200
+
+# Rows read to extract the header for schema discovery (the first/header row).
+_HEADER_PREVIEW_ROWS = 1
 
 
 class SourceSelectionPresenter:
@@ -55,6 +59,9 @@ class SourceSelectionPresenter:
     Attributes:
         _view: The source-selection view this presenter updates.
         _reader: The workbook reader used for tab discovery and preview.
+        _schema_service: Optional schema service used for import-schema discovery
+            (WS2 / issue #48). When ``None``, schema discovery is unavailable and
+            :meth:`on_schema_discovery` is a no-op.
     """
 
     def __init__(
@@ -63,8 +70,9 @@ class SourceSelectionPresenter:
         workbook_reader: WorkbookReaderProtocol,
         *,
         preview_sink: PreviewSinkProtocol | None = None,
+        schema_service: SchemaServiceProtocol | None = None,
     ) -> None:
-        """Initialize the presenter with its view, reader, and optional sink.
+        """Initialize the presenter with its view, reader, and optional sinks.
 
         Args:
             view: The source-selection view to update.
@@ -75,10 +83,16 @@ class SourceSelectionPresenter:
                 a render request renders into the main-window preview as well
                 as into the per-input widget's no-op sink). Defaults to
                 ``None`` (single-view behavior, the v1 contract).
+            schema_service: Optional schema service used by
+                :meth:`on_schema_discovery` to match a header preview against the
+                registry (WS2). The composition root injects the production
+                service; tests inject a fake. Defaults to ``None`` (discovery
+                unavailable).
         """
         self._view = view
         self._reader = workbook_reader
         self._preview_sink = preview_sink
+        self._schema_service = schema_service
 
     @property
     def preview_sink(self) -> PreviewSinkProtocol | None:
@@ -164,6 +178,60 @@ class SourceSelectionPresenter:
         self._view.show_preview([])
         if self._preview_sink is not None:
             self._preview_sink.show_preview([])
+
+    def on_schema_discovery(self, path: str, sheet: str) -> None:
+        """Auto-select a matching import schema for a source tab (WS2).
+
+        Reads the header row of ``sheet``, matches it against the registry via
+        the injected schema service, and applies the discovery decision:
+
+        - ``action == "proceed"`` (a suitable match): select the matched schema
+          name in the view's dropdown (AC-11).
+        - ``action == "resolve"`` (no suitable match): leave the
+          ``<Choose Schema>`` placeholder selected; do not auto-select (AC-12).
+
+        A no-op when no schema service was injected or when the header preview is
+        empty (no header to match).
+
+        Args:
+            path: The workbook path of the activated source tab.
+            sheet: The worksheet name whose header is matched.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            May call ``view.set_selected_schema`` on a proceed decision; routes a
+            reader ``ValueError`` to ``view.show_error``.
+        """
+        # Discovery is only available when a schema service was injected; without
+        # one the per-tab dropdown stays at the placeholder.
+        if self._schema_service is None:
+            return
+        logger.info("Schema discovery requested: %r on %r.", sheet, path)
+        # Read just the header row; a reader ValueError is user-facing and shown
+        # via the view, matching the on_render_tab/on_file_selected policy.
+        try:
+            rows = self._reader.read_sheet_preview(
+                path, sheet, max_rows=_HEADER_PREVIEW_ROWS
+            )
+        except ValueError as error:
+            logger.error("Failed to read header for %r on %r: %s", sheet, path, error)
+            self._view.show_error(str(error))
+            return
+        # An empty preview carries no header to match, so leave the placeholder.
+        if not rows:
+            return
+        headers = rows[0]
+        # Import the discovery decision locally so the presenter module does not
+        # depend on the wiring module at import time.
+        from src.gui._schema_wiring import discover_schema
+
+        decision = discover_schema(self._schema_service, headers)
+        # Decision routing: a proceed selects the matched schema name; a resolve
+        # leaves the <Choose Schema> placeholder so the user picks manually.
+        if decision.action == "proceed" and decision.result.schema is not None:
+            self._view.set_selected_schema(decision.result.schema.name)
 
     def build_import_spec(
         self,

@@ -47,6 +47,7 @@ from src._load_aop_helpers import (
     TIEOUT_TOL,
     YTG_MONTHS,
     build_parser,
+    build_per_row_checks,
     clean_label_sentinels,
     coerce_numeric,
     print_summary,
@@ -226,12 +227,13 @@ def load_aop(
 
     # Fill only the blank YTD/quarter totals (and YTG when present) from their
     # monthly components: the source omits these totals on some rows even though
-    # they are definitionally the sum of their months. The YTG mapping is added
-    # only when the optional YTG column is in the frame so an absent YTG is not
-    # created here.
-    totals_to_months: dict[str, list[str]] = {"YTD": MONTHS, **QUARTER_TO_MONTHS}
-    if "YTG" in frame.columns:
-        totals_to_months["YTG"] = YTG_MONTHS
+    # they are definitionally the sum of their months. The fill map is the same
+    # corrected per-row identity map used by validation (build_per_row_checks):
+    # when YTG is present YTD fills from the non-YTG months (Jan..Apr) and YTG
+    # from May..Dec; when YTG is absent YTD fills from the full year. Using the
+    # shared map keeps a blank-filled total consistent with what validate_aop
+    # then checks (issue #48 / WS5).
+    totals_to_months = build_per_row_checks(list(frame.columns))
     frame = fill_blank_totals(frame, totals_to_months)
 
     # Establish KEY per the documented branches (create/trust/resolve), wired

@@ -21,7 +21,8 @@ from src.gui.services.schema_service import (
 )
 from src.schema_loader import SchemaLoader
 from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
-from src.schema_registry import SchemaRegistry
+from src.schema_registry import SCHEMA_SUFFIX, SchemaRegistry
+from src.schema_serialization import schema_to_json
 
 # Registry directory used by the in-memory-store-backed tests. The store is a
 # dict keyed by POSIX path, so the directory only needs to be a stable prefix.
@@ -125,6 +126,34 @@ def test_list_schema_names_delegates_to_registry() -> None:
 
     # Assert: sorted names match what was saved.
     assert names == ["alpha", "beta"]
+
+
+def test_service_lists_and_loads_bundled_defaults_when_user_dir_empty() -> None:
+    """The service surfaces and loads bundled defaults with no user files (R-AC-1/5).
+
+    With an empty user registry directory and bundled fixtures seeded under the
+    registry's ``bundled_dir`` through the in-memory store, the service must list
+    both bundled defaults and load one by name. This pins the union seam at the
+    :class:`SchemaService` boundary the GUI depends on.
+    """
+    # Arrange: a registry whose user directory is empty but whose bundled_dir is
+    # served bundled fixtures by the shared in-memory store.
+    store = InMemoryFileStore()
+    bundled_dir = Path("/bundled")
+    registry = SchemaRegistry(_REGISTRY_DIR, store, bundled_dir=bundled_dir)
+    aop = _aop_like_schema("default_aop")
+    le = _aop_like_schema("default_le")
+    store.write_text(bundled_dir / f"default_aop{SCHEMA_SUFFIX}", schema_to_json(aop))
+    store.write_text(bundled_dir / f"default_le{SCHEMA_SUFFIX}", schema_to_json(le))
+    service = SchemaService(registry)
+
+    # Act
+    names = service.list_schema_names()
+    loaded = service.load_schema("default_aop")
+
+    # Assert: both bundled defaults are listed and one loads by name.
+    assert names == ["default_aop", "default_le"]
+    assert loaded == aop
 
 
 def test_load_schema_delegates_to_registry() -> None:

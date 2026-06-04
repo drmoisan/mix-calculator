@@ -33,6 +33,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from src import load_aop, load_skulu, normalize_le
+from src.gui._key_mismatch_seam import (
+    default_key_mismatch_resolver,
+    never_tty,
+    no_stdin_prompt,
+)
 from src.gui.services.db_service import DbService
 from src.mix_lookups import (
     build_aop_norm,
@@ -45,6 +50,8 @@ from src.mix_pipeline_run import run_transforms
 from src.mix_transforms import pivot_aop, pivot_le
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pandas as pd
 
     from src.schema_model import SchemaDefinition
@@ -220,19 +227,38 @@ class PipelineService:
 
     Attributes:
         _db_service: The SQLite read/write collaborator (constructor-injected).
+        _key_mismatch_resolver: Zero-arg callable returning the KEY-mismatch
+            policy (``"trust"`` or ``"overwrite"``) for the import loaders. Wired
+            so a GUI session resolves a diverging KEY through this resolver (a Qt
+            modal at the composition root) instead of the loaders' stdin
+            ``input()`` path (WS1a).
     """
 
-    def __init__(self, db_service: DbService | None = None) -> None:
-        """Initialize the service with an optional DB collaborator.
+    def __init__(
+        self,
+        db_service: DbService | None = None,
+        *,
+        key_mismatch_resolver: Callable[[], str] = default_key_mismatch_resolver,
+    ) -> None:
+        """Initialize the service with an optional DB collaborator and KEY seam.
 
         Args:
             db_service: The SQLite read/write service. When ``None`` a default
                 :class:`DbService` is constructed so the production composition
                 root need not supply one.
+            key_mismatch_resolver: Zero-arg callable returning the KEY-mismatch
+                policy applied by the LE and AOP loaders when a present KEY column
+                diverges from the rebuilt pattern. Defaults to
+                :func:`default_key_mismatch_resolver` ("trust"/"Keep existing"),
+                which keeps the loaders off the stdin ``input()`` path. The GUI
+                composition root injects a Qt-modal-backed resolver (WS1a).
         """
         # Default to a plain DbService so callers that do not need to substitute
         # the SQLite boundary get a working service without extra wiring.
         self._db_service = db_service if db_service is not None else DbService()
+        # The resolver yields the KEY-mismatch policy at import time; its default
+        # ("trust") guarantees the loaders never reach the interactive prompt.
+        self._key_mismatch_resolver = key_mismatch_resolver
 
     def import_le(self, path: str, sheet: str) -> pd.DataFrame:
         """Load, normalize, and validate the LE source, returning the frame.
@@ -253,7 +279,16 @@ class PipelineService:
                 KEY-resolution, or tie-out failure.
         """
         logger.info("Importing LE source from sheet %r.", sheet)
-        le_source = normalize_le.load_source(path, sheet)
+        # Forward the resolved KEY-mismatch policy plus the no-stdin seams so a
+        # diverging LE KEY resolves through the injected resolver (a Qt modal at
+        # the composition root) instead of the loader's stdin input() (WS1a).
+        le_source = normalize_le.load_source(
+            path,
+            sheet,
+            key_mismatch=self._key_mismatch_resolver(),
+            is_tty=never_tty,
+            prompt=no_stdin_prompt,
+        )
         le_output = normalize_le.normalize(le_source)
         normalize_le.validate_tieouts(le_source, le_output)
         return le_output
@@ -273,7 +308,16 @@ class PipelineService:
                 failure.
         """
         logger.info("Importing AOP source from sheet %r.", sheet)
-        return load_aop.load_aop(path, sheet=sheet)
+        # Forward the resolved KEY-mismatch policy plus the no-stdin seams so a
+        # diverging AOP KEY resolves through the injected resolver (a Qt modal at
+        # the composition root) instead of the loader's stdin input() (WS1a).
+        return load_aop.load_aop(
+            path,
+            sheet=sheet,
+            key_mismatch=self._key_mismatch_resolver(),
+            is_tty=never_tty,
+            prompt=no_stdin_prompt,
+        )
 
     def import_skulu(self, path: str, sheet: str) -> pd.DataFrame:
         """Load and clean the SKU_LU source, returning the frame.
