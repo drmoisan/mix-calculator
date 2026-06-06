@@ -13,3 +13,5 @@
 - [E402 fixture-import unauthorized](e402-fixture-import-unauthorized.md) — `# noqa: E402` on test sys.path fixture imports is not pre-authorized; gate as PARTIAL/procedural like pyright:ignore. S101 blanket-allowed in tests; S108/ARG002 pattern-authorized
 - [PowerShell line-count undercount](powershell-measure-object-line-undercount.md) — `(Get-Content | Measure-Object -Line).Lines` undercounts vs `awk NR`/`wc -l`; on issue #46 hid an app.py 503-line AC-12 violation reported as 439
 - [pytest --cov module-vs-path arg](pytest-cov-module-vs-path-arg.md) — use dotted `--cov=src.gui.runners`; path form `src/gui/runners` reports "module not imported / no data" despite passing tests
+- [file-size regression during remediation](file-size-regression-during-remediation.md) — independently re-scan ALL changed .py files vs 500 cap; executor final-file-sizes evidence can omit a file it pushed over (issue #50: test_schema_builder_presenter.py 229→506)
+- [protocol-only module 0% coverage](protocol-only-module-zero-coverage.md) — TYPE_CHECKING-only typing.Protocol modules report 0%; classify non-blocking PARTIAL not FAIL when concrete implementers are covered
