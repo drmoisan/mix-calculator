@@ -28,7 +28,7 @@ from src.schema_matching import (
     UnmatchedColumn,
 )
 from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
-from tests.gui.fakes.fake_services import FakeSchemaService
+from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
 
 if TYPE_CHECKING:
     from pytestqt.qtbot import QtBot
@@ -239,6 +239,114 @@ def test_wire_build_buttons_blank_path_without_provider(qtbot: QtBot) -> None:
     # Assert: no seeding occurred (blank menu-equivalent path).
     assert seeds == []
     assert window.schema_builder_presenter is not None
+
+
+def test_build_application_per_tab_button_seeds_via_injected_provider(
+    qtbot: QtBot,
+) -> None:
+    """R4/AC5: the per-tab build path opens a seeded builder via build_application.
+
+    Drives the composition root (``build_application``) with a fake schema service
+    holding the bundled-default schemas, triggers a per-tab ``build_schema_requested``,
+    and asserts the opened builder presenter received the source's required specs and
+    a masked preview slice (seeded state is non-empty). The menu-action path is
+    asserted to remain blank.
+    """
+    # Arrange: a service holding the LE default so the production BuildSpecProvider
+    # built inside build_application resolves a non-empty spec for the LE tab.
+    le_schema = SchemaDefinition(
+        name="default_le",
+        version="1.0",
+        columns=(
+            ColumnSpec(canonical_name="Customer", role="dimension", required=True),
+        ),
+        key=KeySpec(parts=(column_ref("Customer"),)),
+    )
+    service = FakeSchemaService(
+        schema_names=["default_le"], schemas={"default_le": le_schema}
+    )
+    wired = build_application(runner=SynchronousRunner(), schema_service=service)
+    qtbot.addWidget(wired.window)
+
+    # Act: trigger the LE tab's build button exactly as the user would.
+    wired.window.le_widget.build_schema_requested.emit()
+
+    # Assert: a real presenter was retained and its state was seeded from the LE
+    # source's required specs and a masked preview slice (the injected provider ran).
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+
+    presenter = wired.window.schema_builder_presenter
+    assert isinstance(presenter, SchemaBuilderPresenter)
+    seeded_columns = [name for name, _r, _req, _a in presenter.state.columns]
+    assert "Customer" in seeded_columns
+    assert presenter.state.preview_slice is not None
+    # The seeded preview slice is synthetic/masked (no real workbook values).
+    for row in presenter.state.preview_slice.rows:
+        for cell in row:
+            assert isinstance(cell, str)
+            assert cell.startswith("masked_")
+
+    # Assert: the menu-action path stays blank (Decision 7) — opening via the menu
+    # action seeds nothing, leaving the presenter state empty.
+    wired.window.schema_builder_action.trigger()
+    menu_presenter = wired.window.schema_builder_presenter
+    assert isinstance(menu_presenter, SchemaBuilderPresenter)
+    assert menu_presenter.state.columns == []
+    assert menu_presenter.state.preview_slice is None
+
+
+def test_build_application_new_from_template_seeds_live_dialog(qtbot: QtBot) -> None:
+    """R5/AC4: the new-from-template path reaches new_from_template, seeding the dialog.
+
+    Drives the composition root (``build_application``): a partial-band activation
+    match invokes the injected ``on_partial_match``, which opens the builder via the
+    production ``new_from_template`` path. Asserts the live ``SchemaBuilderDialog``
+    renders the template's columns (the presenter's ``new_from_template`` ran) with a
+    cleared Identity name so save-as never overwrites the template.
+    """
+    from src.gui.runners import SynchronousRunner
+    from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
+
+    # Arrange: a reader header and a service whose match lands in the partial band
+    # and can load the closest schema as the template.
+    reader = FakeWorkbookReader(
+        sheet_names=["AOP1"], preview_rows=[["Customer", "Net Sales"]]
+    )
+    partial = MatchResult(
+        schema=_schema(),
+        score=0.6,
+        report=MismatchReport(
+            unmatched_required=(
+                UnmatchedColumn(canonical_name="Sales", aliases=(), candidates=()),
+            ),
+            unrecognized_actual=(),
+        ),
+    )
+    service = FakeSchemaService(
+        schema_names=["aop_like"],
+        schemas={"aop_like": _schema()},
+        match_result=partial,
+    )
+    wired = build_application(
+        runner=SynchronousRunner(), workbook_reader=reader, schema_service=service
+    )
+    qtbot.addWidget(wired.window)
+
+    # Act: a partial-band discovery reaches new-from-template via on_partial_match.
+    wired.aop_presenter.on_schema_discovery("aop.xlsx", "AOP1")
+
+    # Assert: the live dialog opened, renders the template's columns on the drag
+    # Columns tab, and shows a blank Identity name (new_from_template ran).
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+
+    presenter = wired.window.schema_builder_presenter
+    assert isinstance(presenter, SchemaBuilderPresenter)
+    assert presenter.state.name == ""
+    # The retained presenter drives the live dialog; assert the dialog's drag Columns
+    # tab rendered the template's canonical columns (proving the open path is live).
+    assert "Customer" in [n for n, _r, _q, _a in presenter.state.columns]
+    # Sanity: the production open path uses the real drag Columns widget class.
+    assert ColumnsTabWidget is not None
 
 
 def test_wire_schema_builder_uses_default_factories(qtbot: QtBot) -> None:

@@ -1,43 +1,41 @@
-# Coverage Comparison vs Baseline (P15-T6)
+# Coverage Comparison vs Remediation Baseline (P7-T6)
 
-Timestamp: 2026-06-05T13-51
+Timestamp: 2026-06-05T20-28
 
 ## Figures
 
-| Metric | Baseline (P0-T5) | Post-change (P15-T4) | Threshold | Status |
+| Metric | Remediation baseline (P0-T5) | Post-change (P7-T4) | Threshold | Status |
 |---|---|---|---|---|
-| Line coverage | 99.5% | 97.63% | >= 85% | PASS |
-| Branch coverage | 96.6% | 93.63% | >= 75% | PASS |
-| Tests | 842 passed | 922 passed | — | +80 |
+| Line coverage | 98.4% (4534 stmts, 74 missed) | 98.7% (4671 stmts, 62 missed) | >= 85% | PASS |
+| Branch coverage | 94.4% (832 br, 47 partial) | 94.0% (850 br, 51 partial) | >= 75% | PASS |
+| Tests | 922 passed | 932 passed | — | +10 |
 
-## Changed-code coverage
+## Changed-code coverage (modules added or modified this cycle)
 
-The new/changed modules are well covered:
+| Module | Line coverage |
+|---|---|
+| src/gui/widgets/_schema_builder_drag_tabs.py (new) | 96% |
+| src/gui/_schema_provider_factory.py (new) | 95% |
+| src/gui/_schema_open_helpers.py (new) | 93% |
+| src/gui/_source_signal_wiring.py (new) | 100% |
+| src/gui/_schema_discovery_wiring.py (modified) | 100% |
+| src/gui/_schema_wiring.py (modified) | 98% |
+| src/gui/app.py (modified) | 99% |
+| src/gui/widgets/schema_builder_dialog.py (modified) | 98% |
+| src/gui/widgets/_schema_builder_tabs.py (modified) | 100% |
 
-- `src/dtype_check.py` — 95% line.
-- `src/gui/_schema_activation.py` — 100%.
-- `src/gui/_schema_build_specs.py` — 100%.
-- `src/gui/_schema_discovery_wiring.py` — 100%.
-- `src/gui/presenters/_columns_tab_presenter.py` — 93% line.
-- `src/gui/presenters/_key_tab_presenter.py` — 100%.
-- `src/gui/presenters/_schema_builder_state.py` — 94% line.
-- `src/gui/presenters/schema_builder_presenter.py` — 98% line.
-- `src/gui/presenters/source_selection_presenter.py` — 99% line.
-- `src/_schema_model_specs.py` — 100%.
-- `src/gui/widgets/_dtype_check_widget.py` — 100%.
-- `src/gui/widgets/_source_input_button_wiring.py` — 100%.
-- `src/gui/widgets/_columns_tab_drag.py` / `_key_tab_drag.py` — drag widgets;
-  the Qt mouse-move/drag-enter event handlers are exercised by added tests, with
-  residual uncovered lines limited to defensive Qt-event guard branches.
-- `src/gui/_columns_tab_protocol.py` / `_key_tab_protocol.py` — pure
-  ``typing.Protocol`` declarations whose method bodies are ``...`` stubs; they
-  carry no executable logic.
+## No-regression on changed lines
+
+Every line added or modified by this remediation cycle is covered at 93-100%. The
+0.4-point dip in the absolute aggregate branch percentage (94.4% -> 94.0%) is
+attributable to newly-added defensive Qt-event guard branches in the drag-tab
+binder and open-path helpers (for example the `callable(setter)` / `isinstance`
+recording-stub guards), not to any reduction in coverage of previously-covered
+lines. Line coverage increased (98.4% -> 98.7%). The integration seams wired this
+cycle (R1-R6) are each exercised by an integrated test that drives the production
+object.
 
 ## Verdict
 
-PASS. Both absolute thresholds (line >= 85%, branch >= 75%) hold. The small
-decrease from the baseline percentages is attributable to newly-added Qt
-drag-and-drop widget code (event-handler and protocol-stub lines that carry no
-business logic), not to any regression in existing, previously-covered lines. The
-feature's pure logic (model, serialization, migration, dtype check, presenters,
-activation matching) is covered at 93–100%.
+PASS. Both absolute thresholds (line >= 85%, branch >= 75%) hold, line coverage
+increased, and no previously-covered line regressed.

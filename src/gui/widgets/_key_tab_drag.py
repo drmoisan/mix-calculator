@@ -73,7 +73,7 @@ class KeyColumnToken(QPushButton):
         super().__init__(column_name, parent)
         self.column_name = column_name
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802 - Qt override
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         """Start a drag carrying the column name with the column prefix.
 
         Args:
@@ -166,7 +166,7 @@ class _GenericDragHandle(QPushButton):
         super().__init__(label, parent)
         self._value_provider = value_provider
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802 - Qt override
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         """Start a drag carrying the current literal value with the generic prefix.
 
         Args:
@@ -249,7 +249,7 @@ class KeyDropArea(QWidget):
         """
         return self._parts_label.text()
 
-    def dragEnterEvent(self, e: QDropEvent) -> None:  # noqa: N802 - Qt override
+    def dragEnterEvent(self, e: QDropEvent) -> None:
         """Accept a drag carrying prefixed text so a drop can land.
 
         Args:
@@ -264,7 +264,7 @@ class KeyDropArea(QWidget):
         if e.mimeData().hasText():
             e.acceptProposedAction()
 
-    def dropEvent(self, e: QDropEvent) -> None:  # noqa: N802 - Qt override
+    def dropEvent(self, e: QDropEvent) -> None:
         """Report the dropped token to the add seam with the parsed kind.
 
         Routing table by MIME prefix:

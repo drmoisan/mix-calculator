@@ -22,6 +22,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.etl_columns import DEFAULT_THRESHOLD
+from src.gui._schema_open_helpers import (
+    install_new_derived_handler,
+    seed_dialog_preview_slice,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -140,6 +144,13 @@ def open_schema_builder(
     # is open; without a reference it would be collected immediately.
     presenter = presenter_factory(dialog, service)
     window.schema_builder_presenter = presenter
+    # Push the masked preview slice into the dialog's drag Columns tab BEFORE
+    # seeding so the draggable source-token pool and the dtype check reflect the
+    # opened sheet when the presenter's set_columns render runs (Decision 4/5).
+    seed_dialog_preview_slice(dialog, preview_slice)
+    # Install the "New derived column" handler so the Derived tab can open the
+    # PowerQuery-style formula dialog seeded from the live presenter state.
+    install_new_derived_handler(dialog, presenter)
     # Seed from caller specs only when the per-tab path supplies them; the blank
     # menu path leaves the presenter empty. seed_from_caller is a no-op for empty
     # inputs, so guarding on "any input present" keeps the menu path blank.
@@ -172,10 +183,13 @@ def _has_caller_specs(
 
     Returns:
         ``True`` when at least one seeding input is present (the per-tab path);
-        ``False`` when all are absent (the blank menu path).
+        ``False`` when all are absent or empty (the blank menu path). An empty
+        ``CallerBuildSpec`` (for example a source with no bundled default) carries
+        empty collections rather than ``None``, so truthiness — not ``is not None`` —
+        is used to keep that path blank.
     """
     return any(
-        value is not None
+        bool(value)
         for value in (
             required_specs,
             optional_specs,

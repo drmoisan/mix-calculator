@@ -10,6 +10,8 @@ Fabricated data only; no confidential values.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -19,6 +21,9 @@ from src.schema_matching import MatchResult, MismatchReport, UnmatchedColumn
 from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
 from tests.gui.fakes.fake_views import FakeSourceSelectionView
+
+if TYPE_CHECKING:
+    from pytestqt.qtbot import QtBot
 
 
 def _schema() -> SchemaDefinition:
@@ -61,6 +66,71 @@ def test_fake_view_satisfies_source_selection_protocol() -> None:
 
     # Assert: the runtime-checkable Protocol confirms structural compatibility.
     assert isinstance(view, SourceSelectionViewProtocol)
+
+
+def _partial_match() -> MatchResult:
+    """Return a partial-band match result (0.5 <= score < 0.85) selecting ``_schema``.
+
+    Returns:
+        A :class:`MatchResult` whose score lands in the partial-match band so
+        ``classify_activation`` returns the ``"partial"`` action.
+    """
+    return MatchResult(
+        schema=_schema(),
+        score=0.6,
+        report=MismatchReport(
+            unmatched_required=(
+                UnmatchedColumn(canonical_name="Sales", aliases=(), candidates=()),
+            ),
+            unrecognized_actual=(),
+        ),
+    )
+
+
+def test_build_application_partial_match_reaches_new_from_template(
+    qtbot: QtBot,
+) -> None:
+    """R6/R5: a partial activation match through build_application opens the template.
+
+    Drives the composition root (``build_application``): a partial-band header match
+    on a source tab invokes the injected ``on_partial_match`` callback, which opens
+    the builder seeded from the closest existing schema as a template (R5 path). The
+    seeded dialog mirrors the template with a cleared Identity name (Decision 6).
+    """
+    # Arrange: a reader returning a header row and a service whose match lands in the
+    # partial band and can load the closest schema as the template.
+    from src.gui.app import build_application
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+    from src.gui.runners import SynchronousRunner
+
+    reader = FakeWorkbookReader(
+        sheet_names=["AOP1"], preview_rows=[["Customer", "Net Sales"]]
+    )
+    service = FakeSchemaService(
+        schema_names=["aop_like"],
+        schemas={"aop_like": _schema()},
+        match_result=_partial_match(),
+    )
+    wired = build_application(
+        runner=SynchronousRunner(), workbook_reader=reader, schema_service=service
+    )
+    qtbot.addWidget(wired.window)
+
+    # Act: a partial-band discovery on the AOP tab reaches on_partial_match, which
+    # opens the new-from-template builder for the closest existing schema.
+    wired.aop_presenter.on_schema_discovery("aop.xlsx", "AOP1")
+
+    # Assert: the new-from-template builder opened and its presenter is seeded from
+    # the template (mirrored columns) with a cleared name (Decision 6).
+    presenter = wired.window.schema_builder_presenter
+    assert isinstance(presenter, SchemaBuilderPresenter)
+    seeded_columns = [name for name, _r, _req, _a in presenter.state.columns]
+    assert "Customer" in seeded_columns
+    assert "Sales" in seeded_columns
+    # The template's name is cleared so save-as never overwrites the template.
+    assert presenter.state.name == ""
+    # The placeholder stays selected so Import remains disabled on a partial match.
+    assert wired.window.aop_widget.current_schema() != "aop_like"
 
 
 def test_source_selection_protocol_declares_schema_view_methods() -> None:

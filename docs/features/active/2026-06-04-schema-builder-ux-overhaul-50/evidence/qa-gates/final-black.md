@@ -1,7 +1,6 @@
-# Final QA — Black (P15-T1)
+# Final QA — Black (Remediation Cycle 1, P7-T1)
 
-Timestamp: 2026-06-05T13-40
-Command: poetry run black .
+Timestamp: 2026-06-05T20-28
+Command: env -u VIRTUAL_ENV poetry run black .
 EXIT_CODE: 0
-Output Summary: All done. 213 files left unchanged. No files reformatted on the
-final pass.
+Output Summary: All done. 220 files left unchanged. No reformatting needed on the final pass (the loop did not change files at this stage).

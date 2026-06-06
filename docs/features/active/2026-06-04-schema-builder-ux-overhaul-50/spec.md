@@ -87,8 +87,12 @@ section J. They are authoritative for planning and implementation.
 
 1. **Dedup "aggregate" mode — no backward compatibility burden.** Add
    `"aggregate"` to `DEDUP_MODES`. Backward compatibility is **not** a constraint:
-   migrate the two bundled default schemas (`default_aop.schema.json`,
-   `default_le.schema.json`) forward to aggregate mode as part of this work.
+   migrate the bundled default schemas forward as part of this work. The migration
+   to `aggregate` mode applies only to a schema that **has a discriminator** column:
+   `default_le.schema.json` (discriminator `YTD/YTG`) migrates to `aggregate`. A
+   schema **without a discriminator** correctly retains `mode: none` —
+   `default_aop.schema.json` has no discriminator and so stays at `mode: none`
+   (aggregate dedup is meaningless without a discriminator to collapse across).
 
 2. **Key literal-text tokens — structured model.** Replace the flat
    `KeySpec.columns: tuple[str, ...]` with a structured ordered key-part model
@@ -254,4 +258,6 @@ No CLI changes. Affected programmatic surfaces:
 - [x] Derived tab precedes Columns; a dialog creates derived rows referencing
       named and previously-derived columns; derived columns appear on Columns.
 - [x] `ColumnSpec.expected_dtype` added; schema version bumped; forward migration
-      in `schema_from_json`; bundled defaults migrated to aggregate mode.
+      in `schema_from_json`; a bundled default with a discriminator migrates to
+      aggregate mode (`default_le`), while one without a discriminator retains
+      `mode: none` (`default_aop`).

@@ -33,7 +33,10 @@ from src.gui._render_exclusivity import wire_render_checkboxes
 from src.gui._run_wiring import wire_run
 from src.gui._schema_discovery_wiring import wire_schema_discovery_and_gating
 from src.gui._schema_list_wiring import populate_schema_lists
+from src.gui._schema_open_helpers import open_new_from_template_builder
+from src.gui._schema_provider_factory import build_spec_provider
 from src.gui._shutdown_wiring import wire_shutdown_cleanup
+from src.gui._source_signal_wiring import current_import_spec, wire_source_signals
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
     default_export_runner,
@@ -44,7 +47,7 @@ from src.gui.exporters.csv_exporter import CsvExporter
 from src.gui.exporters.excel_exporter import ExcelExporter
 from src.gui.exporters.registry import ExporterRegistry
 from src.gui.main_window import MainWindow
-from src.gui.pipeline_service import ImportSpec, PipelineService
+from src.gui.pipeline_service import PipelineService
 from src.gui.presenters.export_presenter import ExportPresenter
 from src.gui.presenters.pipeline_presenter import PipelinePresenter
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
@@ -117,27 +120,6 @@ def _build_registry() -> ExporterRegistry:
     return registry
 
 
-def _current_import_spec(window: MainWindow) -> ImportSpec:
-    """Read the user's per-input file/sheet selection from the main window.
-
-    Args:
-        window: The shell exposing the three source input widgets.
-
-    Returns:
-        An :class:`ImportSpec` populated from the live widget state.
-    """
-    # Read each widget's path/sheet directly so the spec always reflects the
-    # current user selection at the moment the signal fires.
-    return ImportSpec(
-        le_path=window.le_widget.current_path(),
-        le_sheet=window.le_widget.current_sheet(),
-        aop_path=window.aop_widget.current_path(),
-        aop_sheet=window.aop_widget.current_sheet(),
-        skulu_path=window.skulu_widget.current_path(),
-        skulu_sheet=window.skulu_widget.current_sheet(),
-    )
-
-
 def wire_control_signals(
     window: MainWindow,
     pipeline_presenter: PipelinePresenter,
@@ -179,7 +161,7 @@ def wire_control_signals(
     # Import-one/import-all dispatch and Run dispatch are wired in dedicated
     # helper modules so this file stays under the 500-line cap; all three signals
     # route through the injected runner there (spec section 4).
-    wire_import_dispatch(window, pipeline_presenter, runner, _current_import_spec)
+    wire_import_dispatch(window, pipeline_presenter, runner, current_import_spec)
     wire_run(window, pipeline_presenter, runner)
 
     def _handle_save() -> None:
@@ -337,14 +319,34 @@ def build_application(
     # auto-select a matching import schema (issue #48).
     _sink = window.preview_widget
     _svc = schema_service_resolved
+
+    # Decision 6 (R5/R6): on a partial activation match, open the builder seeded
+    # from the closest existing schema as a template (new-from-template), with a
+    # cleared name so save-as never overwrites the template. The same path backs the
+    # explicit "New from template" affordance.
+    def _on_partial_match(closest_schema_name: str) -> None:
+        open_new_from_template_builder(window, _svc, closest_schema_name)
+
     le_presenter = SourceSelectionPresenter(
-        window.le_widget, reader, preview_sink=_sink, schema_service=_svc
+        window.le_widget,
+        reader,
+        preview_sink=_sink,
+        schema_service=_svc,
+        on_partial_match=_on_partial_match,
     )
     aop_presenter = SourceSelectionPresenter(
-        window.aop_widget, reader, preview_sink=_sink, schema_service=_svc
+        window.aop_widget,
+        reader,
+        preview_sink=_sink,
+        schema_service=_svc,
+        on_partial_match=_on_partial_match,
     )
     skulu_presenter = SourceSelectionPresenter(
-        window.skulu_widget, reader, preview_sink=_sink, schema_service=_svc
+        window.skulu_widget,
+        reader,
+        preview_sink=_sink,
+        schema_service=_svc,
+        on_partial_match=_on_partial_match,
     )
 
     # WS2 (issue #48, R-AC-3): populate each tab's schema dropdown at startup with
@@ -352,36 +354,19 @@ def build_application(
     _source_views = [window.le_widget, window.aop_widget, window.skulu_widget]
     populate_schema_lists(_source_views, _svc)
 
-    # Wire the per-input file_selected and render_tab_requested signals to
-    # their presenters so file selection populates the tab dropdown and
-    # render-tab triggers a preview through the shared preview widget.
-    window.le_widget.file_selected.connect(le_presenter.on_file_selected)
-    window.aop_widget.file_selected.connect(aop_presenter.on_file_selected)
-    window.skulu_widget.file_selected.connect(skulu_presenter.on_file_selected)
-    window.le_widget.render_tab_requested.connect(le_presenter.on_render_tab)
-    window.aop_widget.render_tab_requested.connect(aop_presenter.on_render_tab)
-    window.skulu_widget.render_tab_requested.connect(skulu_presenter.on_render_tab)
-
     # Pipeline presenter over the main window (which satisfies the
     # PipelineViewProtocol surface via the status bar / dialogs).
     pipeline_presenter = PipelinePresenter(
         MainWindowPipelineView(window), pipeline_service_resolved
     )
 
-    # v2 (AC-2/3/4): file selection on each widget reports the new path to
-    # the pipeline presenter so the import button re-enables on a fresh pick.
-    def _le_path_changed(path: str) -> None:
-        pipeline_presenter.on_file_path_changed("LE", path)
-
-    def _aop_path_changed(path: str) -> None:
-        pipeline_presenter.on_file_path_changed("aop", path)
-
-    def _skulu_path_changed(path: str) -> None:
-        pipeline_presenter.on_file_path_changed("sku_lu", path)
-
-    window.le_widget.file_selected.connect(_le_path_changed)
-    window.aop_widget.file_selected.connect(_aop_path_changed)
-    window.skulu_widget.file_selected.connect(_skulu_path_changed)
+    # Wire each source widget's file_selected and render_tab_requested signals to
+    # its presenter (tab dropdown + shared preview) and report each file selection
+    # to the pipeline presenter so the Import button re-enables (v2 AC-2/3/4). The
+    # wiring lives in its own module to keep app.py under the 500-line cap.
+    wire_source_signals(
+        window, pipeline_presenter, le_presenter, aop_presenter, skulu_presenter
+    )
 
     # AC1-AC3: wire the three Render-tab checkboxes through the single
     # composition-root entry point. It connects the preview-clear closures
@@ -433,8 +418,16 @@ def build_application(
 
     # Feature D: schema-builder action/buttons (AC6/AC-13) plus per-tab discovery
     # and Import gating (Decision 8/9), wired in its own module to keep app.py thin.
+    # The per-tab build buttons seed the builder from the production spec provider
+    # (Decision 7); the menu-action path stays blank. The provider construction
+    # lives in its factory module so app.py stays under the 500-line cap.
     wire_schema_discovery_and_gating(
-        window, _svc, le_presenter, aop_presenter, skulu_presenter
+        window,
+        _svc,
+        le_presenter,
+        aop_presenter,
+        skulu_presenter,
+        spec_provider=build_spec_provider(_svc),
     )
 
     return WiredApplication(

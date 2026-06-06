@@ -1,35 +1,32 @@
-# Confidentiality Masking Scan (P13-T2 / P13-T3)
+# Confidentiality Masking Scan (Remediation Cycle 1, P7-T7)
 
-Timestamp: 2026-06-05T13-21
-Command: poetry run python scripts/checks/scan_masked_fixtures.py
+Timestamp: 2026-06-05T20-28
+Command: env -u VIRTUAL_ENV poetry run python scripts/checks/scan_masked_fixtures.py
 EXIT_CODE: 0
-Output Summary: masking-scan: clean (no forbidden patterns found). The scan was run
-both across the feature's changed files explicitly and across the full tree; both
-runs reported clean, confirming no real workbook numeric values or proprietary
-source column names are committed.
+Output Summary: masking-scan: clean (no forbidden patterns found). The full-tree
+scan reported clean, confirming no real workbook numeric values or proprietary
+source column names were introduced by this remediation cycle.
 
-## Documented gate command (P13-T3)
+## Files changed/added this cycle (Decision 5 review)
 
-Run this command before committing new fixtures so future additions are checked:
+New source modules and changed files introduce only synthetic/masked content:
+
+- `src/gui/_schema_provider_factory.py` — the production preview slice uses
+  obviously-synthetic placeholders (`masked_<col>_<row>`); no real workbook values.
+- `src/gui/widgets/_schema_builder_drag_tabs.py`, `_schema_open_helpers.py`,
+  `_source_signal_wiring.py` — pure wiring; carry no data fixtures.
+- Test files (`test_schema_builder_dialog.py`, `test_schema_provider_factory.py`,
+  `test_app_wiring_schema.py`, `test_source_selection_presenter.py`) use fabricated
+  names ("Customer", "Sales", "Region", "Notes", "Account") and synthetic cell
+  values ("Cust-0001", "Reg-A", "masked_*"); no proprietary content.
+- The N1 test split (`test_schema_migration.py`, `test_schema_serialization_errors.py`)
+  preserves the prior fabricated JSON fixtures verbatim; no new data introduced.
+
+## Gate command
 
 ```
-poetry run python scripts/checks/scan_masked_fixtures.py
+env -u VIRTUAL_ENV poetry run python scripts/checks/scan_masked_fixtures.py
 ```
 
 A non-zero exit indicates a forbidden pattern (a real workbook value or a
 proprietary source column name) was found and must be masked before commit.
-
-## Changed-file scan invocation (P13-T2)
-
-```
-poetry run python scripts/checks/scan_masked_fixtures.py \
-  tests/gui/test_columns_tab_presenter.py tests/gui/test_columns_tab_widgets.py \
-  tests/gui/test_derived_formula_dialog.py tests/gui/test_key_tab_presenter.py \
-  tests/gui/test_key_tab_widget.py tests/gui/test_schema_activation.py \
-  tests/gui/test_schema_builder_presenter.py tests/gui/test_source_selection_presenter.py \
-  tests/gui/test_schema_discovery_wiring.py tests/test_dtype_check.py \
-  tests/test_default_schemas.py tests/gui/integration/test_behavioral_schema_import.py \
-  src/schemas/default_le.schema.json src/schemas/default_aop.schema.json
-```
-
-EXIT_CODE: 0 — clean.

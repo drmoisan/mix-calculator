@@ -75,7 +75,7 @@ class SourceColumnToken(QPushButton):
         super().__init__(column_name, parent)
         self.column_name = column_name
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802 - Qt override
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         """Start a drag carrying the column name when the mouse moves.
 
         Args:
@@ -204,7 +204,7 @@ class ColumnDropRow(QWidget):
         """
         self._indicator.set_state(coercible, failing_example)
 
-    def dragEnterEvent(self, e: QDropEvent) -> None:  # noqa: N802 - Qt override
+    def dragEnterEvent(self, e: QDropEvent) -> None:
         """Accept a drag carrying source text so a drop can land.
 
         Args:
@@ -219,7 +219,7 @@ class ColumnDropRow(QWidget):
         if e.mimeData().hasText():
             e.acceptProposedAction()
 
-    def dropEvent(self, e: QDropEvent) -> None:  # noqa: N802 - Qt override
+    def dropEvent(self, e: QDropEvent) -> None:
         """Report the dropped source column to the assignment callback.
 
         Args:

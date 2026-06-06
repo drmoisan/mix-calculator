@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from src.gui._schema_wiring import wire_build_schema_buttons, wire_schema_builder
 
 if TYPE_CHECKING:
+    from src.gui._schema_build_specs import BuildSpecProvider
     from src.gui.main_window import MainWindow
     from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
     from src.gui.services.schema_service import SchemaServiceProtocol
@@ -41,6 +42,8 @@ def wire_schema_discovery_and_gating(
     le_presenter: SourceSelectionPresenter,
     aop_presenter: SourceSelectionPresenter,
     skulu_presenter: SourceSelectionPresenter,
+    *,
+    spec_provider: BuildSpecProvider | None = None,
 ) -> None:
     """Wire the schema-builder, per-tab discovery, and Import-gating (Decision 8/9).
 
@@ -60,6 +63,10 @@ def wire_schema_discovery_and_gating(
         le_presenter: The LE source-selection presenter.
         aop_presenter: The AOP source-selection presenter.
         skulu_presenter: The SKU_LU source-selection presenter.
+        spec_provider: Optional per-source build-spec provider. When supplied, each
+            per-tab "Build/Edit schema" button seeds the builder from its source's
+            required/optional specs, default key pattern, and masked preview slice
+            (Decision 7); the menu-action path stays blank (Decision 7).
 
     Returns:
         ``None``.
@@ -69,9 +76,10 @@ def wire_schema_discovery_and_gating(
         ``currentTextChanged`` and ``schema_selected`` signals to their handlers.
     """
     # Reuse the existing builder-open wiring so the menu action and per-tab
-    # buttons open the builder (Feature D AC6 / AC-13).
+    # buttons open the builder (Feature D AC6 / AC-13). The menu-action path stays
+    # blank by design; only the per-tab buttons seed from the spec provider.
     wire_schema_builder(window, service)
-    wire_build_schema_buttons(window, service)
+    wire_build_schema_buttons(window, service, spec_provider=spec_provider)
     # Pair each widget with its presenter so the same discovery/gating wiring
     # applies uniformly to all three source tabs.
     for widget, presenter in (
