@@ -115,10 +115,24 @@ def _wire_one_tab(
         already selected; discovery reads the header and auto-selects a matching
         schema. The presenter retains the existing empty-header and reader-error
         guards.
+
+        This handler short-circuits when the widget has no file selected or no
+        worksheet selected (blank/whitespace-only path or sheet). The tab combo
+        emits ``currentTextChanged`` during combo population and on placeholder
+        selection, before a worksheet is chosen; discovery must not run with a
+        blank sheet in that window (issue #50 cycle 3, B1). The presenter applies
+        the same guard, so this short-circuit is defense in depth that also avoids
+        an unnecessary call.
         """
         # Read the current path/sheet from the widget so discovery always reflects
         # the live selection at activation time.
-        presenter.on_schema_discovery(widget.current_path(), widget.current_sheet())
+        path = widget.current_path()
+        sheet = widget.current_sheet()
+        # No file or no worksheet selected yet: skip discovery so the reader is
+        # never invoked with a blank sheet.
+        if not path.strip() or not sheet.strip():
+            return
+        presenter.on_schema_discovery(path, sheet)
 
     def _on_schema_selected(_name: str) -> None:
         """Enable this tab's Import button when a real schema is selected.

@@ -75,6 +75,11 @@ class WorkbookReaderProtocol(Protocol):
 
         Returns:
             The preview rows, each a list of string cell values.
+
+        Raises:
+            ValueError: When ``sheet_name`` is absent/blank in the workbook, so a
+                missing or stale worksheet surfaces as a user-facing error rather
+                than crashing the caller (issue #50 cycle 3, B2).
         """
         ...
 
@@ -141,13 +146,23 @@ class WorkbookReader:
         Raises:
             Exception: Propagated from ``openpyxl.load_workbook`` when the
                 workbook cannot be opened.
-            KeyError: When ``sheet_name`` is not present in the workbook.
+            ValueError: When ``sheet_name`` is not present in the workbook
+                (including a blank/whitespace name), so the presenter's
+                ValueError-only reader-error policy surfaces it via the view
+                instead of crashing (issue #50 cycle 3, B2).
 
         Side effects:
             Opens and closes the workbook in read-only mode.
         """
         workbook = load_workbook(path, read_only=True)
         try:
+            # openpyxl raises KeyError for an absent/blank sheet, but the
+            # presenter's reader-error policy only catches ValueError (matching
+            # on_file_selected/on_render_tab). Convert an absent sheet to a
+            # ValueError here so a stale/blank worksheet surfaces as a user-facing
+            # error instead of crashing discovery (issue #50 cycle 3, B2).
+            if sheet_name not in workbook.sheetnames:
+                raise ValueError(f"Worksheet {sheet_name!r} does not exist.")
             worksheet = workbook[sheet_name]
             rows: list[list[str]] = []
             # Walk the worksheet rows up to the max_rows cap so a very large tab

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -441,3 +442,59 @@ def test_on_schema_discovery_reader_value_error_routes_to_show_error() -> None:
     # Assert: the error surfaced and no schema was auto-selected.
     assert view.errors == ["unreadable header"]
     assert view.selected_schemas == []
+
+
+def test_on_schema_discovery_stale_sheet_value_error_routes_to_show_error() -> None:
+    """B2: a stale/absent-sheet reader ValueError routes to show_error (issue #50).
+
+    Confirms the chosen B2 contract end-to-end at the presenter: the reader raises
+    ValueError for an absent worksheet (the converted KeyError), and the presenter's
+    existing ValueError catch routes the message to view.show_error with no
+    exception propagated and no schema auto-selected.
+    """
+    # Arrange: a reader that raises the reader's own absent-sheet ValueError, a
+    # service that would proceed, and a non-blank path and sheet so the guard does
+    # not short-circuit before the reader.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader()
+    reader.raise_on_preview = ValueError("Worksheet 'Stale' does not exist.")
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "Stale")
+
+    # Assert: the reader message surfaced and no schema was auto-selected.
+    assert view.errors == ["Worksheet 'Stale' does not exist."]
+    assert view.selected_schemas == []
+
+
+@pytest.mark.parametrize(
+    ("path", "sheet"),
+    [
+        ("", "AOP1"),  # blank path, valid sheet
+        ("workbook.xlsx", ""),  # valid path, blank sheet (the field crash trigger)
+        ("workbook.xlsx", "   "),  # valid path, whitespace-only sheet
+    ],
+)
+def test_on_schema_discovery_blank_path_or_sheet_is_noop(path: str, sheet: str) -> None:
+    """B1: a blank/whitespace path or sheet short-circuits before the reader.
+
+    Covers the three guard cases ([P1-T1], issue #50): a blank path with a valid
+    sheet, a valid path with a blank sheet, and a valid path with a whitespace-only
+    sheet. In every case the guard short-circuits before any reader call, with
+    nothing selected and no error shown, so the reader never sees a blank sheet.
+    """
+    # Arrange: a service that would proceed, so only the guard can prevent a select.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Sales"]])
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery(path, sheet)
+
+    # Assert: the guard short-circuited before the reader; nothing selected or shown.
+    assert reader.preview_calls == []
+    assert view.selected_schemas == []
+    assert view.errors == []

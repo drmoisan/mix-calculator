@@ -207,8 +207,12 @@ class SourceSelectionPresenter:
         - ``"none"`` (no usable match): set the ``<Choose Schema>`` placeholder so
           the dropdown is unselected and Import stays disabled.
 
-        A no-op when no schema service was injected or when the header preview is
-        empty (no header to match).
+        A no-op when no schema service was injected, when ``path`` or ``sheet``
+        is blank/whitespace-only, or when the header preview is empty (no header
+        to match). The blank/whitespace guard exists because tab-combo activation
+        fires ``currentTextChanged`` during combo population and placeholder
+        events, before a file and worksheet are selected; discovery must not call
+        the reader with a blank sheet in that window (issue #50 cycle 3, B1).
 
         Args:
             path: The workbook path of the activated source tab.
@@ -225,6 +229,12 @@ class SourceSelectionPresenter:
         # Discovery is only available when a schema service was injected; without
         # one the per-tab dropdown stays at the placeholder.
         if self._schema_service is None:
+            return
+        # Tab activation fires currentTextChanged before a file/worksheet is
+        # chosen, so a blank or whitespace-only path or sheet is a no-op: there is
+        # nothing to read and the reader must never be called with a blank sheet
+        # (issue #50 cycle 3, B1).
+        if not path.strip() or not sheet.strip():
             return
         logger.info("Schema discovery requested: %r on %r.", sheet, path)
         # Read just the header row; a reader ValueError is user-facing and shown
