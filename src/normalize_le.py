@@ -30,7 +30,19 @@ from typing import IO, TYPE_CHECKING
 
 import pandas as pd
 
-from src.etl_columns import normalize_name, resolve_columns
+from src._normalize_le_columns import (
+    EXPECTED_COLUMNS,
+    MONTH_COLUMNS,
+    QUARTER_COLUMNS,
+    QUARTER_TO_MONTHS,
+    SOURCE_COLUMNS,
+    SUM_COLUMNS,
+    TARGET_COLUMNS,
+    TEXT_COLUMNS,
+    YTG_MONTHS,
+    resolve_le_columns,
+)
+from src.etl_columns import resolve_columns
 from src.etl_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
 from src.etl_totals import fill_blank_totals, total_vs_months_violations
 from src.pandas_io import read_excel_sheet, write_table
@@ -38,11 +50,22 @@ from src.pandas_io import read_excel_sheet, write_table
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-# Re-export the column resolver and KEY helpers so callers and tests can import
-# them from this module as well as from their home modules. The resolver lives
-# in ``src.etl_columns`` and the KEY helpers in ``src.etl_key`` so this file
-# stays under the 500-line limit.
+# Re-export the column resolver, KEY helpers, and the extracted LE column-schema
+# constants and resolver so callers and tests can import them from this module as
+# well as from their home modules. The neutral resolver lives in
+# ``src.etl_columns``, the KEY helpers in ``src.etl_key``, and the LE column
+# schema/resolution in ``src._normalize_le_columns`` so this file stays under the
+# 500-line limit.
 __all__ = [
+    "EXPECTED_COLUMNS",
+    "MONTH_COLUMNS",
+    "QUARTER_COLUMNS",
+    "QUARTER_TO_MONTHS",
+    "SOURCE_COLUMNS",
+    "SUM_COLUMNS",
+    "TARGET_COLUMNS",
+    "TEXT_COLUMNS",
+    "YTG_MONTHS",
     "coerce_sku",
     "compute_ytg",
     "decide_key_action",
@@ -53,6 +76,7 @@ __all__ = [
     "rebuild_key",
     "resolve_columns",
     "resolve_key",
+    "resolve_le_columns",
     "validate_tieouts",
     "write_sqlite",
 ]
@@ -63,73 +87,6 @@ logger = logging.getLogger(__name__)
 # file-like buffer (the in-memory test fixtures pass a BytesIO).
 ExcelSource = str | IO[bytes]
 
-# Month columns in calendar order (source columns H..S).
-MONTH_COLUMNS: list[str] = list[str](
-    "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
-)
-
-# Months contributing to the derived YTG measure (May..Dec under the 8+4 rule).
-YTG_MONTHS: list[str] = MONTH_COLUMNS[4:]
-
-# Quarter columns (source columns U..X).
-QUARTER_COLUMNS: list[str] = ["Q1", "Q2", "Q3", "Q4"]
-
-# Maps each quarter to its three constituent monthly columns sliced from
-# MONTH_COLUMNS in calendar order (Q1->Jan,Feb,Mar ... Q4->Oct,Nov,Dec). Used to
-# fill blank FY/quarter cells at the read boundary and to validate per-row
-# quarter consistency.
-QUARTER_TO_MONTHS: dict[str, list[str]] = {
-    quarter: MONTH_COLUMNS[index * 3 : index * 3 + 3]
-    for index, quarter in enumerate(QUARTER_COLUMNS)
-}
-
-# Numeric columns that are summed when collapsing rows that share a KEY.
-SUM_COLUMNS: list[str] = [*MONTH_COLUMNS, "FY", *QUARTER_COLUMNS]
-
-# Text columns taken from the first source row per KEY (the "SKU Descripiton"
-# typo is intentional and must be preserved verbatim).
-TEXT_COLUMNS: list[str] = list[str](
-    "Customer,SKU Descripiton,SKU #,Type,GtN Mapping".split(",")
-)
-
-# Source header row, columns A..Z in exact order. The "SKU Descripiton" typo
-# and the leading "YTD/YTG" column are intentional and must match the source.
-SOURCE_COLUMNS: list[str] = [
-    "KEY",
-    "YTD/YTG",
-    "Customer",
-    "SKU Descripiton",
-    "SKU #",
-    "Type",
-    "GtN Mapping",
-    *MONTH_COLUMNS,
-    "FY",
-    *QUARTER_COLUMNS,
-    "Super Category",
-    "PPG",
-]
-
-# Required expected columns for resolution: every source column except the
-# optional "KEY" (which is resolved by name only and handled separately).
-EXPECTED_COLUMNS: list[str] = [c for c in SOURCE_COLUMNS if c != "KEY"]
-
-# Target output header, 26 columns in exact order. "YTD/YTG" is dropped and a
-# derived "YTG" column is inserted after "Q4", before "Super Category".
-TARGET_COLUMNS: list[str] = [
-    "KEY",
-    "Customer",
-    "SKU Descripiton",
-    "SKU #",
-    "Type",
-    "GtN Mapping",
-    *MONTH_COLUMNS,
-    "FY",
-    *QUARTER_COLUMNS,
-    "YTG",
-    "Super Category",
-    "PPG",
-]
-
 
 def load_source(
     path: ExcelSource,
@@ -138,6 +95,7 @@ def load_source(
     key_mismatch: str = "prompt",
     is_tty: Callable[[], bool] = sys.stdin.isatty,
     prompt: Callable[[str], str] = input,
+    resolver: Callable[[list[tuple[str, str]]], str] | None = None,
 ) -> pd.DataFrame:
     """Load and clean the source sheet (Excel read boundary).
 
@@ -157,6 +115,13 @@ def load_source(
             tests; defaults to ``sys.stdin.isatty``).
         prompt: Callable used to ask the user on the interactive prompt path
             (injectable for tests; defaults to the built-in ``input``).
+        resolver: Optional example-aware KEY-mismatch resolver forwarded to
+            :func:`resolve_key`. When supplied (the GUI path) it is invoked only
+            on a genuine divergence with up to three ``(existing, rebuilt)``
+            example pairs and returns ``"trust"`` or ``"overwrite"``. When
+            ``None`` (the default and the CLI path), divergence is resolved via
+            ``key_mismatch``/``is_tty``/``prompt`` exactly as before (issue #52,
+            AC-5/AC-6).
 
     Returns:
         A DataFrame with the canonical expected columns plus an established
@@ -177,32 +142,21 @@ def load_source(
     frame: pd.DataFrame = read_excel_sheet(path, sheet_name=sheet_name, header=2)
     actual_columns = list(frame.columns.astype(str))
 
-    # Locate an optional KEY column by normalized name only (no fuzzy match) so
-    # it is neither a required expected column nor reported as an extra.
-    key_actual: str | None = None
-    for column in actual_columns:
-        if normalize_name(column) == "key":
-            key_actual = column
-            break
-
-    # Resolve every required expected column; resolve_columns raises naming any
-    # unmatched required column. Extras exclude the located KEY column below.
-    resolvable = [c for c in actual_columns if c != key_actual]
-    mapping, extras = resolve_columns(resolvable, EXPECTED_COLUMNS)
-
-    # Surface extra source columns as a warning and continue (they are dropped
-    # from the working frame by the canonical selection below).
-    if extras:
-        logger.warning("Ignoring extra source column(s): %s.", extras)
+    # Resolve the source columns to canonical names and locate the optional KEY
+    # column in one pass (extracted to src._normalize_le_columns so this file
+    # stays under the 500-line cap). The returned selection maps each actual
+    # source column to its canonical name, carrying KEY through when present.
+    selection, key_actual = resolve_le_columns(actual_columns)
 
     # Select and rename to canonical expected names so all downstream logic uses
-    # canonical names regardless of source order. Carry the KEY column through
-    # under its canonical name when present.
-    selection = {mapping[expected]: expected for expected in EXPECTED_COLUMNS}
-    columns_to_keep = list(mapping[expected] for expected in EXPECTED_COLUMNS)
+    # canonical names regardless of source order. Build the keep-list in canonical
+    # expected order with the KEY column appended last, matching the prior
+    # in-place behavior; invert the selection map to find each canonical column's
+    # source name.
+    canonical_to_actual = {canonical: actual for actual, canonical in selection.items()}
+    columns_to_keep = [canonical_to_actual[expected] for expected in EXPECTED_COLUMNS]
     if key_actual is not None:
         columns_to_keep.append(key_actual)
-        selection[key_actual] = "KEY"
     frame = frame[columns_to_keep].rename(columns=selection).copy()
 
     # Drop trailing/interspersed rows with no Customer; these are blank padding
@@ -224,6 +178,7 @@ def load_source(
         has_key_column=key_actual is not None,
         is_tty=is_tty,
         prompt=prompt,
+        resolver=resolver,
     )
     return frame
 

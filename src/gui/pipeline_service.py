@@ -227,18 +227,23 @@ class PipelineService:
 
     Attributes:
         _db_service: The SQLite read/write collaborator (constructor-injected).
-        _key_mismatch_resolver: Zero-arg callable returning the KEY-mismatch
-            policy (``"trust"`` or ``"overwrite"``) for the import loaders. Wired
-            so a GUI session resolves a diverging KEY through this resolver (a Qt
-            modal at the composition root) instead of the loaders' stdin
-            ``input()`` path (WS1a).
+        _key_mismatch_resolver: Example-aware callable forwarded to the import
+            loaders. It receives up to three ``(existing, rebuilt)`` KEY example
+            pairs and returns the KEY-mismatch policy (``"trust"`` or
+            ``"overwrite"``). It is forwarded as the loaders' ``resolver`` and is
+            therefore invoked ONLY on a genuine divergence, on the GUI thread via
+            the composition-root bridge, so a GUI session resolves a diverging
+            KEY through this resolver (a Qt modal) instead of the loaders' stdin
+            ``input()`` path and without firing on every import (issue #52).
     """
 
     def __init__(
         self,
         db_service: DbService | None = None,
         *,
-        key_mismatch_resolver: Callable[[], str] = default_key_mismatch_resolver,
+        key_mismatch_resolver: Callable[
+            [list[tuple[str, str]]], str
+        ] = default_key_mismatch_resolver,
     ) -> None:
         """Initialize the service with an optional DB collaborator and KEY seam.
 
@@ -246,18 +251,23 @@ class PipelineService:
             db_service: The SQLite read/write service. When ``None`` a default
                 :class:`DbService` is constructed so the production composition
                 root need not supply one.
-            key_mismatch_resolver: Zero-arg callable returning the KEY-mismatch
-                policy applied by the LE and AOP loaders when a present KEY column
-                diverges from the rebuilt pattern. Defaults to
+            key_mismatch_resolver: Example-aware callable applied by the LE and
+                AOP loaders ONLY when a present KEY column diverges from the
+                rebuilt pattern. It receives up to three ``(existing, rebuilt)``
+                example pairs and returns the policy (``"trust"`` or
+                ``"overwrite"``). Defaults to
                 :func:`default_key_mismatch_resolver` ("trust"/"Keep existing"),
                 which keeps the loaders off the stdin ``input()`` path. The GUI
-                composition root injects a Qt-modal-backed resolver (WS1a).
+                composition root injects a Qt-modal-backed resolver dispatched on
+                the GUI thread via a cross-thread bridge (issue #52).
         """
         # Default to a plain DbService so callers that do not need to substitute
         # the SQLite boundary get a working service without extra wiring.
         self._db_service = db_service if db_service is not None else DbService()
-        # The resolver yields the KEY-mismatch policy at import time; its default
-        # ("trust") guarantees the loaders never reach the interactive prompt.
+        # The resolver decides the KEY-mismatch policy from concrete divergence
+        # examples; it is forwarded to the loaders as the divergence-only
+        # ``resolver`` (no eager call), so it fires only when the KEY diverges and
+        # never reaches the interactive prompt path.
         self._key_mismatch_resolver = key_mismatch_resolver
 
     def import_le(self, path: str, sheet: str) -> pd.DataFrame:
@@ -279,15 +289,16 @@ class PipelineService:
                 KEY-resolution, or tie-out failure.
         """
         logger.info("Importing LE source from sheet %r.", sheet)
-        # Forward the resolved KEY-mismatch policy plus the no-stdin seams so a
-        # diverging LE KEY resolves through the injected resolver (a Qt modal at
-        # the composition root) instead of the loader's stdin input() (WS1a).
+        # Forward the resolver CALLABLE (not its result) plus the no-stdin seams
+        # so a diverging LE KEY resolves through the injected resolver (a Qt modal
+        # dispatched on the GUI thread via the composition-root bridge) only on a
+        # genuine divergence, never eagerly and never via stdin (issue #52).
         le_source = normalize_le.load_source(
             path,
             sheet,
-            key_mismatch=self._key_mismatch_resolver(),
             is_tty=never_tty,
             prompt=no_stdin_prompt,
+            resolver=self._key_mismatch_resolver,
         )
         le_output = normalize_le.normalize(le_source)
         normalize_le.validate_tieouts(le_source, le_output)
@@ -308,15 +319,16 @@ class PipelineService:
                 failure.
         """
         logger.info("Importing AOP source from sheet %r.", sheet)
-        # Forward the resolved KEY-mismatch policy plus the no-stdin seams so a
-        # diverging AOP KEY resolves through the injected resolver (a Qt modal at
-        # the composition root) instead of the loader's stdin input() (WS1a).
+        # Forward the resolver CALLABLE (not its result) plus the no-stdin seams
+        # so a diverging AOP KEY resolves through the injected resolver (a Qt
+        # modal dispatched on the GUI thread via the composition-root bridge) only
+        # on a genuine divergence, never eagerly and never via stdin (issue #52).
         return load_aop.load_aop(
             path,
             sheet=sheet,
-            key_mismatch=self._key_mismatch_resolver(),
             is_tty=never_tty,
             prompt=no_stdin_prompt,
+            resolver=self._key_mismatch_resolver,
         )
 
     def import_skulu(self, path: str, sheet: str) -> pd.DataFrame:

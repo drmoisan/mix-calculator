@@ -97,15 +97,17 @@ def test_composed_import_path_never_reaches_stdin(
     """End-to-end: the composed GUI import path never reaches stdin (AC-1/AC-3).
 
     Builds the production pipeline service (no injected service) so the
-    composition root's injected KEY-mismatch resolver is in force, then imports
-    AOP and LE through it. The loaders are patched to record the forwarded
-    policy and ``builtins.input`` is patched to fail, proving no GUI import path
-    reaches the stdin prompt.
+    composition root's injected example-aware KEY-mismatch resolver is in force,
+    then imports AOP and LE through it. The loaders are patched to record the
+    forwarded resolver CALLABLE (the divergence-only seam under issue #52) and
+    ``builtins.input`` is patched to fail, proving no GUI import path reaches the
+    stdin prompt. Invoking each recorded resolver confirms the composed modal
+    (forced to "Keep existing") maps to the "trust" policy.
     """
     import pandas as pd
 
-    # Arrange: record the policy each loader receives and fail on any stdin read.
-    recorded: list[tuple[str, str]] = []
+    # Arrange: record the resolver each loader receives and fail on any stdin read.
+    recorded: list[tuple[str, object]] = []
 
     def _input(_prompt: str = "") -> str:
         raise AssertionError("real stdin input() was reached in a GUI session")
@@ -114,16 +116,16 @@ def test_composed_import_path_never_reaches_stdin(
         _path: str,
         *,
         sheet: str = "AOP1",
-        key_mismatch: str = "prompt",
+        resolver: object = None,
         **_kwargs: object,
     ) -> pd.DataFrame:
-        recorded.append(("aop", key_mismatch))
+        recorded.append(("aop", resolver))
         return pd.DataFrame({"KEY": ["k1"]})
 
     def _fake_load_source(
-        _path: str, _sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
+        _path: str, _sheet: str, *, resolver: object = None, **_kwargs: object
     ) -> pd.DataFrame:
-        recorded.append(("LE", key_mismatch))
+        recorded.append(("LE", resolver))
         return pd.DataFrame({"KEY": ["k1"]})
 
     def _passthrough_normalize(frame: pd.DataFrame) -> pd.DataFrame:
@@ -185,6 +187,13 @@ def test_composed_import_path_never_reaches_stdin(
     wired.pipeline_service.import_aop("aop.xlsx", "AOP1")
     wired.pipeline_service.import_le("le.xlsx", "LE-8 + 4")
 
-    # Assert: both loaders received the trust policy; stdin was never reached.
-    assert ("aop", "trust") in recorded
-    assert ("LE", "trust") in recorded
+    # Assert: both loaders received a resolver CALLABLE (the divergence-only seam,
+    # not an eager policy string), and invoking each composed resolver maps the
+    # "Keep existing" modal choice to the "trust" policy; stdin was never reached.
+    by_source = dict(recorded)
+    aop_resolver = by_source["aop"]
+    le_resolver = by_source["LE"]
+    assert callable(aop_resolver)
+    assert callable(le_resolver)
+    assert aop_resolver([("LEGACY", "REBUILT")]) == "trust"
+    assert le_resolver([("LEGACY", "REBUILT")]) == "trust"

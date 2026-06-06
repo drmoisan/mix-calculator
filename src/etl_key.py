@@ -125,6 +125,40 @@ def _rebuilt_key_series(frame: pd.DataFrame) -> list[str]:
     ]
 
 
+def _collect_diverging_examples(
+    existing: list[str],
+    rebuilt: list[str],
+    limit: int = 3,
+) -> list[tuple[str, str]]:
+    """Collect up to ``limit`` diverging ``(existing, rebuilt)`` KEY pairs.
+
+    Walks the two aligned KEY lists in row order and gathers the first ``limit``
+    positions where the source ``existing`` value differs from the ``rebuilt``
+    pattern, so the GUI resolver can show the user concrete examples of the
+    divergence (issue #52, AC-2).
+
+    Args:
+        existing: The source ``KEY`` values rendered as strings, in row order.
+        rebuilt: The rebuilt ``KEY`` pattern values, in the same row order and
+            of the same length as ``existing``.
+        limit: The maximum number of example pairs to collect (default ``3``).
+
+    Returns:
+        A list of up to ``limit`` ``(existing[i], rebuilt[i])`` pairs for the
+        indices ``i`` where ``existing[i] != rebuilt[i]``, in ascending index
+        order. Empty when the two lists are identical.
+    """
+    # Gather only the diverging rows, in order, stopping once we have enough
+    # examples to populate the dialog; non-diverging rows are skipped entirely.
+    examples: list[tuple[str, str]] = []
+    for existing_value, rebuilt_value in zip(existing, rebuilt, strict=True):
+        if existing_value != rebuilt_value:
+            examples.append((existing_value, rebuilt_value))
+            if len(examples) >= limit:
+                break
+    return examples
+
+
 def decide_key_action(
     policy: str,
     *,
@@ -197,6 +231,7 @@ def resolve_key(
     has_key_column: bool,
     is_tty: Callable[[], bool] = sys.stdin.isatty,
     prompt: Callable[[str], str] = input,
+    resolver: Callable[[list[tuple[str, str]]], str] | None = None,
 ) -> pd.DataFrame:
     """Establish the canonical ``KEY`` column on a resolved source frame.
 
@@ -221,13 +256,21 @@ def resolve_key(
             tests; defaults to ``sys.stdin.isatty``).
         prompt: Callable used to ask the user on the interactive prompt path
             (injectable for tests; defaults to the built-in ``input``).
+        resolver: Optional example-aware callable invoked ONLY on a genuine
+            divergence. It receives up to three ``(existing, rebuilt)`` example
+            pairs (from :func:`_collect_diverging_examples`) and returns the
+            resolved action (``"trust"`` or ``"overwrite"``). When ``None`` (the
+            default and the CLI path), the diverging branch falls back to
+            :func:`decide_key_action` under ``policy``/``is_tty``/``prompt``
+            exactly as before (issue #52, AC-5/AC-6).
 
     Returns:
         The same ``frame`` with a canonical ``KEY`` column established.
 
     Raises:
         ValueError: When ``policy`` is ``"prompt"`` and stdin is not interactive
-            while the KEY diverges (propagated from :func:`decide_key_action`).
+            while the KEY diverges and no ``resolver`` is supplied (propagated
+            from :func:`decide_key_action`).
 
     Side effects:
         Emits ``logging`` warnings on ``trust``/``overwrite`` resolution.
@@ -246,8 +289,15 @@ def resolve_key(
         frame["KEY"] = existing
         return frame
 
-    # Diverging KEY: resolve the conflict per the configured policy.
-    action = decide_key_action(policy, is_tty=is_tty(), prompt=prompt)
+    # Diverging KEY: choose the resolution strategy. When an example-aware
+    # resolver is injected (the GUI path), hand it concrete divergence examples
+    # and use its decision; otherwise fall back to the policy/stdin decision seam
+    # (the CLI path), preserving the original behavior exactly (AC-5/AC-6).
+    if resolver is not None:
+        examples = _collect_diverging_examples(existing, rebuilt)
+        action = resolver(examples)
+    else:
+        action = decide_key_action(policy, is_tty=is_tty(), prompt=prompt)
     if action == "trust":
         logger.warning(
             "Source KEY column diverges from the rebuilt pattern; trusting the "

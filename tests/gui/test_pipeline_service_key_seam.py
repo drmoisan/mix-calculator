@@ -1,11 +1,12 @@
-"""WS1a KEY-mismatch seam tests for :class:`PipelineService` (issue #48).
+"""KEY-mismatch resolver-forwarding tests for :class:`PipelineService` (#52).
 
-Verifies the constructor-injectable ``key_mismatch_resolver`` seam: the default
-resolver yields ``"trust"`` ("Keep existing") so the LE and AOP loaders never
-reach the stdin ``input()`` path, and an injected resolver maps "Keep existing"
--> trust and "Rebuild" -> overwrite through to the loaders. All loader reads are
-captured by recording stand-ins; no real stdin or workbook I/O occurs (AC-1,
-AC-2 AOP half, AC-3).
+Verifies the constructor-injectable ``key_mismatch_resolver`` seam under the
+example-aware contract (issue #52): ``import_le`` and ``import_aop`` forward the
+resolver CALLABLE (not its result) to the loaders as the divergence-only
+``resolver`` argument, so the resolver is invoked only when the loader reports a
+genuine divergence and never eagerly on every import. The default resolver
+yields ``"trust"`` ("Keep existing"). All loader reads are captured by recording
+stand-ins; no real stdin or workbook I/O occurs (AC-3, AC-5; reinforces AC-6).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from src.gui import pipeline_service as pipeline_service_module
 from src.gui._key_mismatch_seam import (
     default_key_mismatch_resolver,
     never_tty,
@@ -26,33 +28,39 @@ if TYPE_CHECKING:
 
 
 class _LoaderRecorder:
-    """Records the KEY-related kwargs each loader receives.
+    """Records the resolver callable each loader receives.
 
     Purpose:
-        Prove the service forwards the resolved policy and the no-stdin seams to
-        the LE and AOP loaders without performing any real workbook or stdin I/O.
+        Prove the service forwards the resolver CALLABLE (not its result) and the
+        no-stdin seams to the LE and AOP loaders without performing any real
+        workbook or stdin I/O, and that the resolver is not invoked when the
+        loader reports no divergence.
 
     Attributes:
-        le_calls: Each LE-loader ``key_mismatch`` value, in call order.
-        aop_calls: Each AOP-loader ``key_mismatch`` value, in call order.
+        le_resolvers: Each LE-loader ``resolver`` value, in call order.
+        aop_resolvers: Each AOP-loader ``resolver`` value, in call order.
         stdin_reached: Whether any loader invoked the injected prompt seam.
     """
 
     def __init__(self) -> None:
         """Initialize with no recorded calls."""
-        self.le_calls: list[str] = []
-        self.aop_calls: list[str] = []
+        self.le_resolvers: list[object] = []
+        self.aop_resolvers: list[object] = []
         self.stdin_reached = False
 
 
 def _install_recording_loaders(
     monkeypatch: pytest.MonkeyPatch, recorder: _LoaderRecorder
 ) -> None:
-    """Patch the LE/AOP/SKU_LU loaders to record kwargs and return empty frames.
+    """Patch the LE/AOP/SKU_LU loaders to record the resolver and return frames.
+
+    The recording loaders model the no-divergence path: they capture the
+    forwarded ``resolver`` but never invoke it, mirroring a loader whose source
+    KEY matches the rebuilt pattern (so the resolver/dialog must not fire).
 
     Args:
         monkeypatch: The pytest monkeypatch fixture.
-        recorder: The recorder capturing each loader's ``key_mismatch`` value.
+        recorder: The recorder capturing each loader's ``resolver`` value.
 
     Returns:
         ``None``.
@@ -64,19 +72,23 @@ def _install_recording_loaders(
     import pandas as pd
 
     def _fake_load_source(
-        _path: str, _sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
+        _path: str,
+        _sheet: str,
+        *,
+        resolver: object = None,
+        **_kwargs: object,
     ) -> pd.DataFrame:
-        recorder.le_calls.append(key_mismatch)
+        recorder.le_resolvers.append(resolver)
         return pd.DataFrame({"KEY": ["k1"]})
 
     def _fake_load_aop(
         _path: str,
         *,
         sheet: str = "AOP1",
-        key_mismatch: str = "prompt",
+        resolver: object = None,
         **_kwargs: object,
     ) -> pd.DataFrame:
-        recorder.aop_calls.append(key_mismatch)
+        recorder.aop_resolvers.append(resolver)
         return pd.DataFrame({"KEY": ["k1"]})
 
     def _fake_load_skulu(_path: str, *, sheet: str = "SKU_LU") -> pd.DataFrame:
@@ -84,7 +96,7 @@ def _install_recording_loaders(
 
     def _passthrough_normalize(source: pd.DataFrame) -> pd.DataFrame:
         # The LE import calls normalize/validate_tieouts after load_source; stub
-        # them to pass-through so the seam test exercises only the policy
+        # them to pass-through so the seam test exercises only the resolver
         # forwarding, not the LE transform math.
         return source
 
@@ -116,6 +128,30 @@ def _no_stdin(monkeypatch: pytest.MonkeyPatch, recorder: _LoaderRecorder) -> Non
     monkeypatch.setattr("builtins.input", _input)
 
 
+class _RecordingResolver:
+    """An example-aware resolver that records every invocation.
+
+    Purpose:
+        Let a test assert both that the service forwards this exact object as the
+        loaders' ``resolver`` and that the loaders do not invoke it on a
+        no-divergence path (call count stays zero).
+
+    Attributes:
+        action: The action string returned when invoked.
+        calls: The example-pair lists received, one entry per invocation.
+    """
+
+    def __init__(self, action: str = "trust") -> None:
+        """Initialize with the action to return and an empty call log."""
+        self.action = action
+        self.calls: list[list[tuple[str, str]]] = []
+
+    def __call__(self, examples: list[tuple[str, str]]) -> str:
+        """Record the examples and return the configured action."""
+        self.calls.append(examples)
+        return self.action
+
+
 def _spec() -> ImportSpec:
     """Return a trivial import spec for the seam tests."""
     return ImportSpec(
@@ -128,15 +164,15 @@ def _spec() -> ImportSpec:
     )
 
 
-def test_default_resolver_yields_trust_and_never_reaches_stdin(
+def test_default_resolver_forwarded_as_callable_and_never_reaches_stdin(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The default resolver forwards 'trust' to the loaders and never hits stdin.
+    """The default resolver is forwarded as a callable and stdin is untouched.
 
-    Observed through the loader-forwarding behavior (the public surface) rather
-    than reaching into private state: a default-constructed service forwards the
-    "trust" ("Keep existing") policy to both LE and AOP, and no real stdin
-    input() is consulted (AC-1).
+    A default-constructed service forwards the
+    :func:`default_key_mismatch_resolver` CALLABLE (its result is not eagerly
+    computed) to both LE and AOP, and no real stdin input() is consulted (AC-5,
+    AC-6).
     """
     # Arrange
     recorder = _LoaderRecorder()
@@ -147,76 +183,75 @@ def test_default_resolver_yields_trust_and_never_reaches_stdin(
     # Act: import all sources through the default resolver.
     service.import_sources(_spec())
 
-    # Assert: the loaders received the trust policy and no stdin was consulted.
-    assert recorder.le_calls == ["trust"]
-    assert recorder.aop_calls == ["trust"]
+    # Assert: the loaders received the resolver callable itself (the function
+    # object), not its "trust" result, and no stdin was consulted.
+    assert recorder.le_resolvers == [default_key_mismatch_resolver]
+    assert recorder.aop_resolvers == [default_key_mismatch_resolver]
     assert recorder.stdin_reached is False
 
 
-@pytest.mark.parametrize(
-    ("selection", "expected_policy"),
-    [
-        ("Keep existing", "trust"),
-        ("Rebuild", "overwrite"),
-    ],
-)
-def test_injected_resolver_maps_selection_to_aop_policy(
-    monkeypatch: pytest.MonkeyPatch, selection: str, expected_policy: str
+def test_import_le_forwards_injected_resolver_callable(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An injected resolver maps the dialog selection to the AOP loader policy.
-
-    "Keep existing" -> trust and "Rebuild" -> overwrite, forwarded to the AOP
-    loader, with no stdin consulted (AC-1, AC-2 AOP half).
-    """
-    # Arrange: a resolver mapping the dialog selection to a loader policy.
-    recorder = _LoaderRecorder()
-    _install_recording_loaders(monkeypatch, recorder)
-    _no_stdin(monkeypatch, recorder)
-    policy_for = {"Keep existing": "trust", "Rebuild": "overwrite"}
-    service = PipelineService(key_mismatch_resolver=lambda: policy_for[selection])
-
-    # Act
-    service.import_aop("aop.xlsx", "AOP1")
-
-    # Assert: the AOP loader received the mapped policy and stdin was untouched.
-    assert recorder.aop_calls == [expected_policy]
-    assert recorder.stdin_reached is False
-
-
-@pytest.mark.parametrize(
-    ("selection", "expected_policy"),
-    [
-        ("Keep existing", "trust"),
-        ("Rebuild", "overwrite"),
-    ],
-)
-def test_injected_resolver_maps_selection_to_le_policy(
-    monkeypatch: pytest.MonkeyPatch, selection: str, expected_policy: str
-) -> None:
-    """An injected resolver maps the dialog selection to the LE loader policy (AC-3).
-
-    The LE path receives the same dialog-based handling as AOP and never reaches
-    stdin.
-    """
+    """import_le forwards the injected resolver object as the loader's resolver."""
     # Arrange
     recorder = _LoaderRecorder()
     _install_recording_loaders(monkeypatch, recorder)
     _no_stdin(monkeypatch, recorder)
-    policy_for = {"Keep existing": "trust", "Rebuild": "overwrite"}
-    service = PipelineService(key_mismatch_resolver=lambda: policy_for[selection])
+    resolver = _RecordingResolver()
+    service = PipelineService(key_mismatch_resolver=resolver)
 
     # Act
     service.import_le("le.xlsx", "Sheet1")
 
-    # Assert: the LE loader received the mapped policy and stdin was untouched.
-    assert recorder.le_calls == [expected_policy]
+    # Assert: the LE loader received the same resolver object (not its result),
+    # the resolver was NOT invoked on this no-divergence path, and stdin was
+    # untouched.
+    assert recorder.le_resolvers == [resolver]
+    assert resolver.calls == []
     assert recorder.stdin_reached is False
+
+
+def test_import_aop_forwards_injected_resolver_callable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """import_aop forwards the injected resolver object as the loader's resolver."""
+    # Arrange
+    recorder = _LoaderRecorder()
+    _install_recording_loaders(monkeypatch, recorder)
+    _no_stdin(monkeypatch, recorder)
+    resolver = _RecordingResolver()
+    service = PipelineService(key_mismatch_resolver=resolver)
+
+    # Act
+    service.import_aop("aop.xlsx", "AOP1")
+
+    # Assert: the AOP loader received the same resolver object (not its result),
+    # the resolver was NOT invoked on this no-divergence path, and stdin was
+    # untouched.
+    assert recorder.aop_resolvers == [resolver]
+    assert resolver.calls == []
+    assert recorder.stdin_reached is False
+
+
+def test_resolver_module_import_location_is_patchable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The loaders are patchable at their import location in pipeline_service.
+
+    Documents that ``normalize_le`` and ``load_aop`` are imported into the
+    service module so tests patch them where used; this guards the forwarding
+    tests above against silently patching the wrong symbol.
+    """
+    # Arrange / Assert: the service module references both loader modules.
+    assert hasattr(pipeline_service_module, "normalize_le")
+    assert hasattr(pipeline_service_module, "load_aop")
 
 
 def test_default_key_mismatch_resolver_returns_trust() -> None:
     """The default resolver returns the 'trust' ("Keep existing") policy."""
-    # Act / Assert
-    assert default_key_mismatch_resolver() == "trust"
+    # Act / Assert: the example-aware default ignores its examples and trusts.
+    assert default_key_mismatch_resolver([("old", "new")]) == "trust"
 
 
 def test_never_tty_returns_false() -> None:
@@ -227,8 +262,6 @@ def test_never_tty_returns_false() -> None:
 
 def test_no_stdin_prompt_raises() -> None:
     """The prompt seam fails fast if the interactive path is ever reached."""
-    import pytest
-
     # Act / Assert: reaching the prompt seam is a defect in a GUI session.
     with pytest.raises(RuntimeError, match="reached stdin in a GUI session"):
         no_stdin_prompt("would you like to trust?")
