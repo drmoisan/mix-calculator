@@ -20,3 +20,4 @@
 - [Audit: verify production call site](audit-verify-production-call-site.md) — a unit-tested view/seam method can pass AC review with zero production callers; grep for the wiring call site, not just the test (caused empty schema dropdown in #48)
 - [Configurable-schema persisted matching](configurable-schema-persisted-matching.md) — schema column matching is persisted as ColumnSpec aliases (not ephemeral); partial match -> "new from template" (#50 decision)
 - [GUI activation seam guards](gui-activation-seam-guards.md) — GUI signal-wired discovery crashes on empty/placeholder selection; integration tests must drive the no-file/no-sheet path, not just the happy path (#50 post-PR crash)
+- [Schema output-membership via in_output](schema-output-membership-in-output.md) — ColumnSpec.in_output (vs required=source-presence) drives loader output by inclusion; drop_columns no longer used for output (#54)
