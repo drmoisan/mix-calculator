@@ -27,14 +27,22 @@ __all__ = [
 ]
 
 
-def default_key_mismatch_resolver() -> str:
-    """Return the default KEY-mismatch policy for a GUI session (WS1a).
+def default_key_mismatch_resolver(_examples: list[tuple[str, str]]) -> str:
+    """Return the default KEY-mismatch policy for a GUI session (issue #52).
 
     The GUI default is ``"trust"`` ("Keep existing"): the source KEY column is
     kept as-is rather than rebuilt. Returning a concrete policy here means the
     loaders never reach the interactive ``prompt``/stdin path, because
-    ``etl_key.reconcile_key`` short-circuits on ``"trust"``/``"overwrite"``
-    (AC-1/AC-2).
+    ``etl_key.resolve_key`` short-circuits on ``"trust"``/``"overwrite"``.
+
+    The example-aware contract requires the resolver to accept the divergence
+    example pairs; this default ignores them because it always trusts. The
+    underscore-prefixed parameter name documents the intentional non-use without
+    requiring a lint suppression.
+
+    Args:
+        _examples: Up to three ``(existing, rebuilt)`` KEY example pairs from the
+            diverging rows. Ignored by this default resolver.
 
     Returns:
         The literal ``"trust"`` policy string.

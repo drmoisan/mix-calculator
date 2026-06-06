@@ -128,6 +128,7 @@ def load_aop(
     key_mismatch: str = "prompt",
     is_tty: Callable[[], bool] = sys.stdin.isatty,
     prompt: Callable[[str], str] = input,
+    resolver: Callable[[list[tuple[str, str]]], str] | None = None,
 ) -> pd.DataFrame:
     """Load, clean, validate, and return the ``AOP1`` sheet as a DataFrame.
 
@@ -156,6 +157,13 @@ def load_aop(
             through to :func:`src.etl_key.resolve_key`.
         prompt: Callable used to ask the user on the interactive prompt path
             (injectable for tests; defaults to the built-in ``input``).
+        resolver: Optional example-aware KEY-mismatch resolver forwarded to
+            :func:`resolve_key`. When supplied (the GUI path) it is invoked only
+            on a genuine divergence with up to three ``(existing, rebuilt)``
+            example pairs and returns ``"trust"`` or ``"overwrite"``. When
+            ``None`` (the default and the CLI path), divergence is resolved via
+            ``key_mismatch``/``is_tty``/``prompt`` exactly as before (issue #52,
+            AC-5/AC-6).
 
     Returns:
         A validated DataFrame with canonical column names and an established
@@ -244,6 +252,7 @@ def load_aop(
         has_key_column=key_actual is not None,
         is_tty=is_tty,
         prompt=prompt,
+        resolver=resolver,
     )
 
     # Coerce numeric columns to float BEFORE validation so the identity checks

@@ -10,10 +10,11 @@ are created on disk.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from src import etl_key
 from src.normalize_le import (
     SOURCE_COLUMNS,
     decide_key_action,
@@ -28,7 +29,17 @@ from tests.le_fixtures import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pandas as pd
+
+# Reach into the module for the private example collector via
+# ``vars(module)[name]`` so neither Pyright (reportPrivateUsage) nor Ruff flags
+# the access. The cast documents the callable's signature for the test code.
+_collect_diverging_examples = cast(
+    "Callable[[list[str], list[str]], list[tuple[str, str]]]",
+    vars(etl_key)["_collect_diverging_examples"],
+)
 
 # ---------------------------------------------------------------------------
 # decide_key_action (pure decision seam)
@@ -207,3 +218,179 @@ def test_resolve_key_present_diverging_prompt_tty_overwrite() -> None:
 
     # Assert
     assert result.iloc[0]["KEY"] == "CustA5GS"
+
+
+# ---------------------------------------------------------------------------
+# _collect_diverging_examples (pure example collector, issue #52 / AC-2)
+# ---------------------------------------------------------------------------
+
+
+def test_collect_diverging_examples_returns_only_diverging_pairs_in_order() -> None:
+    """Only positions where existing != rebuilt are returned, in index order."""
+    # Arrange: indices 1 and 3 diverge; 0 and 2 match.
+    existing = ["same0", "old1", "same2", "old3"]
+    rebuilt = ["same0", "new1", "same2", "new3"]
+
+    # Act
+    pairs = _collect_diverging_examples(existing, rebuilt)
+
+    # Assert: each pair carries (existing, rebuilt) for the diverging index only.
+    assert pairs == [("old1", "new1"), ("old3", "new3")]
+
+
+def test_collect_diverging_examples_truncates_to_limit_of_three() -> None:
+    """At most three example pairs are collected even when more rows diverge."""
+    # Arrange: five diverging rows; the default limit is three.
+    existing = [f"old{i}" for i in range(5)]
+    rebuilt = [f"new{i}" for i in range(5)]
+
+    # Act
+    pairs = _collect_diverging_examples(existing, rebuilt)
+
+    # Assert: only the first three diverging pairs are returned, in order.
+    assert pairs == [("old0", "new0"), ("old1", "new1"), ("old2", "new2")]
+
+
+def test_collect_diverging_examples_empty_when_identical() -> None:
+    """No pairs are returned when the two lists are identical."""
+    # Arrange / Act
+    pairs = _collect_diverging_examples(["a", "b"], ["a", "b"])
+
+    # Assert
+    assert pairs == []
+
+
+# ---------------------------------------------------------------------------
+# resolve_key with an injected example-aware resolver (issue #52 / AC-5/AC-6)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingResolver:
+    """Records the example pairs it receives and returns a fixed action.
+
+    Purpose:
+        Stand in for the GUI example-aware resolver so tests can assert both the
+        exact example pairs forwarded and that the resolver is invoked only on a
+        genuine divergence.
+
+    Attributes:
+        action: The action string returned on every call.
+        calls: The example-pair lists received, one entry per invocation.
+    """
+
+    def __init__(self, action: str) -> None:
+        """Initialize with the action to return and an empty call log."""
+        self.action = action
+        self.calls: list[list[tuple[str, str]]] = []
+
+    def __call__(self, examples: list[tuple[str, str]]) -> str:
+        """Record the examples and return the configured action."""
+        self.calls.append(examples)
+        return self.action
+
+
+def _diverging_two_row_frame() -> pd.DataFrame:
+    """Return a two-row loaded frame whose KEY diverges from the pattern."""
+    rows = [
+        make_row(customer="CustA", sku=5, type_="GS", ppg="PX", months=[1.0] * 12),
+        make_row(customer="CustB", sku=7, type_="GS", ppg="PY", months=[2.0] * 12),
+    ]
+    base = loaded_frame(rows)
+    base["KEY"] = ["LEGACY_A", "LEGACY_B"]
+    return base
+
+
+def test_resolve_key_invokes_resolver_only_on_divergence_with_examples() -> None:
+    """The injected resolver is invoked on divergence with the exact pairs."""
+    # Arrange: a frame whose two KEY values both diverge from the pattern.
+    base = _diverging_two_row_frame()
+    resolver = _RecordingResolver("trust")
+
+    # Act
+    resolve_key(base, "prompt", has_key_column=True, resolver=resolver)
+
+    # Assert: invoked once, with the (existing, rebuilt) pairs for both rows.
+    assert resolver.calls == [[("LEGACY_A", "CustA5GS"), ("LEGACY_B", "CustB7GS")]]
+
+
+def test_resolve_key_resolver_trust_keeps_existing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A resolver returning 'trust' keeps existing KEY values and warns."""
+    # Arrange
+    base = _diverging_two_row_frame()
+    resolver = _RecordingResolver("trust")
+
+    # Act
+    with caplog.at_level("WARNING", logger="src.etl_key"):
+        result = resolve_key(base, "prompt", has_key_column=True, resolver=resolver)
+
+    # Assert
+    assert list(result["KEY"]) == ["LEGACY_A", "LEGACY_B"]
+    assert any("trust" in record.message.lower() for record in caplog.records)
+
+
+def test_resolve_key_resolver_overwrite_replaces(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A resolver returning 'overwrite' replaces KEY with the pattern and warns."""
+    # Arrange
+    base = _diverging_two_row_frame()
+    resolver = _RecordingResolver("overwrite")
+
+    # Act
+    with caplog.at_level("WARNING", logger="src.etl_key"):
+        result = resolve_key(base, "prompt", has_key_column=True, resolver=resolver)
+
+    # Assert
+    assert list(result["KEY"]) == ["CustA5GS", "CustB7GS"]
+    assert any("overwrit" in record.message.lower() for record in caplog.records)
+
+
+def test_resolve_key_resolver_not_invoked_when_matching() -> None:
+    """The resolver is not invoked when the KEY matches the rebuilt pattern."""
+    # Arrange: a frame whose KEY already equals the rebuilt pattern.
+    rows = [make_row(customer="CustA", sku=5, type_="GS", ppg="PX", months=[1.0] * 12)]
+    base = loaded_frame(rows)
+    base["KEY"] = ["CustA5GS"]
+    resolver = _RecordingResolver("overwrite")
+
+    # Act
+    result = resolve_key(base, "prompt", has_key_column=True, resolver=resolver)
+
+    # Assert: matching KEY is trusted as-is; the resolver was never consulted.
+    assert result.iloc[0]["KEY"] == "CustA5GS"
+    assert resolver.calls == []
+
+
+def test_resolve_key_resolver_not_invoked_when_no_key_column() -> None:
+    """The resolver is not invoked when there is no source KEY column."""
+    # Arrange: a frame with no source KEY column (created from the pattern).
+    rows = [make_row(customer="CustA", sku=5, type_="GS", ppg="PX", months=[1.0] * 12)]
+    base = loaded_frame(rows)
+    resolver = _RecordingResolver("overwrite")
+
+    # Act
+    result = resolve_key(base, "prompt", has_key_column=False, resolver=resolver)
+
+    # Assert: KEY is created from the pattern; the resolver was never consulted.
+    assert result.iloc[0]["KEY"] == "CustA5GS"
+    assert resolver.calls == []
+
+
+def test_resolve_key_resolver_none_preserves_cli_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """With resolver=None the CLI policy/stdin path is unchanged (AC-6)."""
+    # Arrange: a diverging frame resolved via the policy path (no resolver).
+    base = _diverging_two_row_frame()
+
+    # Act: the trust policy via the CLI path keeps existing values and warns.
+    with caplog.at_level("WARNING", logger="src.etl_key"):
+        result = resolve_key(
+            base, "trust", has_key_column=True, is_tty=lambda: False, resolver=None
+        )
+
+    # Assert
+    assert list(result["KEY"]) == ["LEGACY_A", "LEGACY_B"]
+    assert any("trust" in record.message.lower() for record in caplog.records)

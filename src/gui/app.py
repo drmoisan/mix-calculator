@@ -304,16 +304,18 @@ def build_application(
     reader: WorkbookReaderProtocol = (
         workbook_reader if workbook_reader is not None else WorkbookReader()
     )
-    # WS1a (AC-1/AC-2): the production pipeline service resolves a diverging
-    # source KEY through a Qt modal (default "Keep existing" -> trust) injected
-    # here, so a GUI session never reaches the loaders' stdin input() path. Tests
-    # inject their own pipeline_service and bypass this resolver entirely.
+    # Build the window before the pipeline service so the production KEY-mismatch
+    # resolver/bridge is parented to the GUI-thread window (issue #52, AC-1).
+    window = MainWindow()
+    # The production service resolves a diverging source KEY through a GUI-thread Qt
+    # modal (default "Keep existing" -> trust) via the bridge in the resolver built
+    # here, forwarded to the loaders as the divergence-only resolver (#52).
     pipeline_service_resolved: PipelineServiceProtocol = (
         pipeline_service
         if pipeline_service is not None
         else PipelineService(
             db_service=DbService(),
-            key_mismatch_resolver=build_key_mismatch_resolver(),
+            key_mismatch_resolver=build_key_mismatch_resolver(window=window),
         )
     )
     runner_resolved: RunnerProtocol = runner if runner is not None else ThreadedRunner()
@@ -329,12 +331,10 @@ def build_application(
         )
     )
 
-    # Build the shell and bind one source-selection presenter per input widget;
-    # pass the shared preview widget as the preview sink (research Q1 Option A)
-    # so each render request renders into the main-window preview.
-    # WS2: each source presenter receives the resolved schema service so a tab's
-    # header preview can auto-select a matching import schema (issue #48).
-    window = MainWindow()
+    # Bind one source-selection presenter per input widget; pass the shared
+    # preview widget as the preview sink (research Q1 Option A). WS2: each source
+    # presenter receives the resolved schema service so a tab's header preview can
+    # auto-select a matching import schema (issue #48).
     _sink = window.preview_widget
     _svc = schema_service_resolved
     le_presenter = SourceSelectionPresenter(
