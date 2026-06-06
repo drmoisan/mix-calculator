@@ -99,13 +99,14 @@ class DedupTabControls:
 
     Attributes:
         widget: The tab container widget.
-        mode: The dedup-mode combo (``none``/``collapse``).
-        discriminator: The discriminator-column input.
+        mode: The dedup-mode combo (``none``/``collapse``/``aggregate``).
+        discriminator: The discriminator-column dropdown populated from existing
+            canonical + derived column names only (no free-text entry).
     """
 
     widget: QWidget
     mode: QComboBox
-    discriminator: QLineEdit
+    discriminator: QComboBox
 
 
 @dataclass
@@ -189,14 +190,21 @@ def build_key_tab() -> KeyTabControls:
 def build_dedup_tab() -> DedupTabControls:
     """Build the Dedup tab.
 
+    Decision 1/6: the mode combo offers ``aggregate`` (the default), and the
+    discriminator is a dropdown (no free-text entry) so a non-existent column
+    cannot be chosen as discriminator. The default mode is ``aggregate`` and the
+    discriminator dropdown is populated by the dialog from the existing canonical
+    and derived column names plus the schema ``Key`` sentinel.
+
     Returns:
         The dedup-tab controls bundle.
     """
     widget = QWidget()
     layout = QFormLayout(widget)
     mode = QComboBox()
-    mode.addItems(["none", "collapse"])
-    discriminator = QLineEdit()
+    # Aggregate is listed first so it is the default selection (Decision 1).
+    mode.addItems(["aggregate", "collapse", "none"])
+    discriminator = QComboBox()
     layout.addRow("Mode", mode)
     layout.addRow("Discriminator column", discriminator)
     return DedupTabControls(widget=widget, mode=mode, discriminator=discriminator)

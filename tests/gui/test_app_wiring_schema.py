@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.gui._schema_wiring import discover_schema, wire_schema_builder
+from src.gui._schema_build_specs import CallerBuildSpec
+from src.gui._schema_wiring import (
+    discover_schema,
+    wire_build_schema_buttons,
+    wire_schema_builder,
+)
 from src.gui.app import build_application
 from src.gui.main_window import MainWindow
 from src.gui.runners import SynchronousRunner
@@ -22,7 +27,7 @@ from src.schema_matching import (
     MismatchReport,
     UnmatchedColumn,
 )
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 from tests.gui.fakes.fake_services import FakeSchemaService
 
 if TYPE_CHECKING:
@@ -42,7 +47,7 @@ def _schema() -> SchemaDefinition:
             ColumnSpec(canonical_name="Customer", role="dimension"),
             ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
 
 
@@ -154,6 +159,86 @@ def test_wire_schema_builder_uses_injected_factories(qtbot: QtBot) -> None:
     # Assert: one dialog opened and the presenter was retained on the window.
     assert len(opened) == 1
     assert window.schema_builder_presenter is sentinel
+
+
+def test_wire_build_buttons_seeds_presenter_from_caller_specs(qtbot: QtBot) -> None:
+    """A per-tab build button passes its source-specific specs to the presenter."""
+    # Arrange: a spec provider returning a distinct spec per source key, and a
+    # recording presenter capturing the seed inputs.
+    from src.gui.presenters._schema_builder_state import PreviewSlice
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    service = FakeSchemaService()
+    le_spec = CallerBuildSpec(
+        required_specs=(ColumnSpec(canonical_name="Customer", role="dimension"),),
+        default_key_pattern="{Customer}",
+        preview_slice=PreviewSlice(header=("col_a",), rows=(("x1",),)),
+    )
+
+    class _Provider:
+        def build_spec_for(self, key: str) -> CallerBuildSpec:
+            # Only the LE key is exercised in this test; return its spec.
+            return le_spec if key == "LE" else CallerBuildSpec()
+
+    seeds: list[dict[str, object]] = []
+
+    class _RecordingPresenter:
+        def seed_from_caller(self, **kwargs: object) -> None:
+            seeds.append(kwargs)
+
+    def dialog_factory() -> SchemaBuilderDialog:
+        dialog = SchemaBuilderDialog()
+        qtbot.addWidget(dialog)
+        return dialog
+
+    wire_build_schema_buttons(
+        window,
+        service,
+        dialog_factory=dialog_factory,
+        presenter_factory=lambda _d, _s: _RecordingPresenter(),
+        spec_provider=_Provider(),
+    )
+
+    # Act: click the LE tab's build button.
+    window.le_widget.build_schema_requested.emit()
+
+    # Assert: the LE source's required spec and key pattern were seeded.
+    assert len(seeds) == 1
+    assert seeds[0]["default_key_pattern"] == "{Customer}"
+    assert seeds[0]["required_specs"] == le_spec.required_specs
+
+
+def test_wire_build_buttons_blank_path_without_provider(qtbot: QtBot) -> None:
+    """Without a spec provider, a build button opens a blank builder (no seeding)."""
+    # Arrange: a recording presenter that fails if seeded with caller specs.
+    window = MainWindow()
+    qtbot.addWidget(window)
+    service = FakeSchemaService()
+    seeds: list[dict[str, object]] = []
+
+    class _RecordingPresenter:
+        def seed_from_caller(self, **kwargs: object) -> None:
+            seeds.append(kwargs)
+
+    def dialog_factory() -> SchemaBuilderDialog:
+        dialog = SchemaBuilderDialog()
+        qtbot.addWidget(dialog)
+        return dialog
+
+    wire_build_schema_buttons(
+        window,
+        service,
+        dialog_factory=dialog_factory,
+        presenter_factory=lambda _d, _s: _RecordingPresenter(),
+    )
+
+    # Act
+    window.aop_widget.build_schema_requested.emit()
+
+    # Assert: no seeding occurred (blank menu-equivalent path).
+    assert seeds == []
+    assert window.schema_builder_presenter is not None
 
 
 def test_wire_schema_builder_uses_default_factories(qtbot: QtBot) -> None:

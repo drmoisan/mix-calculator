@@ -238,6 +238,42 @@ class SchemaBuilderViewProtocol(Protocol):
         """
         ...
 
+    def set_key_parts(self, parts: list[tuple[str, str]]) -> None:
+        """Render the ordered structured key parts.
+
+        Pushes the full structured key composition (column-ref and literal-text
+        parts) so the Key tab can display interleaved literal segments, not just
+        the column-ref names :meth:`set_key` carries.
+
+        Args:
+            parts: One ``(kind, value)`` tuple per key part in order, where
+                ``kind`` is ``"column-ref"`` or ``"literal-text"`` and ``value``
+                is the referenced column name or the literal string.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's structured key-part display.
+        """
+        ...
+
+    def set_column_dtypes(self, dtypes: list[tuple[str, str | None]]) -> None:
+        """Render the per-column expected data type.
+
+        Args:
+            dtypes: One ``(canonical_name, expected_dtype)`` tuple per column, in
+                schema order, where ``expected_dtype`` is one of the dtype
+                vocabulary values or ``None`` when no explicit type is declared.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's per-column expected-dtype display.
+        """
+        ...
+
     def set_dedup(self, mode: str, discriminator: str | None) -> None:
         """Render the dedup mode and discriminator.
 

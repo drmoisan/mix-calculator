@@ -17,32 +17,33 @@ if TYPE_CHECKING:
 
 
 def test_main_window_exposes_import_le_btn_publicly(qtbot: QtBot) -> None:
-    """The LE import button is a public, initially-enabled attribute."""
+    """The LE import button is public and starts disabled (Decision 8)."""
     # Arrange
     window = MainWindow()
     qtbot.addWidget(window)
 
-    # Act + Assert
+    # Act + Assert: Decision 8 — the per-tab Import button starts disabled until a
+    # non-placeholder schema is selected.
     assert hasattr(window, "import_le_btn")
-    assert window.import_le_btn.isEnabled() is True
+    assert window.import_le_btn.isEnabled() is False
 
 
 def test_main_window_exposes_import_aop_btn_publicly(qtbot: QtBot) -> None:
-    """The AOP import button is a public, initially-enabled attribute."""
+    """The AOP import button is public and starts disabled (Decision 8)."""
     window = MainWindow()
     qtbot.addWidget(window)
 
     assert hasattr(window, "import_aop_btn")
-    assert window.import_aop_btn.isEnabled() is True
+    assert window.import_aop_btn.isEnabled() is False
 
 
 def test_main_window_exposes_import_skulu_btn_publicly(qtbot: QtBot) -> None:
-    """The SKU_LU import button is a public, initially-enabled attribute."""
+    """The SKU_LU import button is public and starts disabled (Decision 8)."""
     window = MainWindow()
     qtbot.addWidget(window)
 
     assert hasattr(window, "import_skulu_btn")
-    assert window.import_skulu_btn.isEnabled() is True
+    assert window.import_skulu_btn.isEnabled() is False
 
 
 def test_main_window_exposes_import_all_btn_publicly(qtbot: QtBot) -> None:

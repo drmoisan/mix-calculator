@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
 from src.gui.protocols import SourceSelectionViewProtocol
 from src.schema_matching import MatchResult, MismatchReport, UnmatchedColumn
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
 from tests.gui.fakes.fake_views import FakeSourceSelectionView
 
@@ -30,7 +30,7 @@ def _schema() -> SchemaDefinition:
             ColumnSpec(canonical_name="Customer", role="dimension"),
             ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
 
 
@@ -287,9 +287,9 @@ def test_on_schema_discovery_proceed_selects_matched_schema() -> None:
     assert view.selected_schemas == ["aop_like"]
 
 
-def test_on_schema_discovery_resolve_leaves_placeholder() -> None:
-    """WS2: a no-match leaves the placeholder and does not auto-select (AC-12)."""
-    # Arrange: a reader returning a header row and a service that resolves.
+def test_on_schema_discovery_no_match_sets_placeholder() -> None:
+    """Decision 9: a no-match sets the placeholder so Import stays disabled."""
+    # Arrange: a reader returning a header row and a service that does not match.
     view = FakeSourceSelectionView()
     reader = FakeWorkbookReader(preview_rows=[["Customer", "Net Sales"]])
     service = FakeSchemaService(match_result=_no_match())
@@ -298,8 +298,32 @@ def test_on_schema_discovery_resolve_leaves_placeholder() -> None:
     # Act
     presenter.on_schema_discovery("workbook.xlsx", "AOP1")
 
-    # Assert: no schema was auto-selected; the placeholder remains.
-    assert view.selected_schemas == []
+    # Assert: the placeholder is explicitly selected (keeps Import disabled).
+    assert view.selected_schemas == ["<Choose Schema>"]
+
+
+def test_on_schema_discovery_partial_match_offers_new_from_template() -> None:
+    """Decision 6: a partial match keeps the placeholder and offers a template."""
+    # Arrange: a partial-band score (>= 0.5, < threshold) with a selected schema.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Net Sales"]])
+    partial = MatchResult(
+        schema=_schema(),
+        score=0.6,
+        report=MismatchReport(unmatched_required=(), unrecognized_actual=()),
+    )
+    service = FakeSchemaService(match_result=partial)
+    seen: list[str] = []
+    presenter = SourceSelectionPresenter(
+        view, reader, schema_service=service, on_partial_match=seen.append
+    )
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: the placeholder stays selected and the closest schema is offered.
+    assert view.selected_schemas == ["<Choose Schema>"]
+    assert seen == ["aop_like"]
 
 
 def test_on_schema_discovery_no_service_is_noop() -> None:

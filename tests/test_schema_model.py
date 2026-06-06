@@ -12,15 +12,33 @@ from __future__ import annotations
 import pytest
 
 from src.schema_model import (
+    DEDUP_MODES,
+    SCHEMA_FORMAT_VERSION,
     ColumnSpec,
     DedupPolicy,
     DerivedColumnSpec,
     FillRule,
+    KeyPart,
     KeySpec,
     MeasureAggregation,
     SchemaDefinition,
     SchemaValidationError,
+    column_ref,
+    derive_expected_dtype,
+    literal_text,
 )
+
+
+def _key(*names: str) -> KeySpec:
+    """Build a column-ref-only ``KeySpec`` from the given column names.
+
+    Args:
+        names: Canonical column names that become ordered column-ref parts.
+
+    Returns:
+        A ``KeySpec`` whose parts are column-ref parts for ``names``.
+    """
+    return KeySpec(parts=tuple(column_ref(name) for name in names))
 
 
 def _minimal_columns() -> tuple[ColumnSpec, ...]:
@@ -47,12 +65,12 @@ def test_minimal_schema_constructs() -> None:
         name="minimal",
         version="1.0",
         columns=columns,
-        key=KeySpec(columns=("Customer", "Type")),
+        key=_key("Customer", "Type"),
     )
 
     # Assert
     assert schema.name == "minimal"
-    assert schema.key.columns == ("Customer", "Type")
+    assert schema.key.column_names == ("Customer", "Type")
     assert schema.dedup.mode == "none"
 
 
@@ -64,7 +82,9 @@ def test_empty_name_raises() -> None:
             name="",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key(
+                "Customer",
+            ),
         )
 
 
@@ -76,7 +96,9 @@ def test_missing_version_raises() -> None:
             name="x",
             version="",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key(
+                "Customer",
+            ),
         )
 
 
@@ -90,7 +112,9 @@ def test_key_references_undeclared_column_raises() -> None:
             name="x",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Nope",)),
+            key=_key(
+                "Nope",
+            ),
         )
 
 
@@ -104,7 +128,9 @@ def test_derived_copy_from_undeclared_raises() -> None:
             name="x",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key(
+                "Customer",
+            ),
             derived_columns=(DerivedColumnSpec(name="Derived", copy_from="Ghost"),),
         )
 
@@ -119,7 +145,9 @@ def test_fill_rule_references_undeclared_column_raises() -> None:
             name="x",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key(
+                "Customer",
+            ),
             fill_rules=(FillRule(total="Jan", components=("Feb",)),),
         )
 
@@ -132,7 +160,9 @@ def test_dedup_measure_aggregation_undeclared_raises() -> None:
             name="x",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key(
+                "Customer",
+            ),
             dedup=DedupPolicy(
                 mode="collapse",
                 discriminator_column="Type",
@@ -159,7 +189,9 @@ def test_collapse_with_undeclared_discriminator_raises() -> None:
             name="x",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key(
+                "Customer",
+            ),
             dedup=DedupPolicy(mode="collapse", discriminator_column="Missing"),
         )
 
@@ -215,13 +247,13 @@ def test_derived_column_empty_name_raises() -> None:
         DerivedColumnSpec(name="")
 
 
-def test_key_spec_empty_columns_raises() -> None:
-    """An empty key column tuple is rejected at KeySpec construction."""
+def test_key_spec_empty_parts_raises() -> None:
+    """An empty key parts tuple is rejected at KeySpec construction."""
     # Arrange / Act / Assert
     with pytest.raises(
-        SchemaValidationError, match="KeySpec.columns must declare at least one"
+        SchemaValidationError, match="KeySpec.parts must declare at least one"
     ):
-        KeySpec(columns=())
+        KeySpec(parts=())
 
 
 def test_fill_rule_empty_total_raises() -> None:
@@ -246,6 +278,158 @@ def test_fill_rule_undeclared_total_raises() -> None:
             name="x",
             version="1.0",
             columns=_minimal_columns(),
-            key=KeySpec(columns=("Customer",)),
+            key=_key("Customer"),
             fill_rules=(FillRule(total="Ghost", components=("Jan",)),),
         )
+
+
+# --- expected_dtype field (P1-T3, P1-T4, P1-T5) ---
+
+
+def test_expected_dtype_valid_value_constructs() -> None:
+    """A ColumnSpec with a vocabulary expected_dtype constructs cleanly."""
+    # Arrange / Act
+    column = ColumnSpec(canonical_name="Amount", role="measure", expected_dtype="float")
+
+    # Assert
+    assert column.expected_dtype == "float"
+
+
+def test_expected_dtype_invalid_value_raises() -> None:
+    """An expected_dtype outside the vocabulary is rejected by name."""
+    # Arrange / Act / Assert
+    with pytest.raises(SchemaValidationError, match="invalid expected_dtype 'decimal'"):
+        ColumnSpec(canonical_name="Amount", role="measure", expected_dtype="decimal")
+
+
+def test_numeric_derives_to_float_when_dtype_absent() -> None:
+    """A numeric column with no explicit dtype derives an effective float dtype."""
+    # Arrange
+    column = ColumnSpec(canonical_name="Jan", role="measure", numeric=True)
+
+    # Act
+    effective = column.effective_dtype()
+
+    # Assert
+    assert column.expected_dtype is None
+    assert effective == "float"
+
+
+def test_derive_expected_dtype_prefers_explicit_over_numeric() -> None:
+    """An explicit dtype wins over the legacy numeric flag in derivation."""
+    # Arrange / Act
+    resolved = derive_expected_dtype(numeric=True, expected_dtype="integer")
+
+    # Assert
+    assert resolved == "integer"
+
+
+def test_derive_expected_dtype_returns_none_for_non_numeric() -> None:
+    """A non-numeric column with no explicit dtype derives no dtype."""
+    # Arrange / Act
+    resolved = derive_expected_dtype(numeric=False, expected_dtype=None)
+
+    # Assert
+    assert resolved is None
+
+
+# --- structured key parts (P1-T6, P1-T7, P1-T10) ---
+
+
+def test_key_parts_preserve_order_and_types() -> None:
+    """A mixed-part key preserves part order and distinguishes part kinds."""
+    # Arrange
+    parts = (column_ref("Customer"), literal_text("-"), column_ref("SKU"))
+
+    # Act
+    key = KeySpec(parts=parts)
+
+    # Assert
+    assert [part.kind for part in key.parts] == [
+        "column-ref",
+        "literal-text",
+        "column-ref",
+    ]
+    assert key.column_names == ("Customer", "SKU")
+
+
+def test_literal_text_part_carries_arbitrary_value() -> None:
+    """A literal-text part may carry any string value, including symbols."""
+    # Arrange / Act
+    part = literal_text(" | ")
+
+    # Assert
+    assert part.kind == "literal-text"
+    assert part.value == " | "
+    assert part.is_column_ref is False
+
+
+def test_column_ref_part_requires_non_empty_name() -> None:
+    """A column-ref part with a blank value is rejected at construction."""
+    # Arrange / Act / Assert
+    with pytest.raises(SchemaValidationError, match="must reference a non-empty"):
+        KeyPart(kind="column-ref", value="   ")
+
+
+def test_key_part_invalid_kind_raises() -> None:
+    """An unrecognized key-part kind is rejected by name."""
+    # Arrange / Act / Assert
+    with pytest.raises(SchemaValidationError, match="invalid kind 'separator'"):
+        KeyPart(kind="separator", value="x")
+
+
+def test_all_literal_key_raises() -> None:
+    """A key with no column-ref part is rejected as not a business key."""
+    # Arrange / Act / Assert
+    with pytest.raises(SchemaValidationError, match="at least one column-ref part"):
+        KeySpec(parts=(literal_text("a"), literal_text("b")))
+
+
+# --- aggregate dedup mode (P1-T8, P1-T10) ---
+
+
+def test_aggregate_mode_is_a_dedup_mode() -> None:
+    """The aggregate mode is registered in DEDUP_MODES alongside the originals."""
+    # Assert
+    assert DEDUP_MODES == {"none", "collapse", "aggregate"}
+
+
+def test_aggregate_dedup_policy_constructs_with_discriminator() -> None:
+    """An aggregate DedupPolicy with a discriminator constructs cleanly."""
+    # Arrange / Act
+    policy = DedupPolicy(mode="aggregate", discriminator_column="Type")
+
+    # Assert
+    assert policy.mode == "aggregate"
+    assert policy.discriminator_column == "Type"
+
+
+def test_aggregate_without_discriminator_raises() -> None:
+    """Aggregate mode without a discriminator column is rejected."""
+    # Arrange / Act / Assert
+    with pytest.raises(SchemaValidationError, match="requires a discriminator_column"):
+        DedupPolicy(mode="aggregate")
+
+
+def test_aggregate_dedup_in_schema_validates_discriminator() -> None:
+    """An aggregate schema validates its discriminator against declared columns."""
+    # Arrange / Act
+    schema = SchemaDefinition(
+        name="agg",
+        version="1.0",
+        columns=_minimal_columns(),
+        key=_key("Customer"),
+        dedup=DedupPolicy(mode="aggregate", discriminator_column="Type"),
+    )
+
+    # Assert
+    assert schema.dedup.mode == "aggregate"
+
+
+# --- format version constant (P1-T9) ---
+
+
+def test_schema_format_version_value() -> None:
+    """The current write-format version constant is the bumped value."""
+    # Assert
+    assert SCHEMA_FORMAT_VERSION == "2.0"

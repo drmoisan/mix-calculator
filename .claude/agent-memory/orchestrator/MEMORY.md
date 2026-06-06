@@ -18,3 +18,4 @@
 - [AOP partial-year 8+4 convention](aop-partial-year-8plus4-convention.md) — YTD is actuals-through-cutoff (e.g. Jan..Apr), YTG is the rest; validate_aop must keep the YTD/YTG split consistent (fixed in #48)
 - [Real pipeline workbook location](real-pipeline-workbook-location.md) — user's real .xlsx at artifacts/LE_NEW v LE_ORIG...; gitignored; orchestrator runs loaders against it for end-to-end checks
 - [Audit: verify production call site](audit-verify-production-call-site.md) — a unit-tested view/seam method can pass AC review with zero production callers; grep for the wiring call site, not just the test (caused empty schema dropdown in #48)
+- [Configurable-schema persisted matching](configurable-schema-persisted-matching.md) — schema column matching is persisted as ColumnSpec aliases (not ephemeral); partial match -> "new from template" (#50 decision)

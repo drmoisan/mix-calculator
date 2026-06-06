@@ -14,19 +14,35 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from src.schema_model import (
+    SCHEMA_FORMAT_VERSION,
     ColumnSpec,
     DedupPolicy,
     DerivedColumnSpec,
     FillRule,
+    KeyPart,
     KeySpec,
     MeasureAggregation,
     SchemaDefinition,
+    column_ref,
+    literal_text,
 )
 from src.schema_serialization import (
     SchemaSerializationError,
     schema_from_json,
     schema_to_json,
 )
+
+
+def _key(*names: str) -> KeySpec:
+    """Build a column-ref-only ``KeySpec`` from the given column names.
+
+    Args:
+        names: Canonical column names that become ordered column-ref parts.
+
+    Returns:
+        A ``KeySpec`` whose parts are column-ref parts for ``names``.
+    """
+    return KeySpec(parts=tuple(column_ref(name) for name in names))
 
 
 def _representative_schema() -> SchemaDefinition:
@@ -39,17 +55,25 @@ def _representative_schema() -> SchemaDefinition:
     """
     return SchemaDefinition(
         name="representative",
-        version="1.0",
+        version=SCHEMA_FORMAT_VERSION,
         description="exercises every nested shape",
         source_sheet_hints=("Sheet1", "Data"),
         header_row=2,
         columns=(
             ColumnSpec(canonical_name="Customer", role="dimension", aliases=("Cust",)),
             ColumnSpec(canonical_name="Type", role="discriminator"),
-            ColumnSpec(canonical_name="Jan", role="measure", numeric=True),
+            ColumnSpec(
+                canonical_name="Jan",
+                role="measure",
+                numeric=True,
+                expected_dtype="float",
+            ),
             ColumnSpec(canonical_name="PPG", role="dimension", sentinel_clean=True),
         ),
-        key=KeySpec(columns=("Customer", "Type"), sku_coercion=True),
+        key=KeySpec(
+            parts=(column_ref("Customer"), literal_text("-"), column_ref("Type")),
+            sku_coercion=True,
+        ),
         dedup=DedupPolicy(
             mode="collapse",
             discriminator_column="Type",
@@ -280,12 +304,17 @@ def test_full_collapse_dedup_round_trips() -> None:
     # Arrange
     schema = SchemaDefinition(
         name="sel",
-        version="1.0",
+        version=SCHEMA_FORMAT_VERSION,
         columns=(
             ColumnSpec(canonical_name="Type", role="discriminator"),
-            ColumnSpec(canonical_name="Jan", role="measure", numeric=True),
+            ColumnSpec(
+                canonical_name="Jan",
+                role="measure",
+                numeric=True,
+                expected_dtype="float",
+            ),
         ),
-        key=KeySpec(columns=("Type",)),
+        key=_key("Type"),
         dedup=DedupPolicy(
             mode="collapse",
             discriminator_column="Type",
@@ -304,6 +333,193 @@ def test_full_collapse_dedup_round_trips() -> None:
     assert restored == schema
 
 
+# --- New-field and structured-key round-trips (P2-T5) ---
+
+
+def test_expected_dtype_round_trips() -> None:
+    """A column's explicit expected_dtype survives a JSON round-trip."""
+    # Arrange
+    schema = SchemaDefinition(
+        name="dt",
+        version=SCHEMA_FORMAT_VERSION,
+        columns=(
+            ColumnSpec(canonical_name="When", role="dimension", expected_dtype="date"),
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+        ),
+        key=_key("Customer"),
+    )
+
+    # Act
+    restored = schema_from_json(schema_to_json(schema))
+
+    # Assert
+    assert restored.columns[0].expected_dtype == "date"
+    assert restored == schema
+
+
+def test_column_aliases_round_trip_unchanged() -> None:
+    """Persisted ColumnSpec aliases (matched source columns) survive round-trip."""
+    # Arrange: aliases are the persisted store for matched source->canonical maps.
+    schema = SchemaDefinition(
+        name="alias",
+        version=SCHEMA_FORMAT_VERSION,
+        columns=(
+            ColumnSpec(
+                canonical_name="Customer",
+                role="dimension",
+                aliases=("src_col_a", "src_col_b"),
+            ),
+        ),
+        key=_key("Customer"),
+    )
+
+    # Act
+    restored = schema_from_json(schema_to_json(schema))
+
+    # Assert
+    assert restored.columns[0].aliases == ("src_col_a", "src_col_b")
+    assert restored == schema
+
+
+def test_structured_key_parts_round_trip_with_order_and_types() -> None:
+    """Mixed structured key parts survive serialization preserving order/types."""
+    # Arrange
+    schema = SchemaDefinition(
+        name="k",
+        version=SCHEMA_FORMAT_VERSION,
+        columns=(
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+            ColumnSpec(canonical_name="SKU", role="dimension"),
+        ),
+        key=KeySpec(
+            parts=(
+                column_ref("Customer"),
+                literal_text(" / "),
+                column_ref("SKU"),
+                literal_text("X"),
+            )
+        ),
+    )
+
+    # Act
+    restored = schema_from_json(schema_to_json(schema))
+
+    # Assert
+    assert [(p.kind, p.value) for p in restored.key.parts] == [
+        ("column-ref", "Customer"),
+        ("literal-text", " / "),
+        ("column-ref", "SKU"),
+        ("literal-text", "X"),
+    ]
+
+
+def test_aggregate_dedup_mode_round_trips() -> None:
+    """A schema using the aggregate dedup mode round-trips with mode preserved."""
+    # Arrange
+    schema = SchemaDefinition(
+        name="agg",
+        version=SCHEMA_FORMAT_VERSION,
+        columns=(
+            ColumnSpec(canonical_name="Type", role="discriminator"),
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+        ),
+        key=_key("Customer"),
+        dedup=DedupPolicy(mode="aggregate", discriminator_column="Type"),
+    )
+
+    # Act
+    restored = schema_from_json(schema_to_json(schema))
+
+    # Assert
+    assert restored.dedup.mode == "aggregate"
+    assert restored == schema
+
+
+def test_serialized_json_carries_current_format_version() -> None:
+    """Serialized JSON always emits SCHEMA_FORMAT_VERSION as the version."""
+    # Arrange
+    schema = _representative_schema()
+
+    # Act
+    text = schema_to_json(schema)
+
+    # Assert
+    assert f'"version":"{SCHEMA_FORMAT_VERSION}"' in text
+
+
+# --- Forward migration (P3-T5) ---
+
+
+def test_legacy_key_columns_migrate_to_column_ref_parts() -> None:
+    """Legacy flat key.columns parse into ordered column-ref parts."""
+    # Arrange: a pre-bump schema using the flat columns key shape.
+    text = (
+        '{"name": "legacy", "version": "1.0", '
+        '"columns": [{"canonical_name": "Customer", "role": "dimension"}, '
+        '{"canonical_name": "Type", "role": "dimension"}], '
+        '"key": {"columns": ["Customer", "Type"], "sku_coercion": true}}'
+    )
+
+    # Act
+    restored = schema_from_json(text)
+
+    # Assert
+    assert [(p.kind, p.value) for p in restored.key.parts] == [
+        ("column-ref", "Customer"),
+        ("column-ref", "Type"),
+    ]
+    assert restored.key.sku_coercion is True
+
+
+def test_legacy_numeric_backfills_expected_dtype_float() -> None:
+    """A legacy numeric column parses with expected_dtype backfilled to float."""
+    # Arrange
+    text = (
+        '{"name": "legacy", "version": "1.0", '
+        '"columns": [{"canonical_name": "Jan", "role": "measure", '
+        '"numeric": true}, '
+        '{"canonical_name": "Customer", "role": "dimension"}], '
+        '"key": {"columns": ["Customer"]}}'
+    )
+
+    # Act
+    restored = schema_from_json(text)
+
+    # Assert
+    assert restored.columns[0].expected_dtype == "float"
+
+
+def test_migration_sets_bumped_version_on_reserialize() -> None:
+    """Parsing legacy JSON sets the bumped version so re-serialize is current."""
+    # Arrange
+    text = (
+        '{"name": "legacy", "version": "1.0", '
+        '"columns": [{"canonical_name": "Customer", "role": "dimension"}], '
+        '"key": {"columns": ["Customer"]}}'
+    )
+
+    # Act
+    restored = schema_from_json(text)
+    reserialized = schema_to_json(restored)
+
+    # Assert
+    assert restored.version == SCHEMA_FORMAT_VERSION
+    assert f'"version":"{SCHEMA_FORMAT_VERSION}"' in reserialized
+
+
+def test_current_format_json_is_idempotent() -> None:
+    """Parsing current-format JSON twice yields an identical schema (idempotent)."""
+    # Arrange
+    schema = _representative_schema()
+    once = schema_from_json(schema_to_json(schema))
+
+    # Act
+    twice = schema_from_json(schema_to_json(once))
+
+    # Assert
+    assert once == twice == schema
+
+
 # --- Property-based round-trip (T2 requirement) ---
 
 
@@ -311,6 +527,41 @@ def test_full_collapse_dedup_round_trips() -> None:
 # strategy stays satisfiable and column-name references remain easy to keep
 # consistent; the round-trip property is independent of name content.
 _NAME = st.text(alphabet="abcdefghijklmnop", min_size=1, max_size=6)
+
+
+def _draw_column(draw: st.DrawFn, name: str) -> ColumnSpec:
+    """Draw a single ``ColumnSpec`` whose dtype survives the forward migration.
+
+    The serialization forward-migration backfills ``expected_dtype="float"`` for
+    a numeric column that declares no explicit dtype. To keep the round-trip
+    equality stable, this helper assigns numeric columns an explicit dtype and
+    leaves non-numeric columns with an explicit dtype or ``None``.
+
+    Args:
+        draw: The hypothesis draw callable.
+        name: The canonical column name.
+
+    Returns:
+        A ``ColumnSpec`` whose ``expected_dtype`` is round-trip stable.
+    """
+    numeric = draw(st.booleans())
+    # Numeric columns must carry an explicit dtype so the migration backfill does
+    # not change the value on parse; non-numeric columns may be None or explicit.
+    if numeric:
+        expected_dtype = draw(st.sampled_from(["float", "integer"]))
+    else:
+        expected_dtype = draw(
+            st.sampled_from([None, "string", "date", "bool", "float", "integer"])
+        )
+    return ColumnSpec(
+        canonical_name=name,
+        role=draw(st.sampled_from(["dimension", "measure", "discriminator"])),
+        required=draw(st.booleans()),
+        aliases=tuple(draw(st.lists(_NAME, max_size=2))),
+        numeric=numeric,
+        expected_dtype=expected_dtype,
+        sentinel_clean=draw(st.booleans()),
+    )
 
 
 @st.composite
@@ -331,19 +582,11 @@ def _valid_schemas(draw: st.DrawFn) -> SchemaDefinition:
     # Draw a unique, ordered set of declared column names to reference from the
     # key, dedup, derived, and fill-rule sections.
     names = draw(st.lists(_NAME, min_size=1, max_size=5, unique=True))
-    columns = tuple(
-        ColumnSpec(
-            canonical_name=name,
-            role=draw(st.sampled_from(["dimension", "measure", "discriminator"])),
-            required=draw(st.booleans()),
-            aliases=tuple(draw(st.lists(_NAME, max_size=2))),
-            numeric=draw(st.booleans()),
-            sentinel_clean=draw(st.booleans()),
-        )
-        for name in names
-    )
+    columns = tuple(_draw_column(draw, name) for name in names)
 
-    # Key references at least one declared column, in declaration order.
+    # Key references at least one declared column, in declaration order. The key
+    # is built from structured parts: each chosen column becomes a column-ref
+    # part; an optional literal-text part may be interleaved.
     key_columns = tuple(
         draw(
             st.lists(
@@ -351,18 +594,24 @@ def _valid_schemas(draw: st.DrawFn) -> SchemaDefinition:
             )
         )
     )
-    key = KeySpec(columns=key_columns, sku_coercion=draw(st.booleans()))
+    key_parts: list[KeyPart] = [column_ref(name) for name in key_columns]
+    # Optionally append a literal-text part to exercise mixed-part serialization;
+    # the key still contains at least one column-ref so it stays valid.
+    if draw(st.booleans()):
+        key_parts.append(literal_text(draw(st.text(max_size=4))))
+    key = KeySpec(parts=tuple(key_parts), sku_coercion=draw(st.booleans()))
 
-    # Dedup: either no collapse, or collapse with a declared discriminator and
-    # additive aggregations over declared measures.
-    collapse = draw(st.booleans())
-    if collapse:
+    # Dedup: either no collapse, or a collapsing mode (collapse or aggregate)
+    # with a declared discriminator and additive aggregations over declared
+    # measures.
+    collapse_mode = draw(st.sampled_from([None, "collapse", "aggregate"]))
+    if collapse_mode is not None:
         discriminator = draw(st.sampled_from(names))
         measures = draw(
             st.lists(st.sampled_from(names), max_size=len(names), unique=True)
         )
         dedup = DedupPolicy(
-            mode="collapse",
+            mode=collapse_mode,
             discriminator_column=discriminator,
             measure_aggregations=tuple(
                 MeasureAggregation(measure=measure, mode="additive")
@@ -395,7 +644,9 @@ def _valid_schemas(draw: st.DrawFn) -> SchemaDefinition:
 
     return SchemaDefinition(
         name=draw(_NAME),
-        version=draw(_NAME),
+        # Use the current format version so the always-emit-current serialization
+        # round-trips to an equal object.
+        version=SCHEMA_FORMAT_VERSION,
         description=draw(st.text(max_size=8)),
         source_sheet_hints=tuple(draw(st.lists(_NAME, max_size=2))),
         header_row=draw(st.integers(min_value=0, max_value=10)),

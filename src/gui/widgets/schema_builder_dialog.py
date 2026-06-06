@@ -79,13 +79,18 @@ class SchemaBuilderDialog(QDialog):
         self._derived = build_derived_tab()
         self._preview = build_preview_tab()
 
+        # Decision 10: tab order is Identity -> Derived -> Columns -> Key ->
+        # Dedup -> Preview so derived columns are authored before they are
+        # referenced on the Columns and Key tabs.
         tabs = QTabWidget()
         tabs.addTab(self._identity.widget, "Identity")
+        tabs.addTab(self._derived.widget, "Derived")
         tabs.addTab(self._columns.widget, "Columns")
         tabs.addTab(self._key.widget, "Key")
         tabs.addTab(self._dedup.widget, "Dedup")
-        tabs.addTab(self._derived.widget, "Derived")
         tabs.addTab(self._preview.widget, "Preview")
+        # Retain the tab widget so the tab order can be inspected (test seam).
+        self._tabs = tabs
 
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -216,32 +221,118 @@ class SchemaBuilderDialog(QDialog):
         columns = tuple(part.strip() for part in raw.split(",") if part.strip())
         return (columns, self._key.sku_coercion.isChecked())
 
-    def set_dedup(self, mode: str, discriminator: str | None) -> None:
-        """Render the dedup mode and discriminator.
+    # Sentinel discriminator value meaning "use the schema Key" (Decision 6). The
+    # dedup dropdown offers this plus the existing column/derived names.
+    _KEY_DISCRIMINATOR = "Key"
+
+    def set_key_parts(self, parts: list[tuple[str, str]]) -> None:
+        """Render the structured key parts on the Key tab.
+
+        The passive Key tab edits the column-ref parts as a comma-separated list
+        (its existing control); the structured parts are flattened to the
+        column-ref names here so a loaded structured key still displays. Literal
+        ("Generic Text") parts are omitted from this passive rendering because the
+        comma-separated control carries column names only; the drag-based Key tab
+        (Phase 9) renders the full structured composition.
 
         Args:
-            mode: The dedup mode (``"none"`` or ``"collapse"``).
-            discriminator: The discriminator column for collapse, or ``None``.
+            parts: One ``(kind, value)`` tuple per key part, in order.
 
         Returns:
             ``None``.
 
         Side effects:
-            Updates the Dedup-tab controls.
+            Updates the Key-tab columns control with the column-ref names.
         """
+        # Render only the column-ref values in the comma-separated control so a
+        # loaded structured key still shows its referenced columns.
+        column_names = [value for kind, value in parts if kind == "column-ref"]
+        self._key.columns.setText(", ".join(column_names))
+
+    def set_column_dtypes(self, dtypes: list[tuple[str, str | None]]) -> None:
+        """Accept per-column expected dtypes (passive no-op for this dialog).
+
+        The text-based Columns tab does not render a dedicated expected-dtype
+        column; the drag-based Columns tab (Phase 7) shows the expected dtype. This
+        method exists so the dialog satisfies the view protocol; it intentionally
+        does not alter the passive columns editor.
+
+        Args:
+            dtypes: One ``(canonical_name, expected_dtype)`` tuple per column.
+
+        Returns:
+            ``None``.
+        """
+        # The passive columns editor encodes only canonical|role|required|aliases,
+        # so the expected dtype is not rendered here; the drag-based tab shows it.
+        del dtypes
+
+    def set_dedup(self, mode: str, discriminator: str | None) -> None:
+        """Render the dedup mode and discriminator.
+
+        The discriminator control is a dropdown populated from the existing
+        canonical and derived column names plus the ``Key`` sentinel (Decision 6),
+        so a non-existent column cannot be selected. A discriminator not present in
+        the dropdown is ignored (the selection stays at the current valid value).
+
+        Args:
+            mode: The dedup mode (``"none"``, ``"collapse"``, or ``"aggregate"``).
+            discriminator: The discriminator column for collapse/aggregate, or
+                ``None``.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Repopulates the discriminator dropdown and updates the dedup controls.
+        """
+        self._populate_discriminator_options()
         self._dedup.mode.setCurrentText(mode)
-        self._dedup.discriminator.setText(discriminator or "")
+        # Only select a discriminator that exists in the dropdown so the invariant
+        # "discriminator references an existing column (or the Key)" always holds.
+        if discriminator is not None:
+            index = self._dedup.discriminator.findText(discriminator)
+            if index >= 0:
+                self._dedup.discriminator.setCurrentIndex(index)
 
     def get_dedup(self) -> tuple[str, str | None]:
         """Return the user-entered dedup mode and discriminator.
 
         Returns:
             A ``(mode, discriminator)`` tuple; the discriminator is ``None`` when
-            the field is blank.
+            the dropdown is empty (no selectable column).
         """
         mode = self._dedup.mode.currentText()
-        text = self._dedup.discriminator.text().strip()
+        text = self._dedup.discriminator.currentText().strip()
         return (mode, text or None)
+
+    def _populate_discriminator_options(self) -> None:
+        """Populate the discriminator dropdown from existing columns + the Key.
+
+        Builds the option list from the current Columns-tab canonical names and
+        Derived-tab names plus the ``Key`` sentinel, so the dropdown only ever
+        offers existing columns (or the Key) as discriminator (Decision 6).
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Rebuilds the discriminator dropdown items, preserving the current
+            selection when it is still valid.
+        """
+        current = self._dedup.discriminator.currentText()
+        # The Key sentinel is always offered as the default discriminator; the
+        # existing canonical and derived names follow so only real targets appear.
+        options = [self._KEY_DISCRIMINATOR]
+        options.extend(canonical for canonical, _r, _req, _a in self.get_columns())
+        options.extend(name for name, _expr in self.get_derived())
+        self._dedup.discriminator.clear()
+        self._dedup.discriminator.addItems(options)
+        # Restore the prior selection when it is still a valid option so a
+        # repopulate does not silently drop the user's choice.
+        index = self._dedup.discriminator.findText(current)
+        if index >= 0:
+            self._dedup.discriminator.setCurrentIndex(index)
 
     def set_derived(self, rows: list[tuple[str, str]]) -> None:
         """Render the derived/formula rows as one ``name|expression`` line each.
@@ -342,3 +433,20 @@ class SchemaBuilderDialog(QDialog):
             The Preview-tab rows label text.
         """
         return self._preview.rows_label.text()
+
+    def tab_labels(self) -> list[str]:
+        """Return the tab labels in display order (public test seam).
+
+        Returns:
+            The tab text for each tab, left to right (Decision 10 order).
+        """
+        return [self._tabs.tabText(index) for index in range(self._tabs.count())]
+
+    def discriminator_options(self) -> list[str]:
+        """Return the discriminator dropdown options (public test seam).
+
+        Returns:
+            The discriminator dropdown item texts, in order.
+        """
+        combo = self._dedup.discriminator
+        return [combo.itemText(index) for index in range(combo.count())]

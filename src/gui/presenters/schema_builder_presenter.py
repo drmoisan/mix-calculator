@@ -33,6 +33,7 @@ from src.gui.presenters._schema_builder_state import (
     SchemaBuilderState,
     assemble_schema,
     known_column_names,
+    parse_key_pattern,
 )
 from src.schema_formula import FormulaError
 from src.schema_model import SchemaValidationError
@@ -40,9 +41,11 @@ from src.schema_model import SchemaValidationError
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from src.gui.presenters._schema_builder_state import PreviewSlice
     from src.gui.protocols import SchemaBuilderViewProtocol
     from src.gui.services.schema_service import SchemaServiceProtocol
     from src.schema_formula import FormulaEvaluator
+    from src.schema_model import ColumnSpec, SchemaDefinition
 
 __all__ = ["SchemaBuilderPresenter"]
 
@@ -104,6 +107,90 @@ class SchemaBuilderPresenter:
         self._evaluator = formula_evaluator
         self._state = SchemaBuilderState()
 
+    def seed_from_caller(
+        self,
+        *,
+        required_specs: Sequence[ColumnSpec] | None = None,
+        optional_specs: Sequence[ColumnSpec] | None = None,
+        default_key_pattern: str | None = None,
+        preview_slice: PreviewSlice | None = None,
+    ) -> None:
+        """Seed the in-progress state from the per-tab caller's build inputs.
+
+        Populates the column rows from the supplied required and optional specs
+        (required first, then optional), parses ``default_key_pattern`` into
+        ordered structured key parts, and records the masked preview slice and its
+        header columns as the draggable source-column pool. The builder reads only
+        the supplied slice and performs no I/O (Decision 5). All arguments are
+        optional so the blank menu path (no inputs) leaves the state empty.
+
+        Args:
+            required_specs: The source's required column specs, or ``None``.
+            optional_specs: The source's optional column specs, or ``None``.
+            default_key_pattern: The default key pattern to parse into structured
+                parts, or ``None`` to leave the key empty.
+            preview_slice: The masked preview slice the builder reads, or ``None``.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Replaces the in-progress state's column rows, key parts, source-column
+            pool, and preview slice, then renders the state to the view.
+        """
+        # Build the column rows required-first then optional so the Columns tab
+        # lists required columns ahead of optional ones, matching display order.
+        required = list(required_specs or ())
+        optional = list(optional_specs or ())
+        all_specs = [*required, *optional]
+        columns = [self._spec_to_row(spec) for spec in all_specs]
+        # Carry each caller column's expected dtype so the Columns tab can render
+        # the expected type and the dtype check can target it.
+        column_dtypes = {spec.canonical_name: spec.expected_dtype for spec in all_specs}
+        # Parse the default pattern into ordered structured parts; an absent
+        # pattern leaves the key empty for the user to compose.
+        key_parts = (
+            parse_key_pattern(default_key_pattern) if default_key_pattern else []
+        )
+        # The masked slice header is the draggable source-column pool; the builder
+        # reads only this slice and never touches a reader or the filesystem.
+        source_columns = list(preview_slice.header) if preview_slice else []
+        self._state = SchemaBuilderState(
+            columns=columns,
+            column_dtypes=column_dtypes,
+            key_parts=key_parts,
+            key_columns=tuple(p.value for p in key_parts if p.is_column_ref),
+            source_columns=source_columns,
+            preview_slice=preview_slice,
+        )
+        self._render_state()
+
+    @staticmethod
+    def _spec_to_row(spec: ColumnSpec) -> tuple[str, str, bool, tuple[str, ...]]:
+        """Convert a caller column spec into a builder column row tuple.
+
+        Args:
+            spec: The caller-supplied column spec.
+
+        Returns:
+            A ``(canonical_name, role, required, aliases)`` row tuple mirroring the
+            state's column-row shape.
+        """
+        return (spec.canonical_name, spec.role, spec.required, spec.aliases)
+
+    @property
+    def state(self) -> SchemaBuilderState:
+        """Return the current in-progress builder state.
+
+        Exposed read-only so wiring and tests can inspect the seeded/loaded state
+        (column rows, structured key parts, source-column pool, preview slice)
+        without driving it through the view.
+
+        Returns:
+            The presenter's current :class:`SchemaBuilderState`.
+        """
+        return self._state
+
     def load_existing(self, name: str) -> None:
         """Load an existing schema into the in-progress state and render it.
 
@@ -117,7 +204,73 @@ class SchemaBuilderPresenter:
             Reads the schema via the service and pushes its fields to the view.
         """
         schema = self._service.load_schema(name)
-        self._state = SchemaBuilderState(
+        self._state = self._state_from_schema(schema)
+        self._render_state()
+
+    def add_derived(self, name: str, expression: str) -> None:
+        """Append a derived column to the in-progress state in order.
+
+        Called when the Derived-tab dialog is accepted (Decision 7). The new
+        derived column is appended after existing derived columns so ordering is
+        preserved, and the state is re-rendered so the column becomes referenceable
+        on the Columns and Key tabs.
+
+        Args:
+            name: The derived column's canonical name.
+            expression: The derived column's formula expression.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Appends to the state's derived list and re-renders the state.
+        """
+        self._state.derived.append((name, expression))
+        self._render_state()
+
+    def new_from_template(self, template_name: str) -> None:
+        """Seed fresh state from the closest-existing schema as a template.
+
+        Loads ``template_name`` and copies its column specs (including persisted
+        aliases), structured key, and dedup policy into a new in-progress state,
+        but clears the name so the user adjusts and saves the result under a new
+        name (Decision 6). The template file is never overwritten because the
+        seeded name is blank until the user provides a new one and saves.
+
+        Args:
+            template_name: The name of the closest-existing schema to seed from.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Reads the template schema via the service and renders the seeded
+            state to the view.
+        """
+        template = self._service.load_schema(template_name)
+        state = self._state_from_schema(template)
+        # Clear identity so save-as writes a new file rather than overwriting the
+        # template; the user supplies the new name before saving.
+        state.name = ""
+        self._state = state
+        self._render_state()
+
+    @staticmethod
+    def _state_from_schema(schema: SchemaDefinition) -> SchemaBuilderState:
+        """Build an in-progress state mirroring a loaded schema.
+
+        Carries the loaded schema's structured key parts (column-ref and
+        literal-text, preserving order), aggregate/collapse dedup mode and
+        discriminator, and the column rows into editable state so a subsequent
+        edit-and-save round-trips faithfully.
+
+        Args:
+            schema: The loaded schema definition.
+
+        Returns:
+            A :class:`SchemaBuilderState` populated from ``schema``.
+        """
+        return SchemaBuilderState(
             name=schema.name,
             version=schema.version,
             description=schema.description,
@@ -125,13 +278,19 @@ class SchemaBuilderPresenter:
                 (c.canonical_name, c.role, c.required, c.aliases)
                 for c in schema.columns
             ],
-            key_columns=schema.key.columns,
+            # Carry each column's expected dtype so the Columns tab can render it
+            # and an edit-then-save preserves the declared type.
+            column_dtypes={c.canonical_name: c.expected_dtype for c in schema.columns},
+            key_columns=schema.key.column_names,
+            # Preserve the full structured key (including literal-text parts) so
+            # an edit-then-save re-emits the same composition, not just the
+            # column-ref names.
+            key_parts=list(schema.key.parts),
             sku_coercion=schema.key.sku_coercion,
             dedup_mode=schema.dedup.mode,
             discriminator=schema.dedup.discriminator_column,
             derived=[(d.name, d.expression) for d in schema.derived_columns],
         )
-        self._render_state()
 
     def _render_state(self) -> None:
         """Push the entire in-progress state to the view.
@@ -149,6 +308,37 @@ class SchemaBuilderPresenter:
         self._view.set_key(self._state.key_columns, self._state.sku_coercion)
         self._view.set_dedup(self._state.dedup_mode, self._state.discriminator)
         self._view.set_derived(list(self._state.derived))
+        self._push_structured_key_and_dtypes()
+
+    def _push_structured_key_and_dtypes(self) -> None:
+        """Push structured key parts and per-column dtypes when the view supports it.
+
+        The structured key-part and expected-dtype setters are newer additions to
+        the view contract. They are invoked through ``getattr`` so a view that has
+        not yet adopted them (for example a minimal test fake) is unaffected, while
+        a view that implements them receives the ordered parts and per-column type.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Calls ``view.set_key_parts`` and ``view.set_column_dtypes`` when those
+            methods exist on the view.
+        """
+        set_key_parts = getattr(self._view, "set_key_parts", None)
+        # Render the full structured key (including literal-text parts) so the Key
+        # tab shows interleaved literals, not only the column-ref names.
+        if callable(set_key_parts):
+            set_key_parts([(p.kind, p.value) for p in self._state.key_parts])
+        set_column_dtypes = getattr(self._view, "set_column_dtypes", None)
+        # Render the per-column expected dtype in declared column order.
+        if callable(set_column_dtypes):
+            set_column_dtypes(
+                [
+                    (canonical, self._state.column_dtypes.get(canonical))
+                    for canonical, _role, _required, _aliases in self._state.columns
+                ]
+            )
 
     def sync_from_view(self) -> None:
         """Read every editable field from the view into the in-progress state.

@@ -5,3 +5,4 @@
 - [PowerShell new files need UTF-8 BOM](powershell-bom-required.md) — PSScriptAnalyzer enforces PSUseBOMForUnicodeEncodedFile; prepend BOM after Write or restart the format loop
 - [Tier-classification has no script](tier-classification-no-script.md) — quality-tiers.yml tier stage is conceptual; no glob-and-fail script; verify "all classified" via `python -c` enumeration
 - [pytest-qt SignalBlocker.args typing](pytest-qt-signal-blocker-typing.md) — blocker.args is list[Unknown] | None; contain via a typed Protocol view + cast (the pandas_io pattern), not a suppression
+- [Aggregate dedup mode loader coupling](aggregate-dedup-mode-loader-coupling.md) — #50 "aggregate" renames collapse; loader had a literal == "collapse" ordering branch; AOP can't be aggregate (no discriminator)

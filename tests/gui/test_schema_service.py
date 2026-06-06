@@ -20,7 +20,13 @@ from src.gui.services.schema_service import (
     build_default_schema_service,
 )
 from src.schema_loader import SchemaLoader
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import (
+    SCHEMA_FORMAT_VERSION,
+    ColumnSpec,
+    KeySpec,
+    SchemaDefinition,
+    column_ref,
+)
 from src.schema_registry import SCHEMA_SUFFIX, SchemaRegistry
 from src.schema_serialization import schema_to_json
 
@@ -93,12 +99,17 @@ def _aop_like_schema(name: str = "aop_like") -> SchemaDefinition:
     """
     return SchemaDefinition(
         name=name,
-        version="1.0",
+        version=SCHEMA_FORMAT_VERSION,
         columns=(
             ColumnSpec(canonical_name="Customer", role="dimension"),
-            ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
+            ColumnSpec(
+                canonical_name="Sales",
+                role="measure",
+                numeric=True,
+                expected_dtype="float",
+            ),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
 
 
@@ -236,14 +247,21 @@ def _keyable_schema(name: str = "keyable") -> SchemaDefinition:
     """
     return SchemaDefinition(
         name=name,
-        version="1.0",
+        version=SCHEMA_FORMAT_VERSION,
         columns=(
             ColumnSpec(canonical_name="Customer", role="dimension"),
             ColumnSpec(canonical_name="SKU #", role="dimension"),
             ColumnSpec(canonical_name="Type", role="dimension"),
-            ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
+            ColumnSpec(
+                canonical_name="Sales",
+                role="measure",
+                numeric=True,
+                expected_dtype="float",
+            ),
         ),
-        key=KeySpec(columns=("Customer", "SKU #", "Type")),
+        key=KeySpec(
+            parts=tuple(column_ref(_n) for _n in ("Customer", "SKU #", "Type"))
+        ),
     )
 
 

@@ -431,9 +431,11 @@ def emit_output_columns(
         path keeps its filtered index).
     """
     drop = set(schema.drop_columns)
-    # Decide the output column order by dedup mode: the collapse path rebuilds the
-    # canonical declared order; the none path preserves the frame's natural order.
-    if schema.dedup.mode == "collapse":
+    # Decide the output column order by dedup mode: the collapsing modes
+    # (collapse/aggregate) rebuild the canonical declared order; the none path
+    # preserves the frame's natural order. Aggregate is the renamed collapse mode
+    # (Decision 1) and shares the same canonical-ordering behavior.
+    if schema.dedup.mode in {"collapse", "aggregate"}:
         order = _output_column_order(schema)
     else:
         # Preserve the frame's existing column order, dropping only drop-columns,

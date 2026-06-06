@@ -61,10 +61,12 @@ def test_key_selection_round_trip(qtbot: QtBot) -> None:
 
 
 def test_dedup_mode_switch_reveals_discriminator(qtbot: QtBot) -> None:
-    """Switching dedup to collapse carries the discriminator through the getter."""
-    # Arrange
+    """Switching dedup to collapse carries an existing-column discriminator."""
+    # Arrange: declare the discriminator column so it is a selectable dropdown
+    # option (Decision 6: the discriminator must reference an existing column).
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
+    dialog.set_columns([("YTD/YTG", "discriminator", True, ())])
 
     # Act
     dialog.set_dedup("collapse", "YTD/YTG")
@@ -73,17 +75,17 @@ def test_dedup_mode_switch_reveals_discriminator(qtbot: QtBot) -> None:
     assert dialog.get_dedup() == ("collapse", "YTD/YTG")
 
 
-def test_dedup_none_yields_no_discriminator(qtbot: QtBot) -> None:
-    """A blank discriminator reads back as None."""
+def test_dedup_discriminator_defaults_to_key(qtbot: QtBot) -> None:
+    """The discriminator dropdown offers the Key sentinel as the default."""
     # Arrange
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
 
-    # Act
-    dialog.set_dedup("none", None)
+    # Act: with aggregate mode and no explicit discriminator, the Key is default.
+    dialog.set_dedup("aggregate", None)
 
-    # Assert
-    assert dialog.get_dedup() == ("none", None)
+    # Assert: the Key sentinel is the resolved default discriminator.
+    assert dialog.get_dedup() == ("aggregate", "Key")
 
 
 def test_derived_entry_round_trip(qtbot: QtBot) -> None:
@@ -138,3 +140,64 @@ def test_show_error_renders_on_error_surface(qtbot: QtBot) -> None:
 
     # Assert
     assert dialog.formula_error_text() == "name must be non-empty"
+
+
+def test_tab_order_matches_decision_10(qtbot: QtBot) -> None:
+    """Decision 10: tabs are Identity, Derived, Columns, Key, Dedup, Preview."""
+    # Arrange / Act
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+
+    # Assert: the tab labels appear in the specified order.
+    assert dialog.tab_labels() == [
+        "Identity",
+        "Derived",
+        "Columns",
+        "Key",
+        "Dedup",
+        "Preview",
+    ]
+
+
+def test_dedup_default_mode_is_aggregate(qtbot: QtBot) -> None:
+    """Decision 1: a freshly-opened Dedup tab shows aggregate selected by default."""
+    # Arrange / Act
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+
+    # Assert: the dedup mode defaults to aggregate.
+    mode, _discriminator = dialog.get_dedup()
+    assert mode == "aggregate"
+
+
+def test_dedup_discriminator_is_dropdown_of_existing_columns(qtbot: QtBot) -> None:
+    """Decision 6: the discriminator dropdown contains only existing names + Key."""
+    # Arrange: declare two columns and a derived column.
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_columns(
+        [("Customer", "dimension", True, ()), ("Sales", "measure", True, ())]
+    )
+    dialog.set_derived([("Revenue", "Sales * 2")])
+
+    # Act: repopulate the dropdown by setting dedup.
+    dialog.set_dedup("aggregate", None)
+
+    # Assert: the dropdown offers the Key plus the existing canonical/derived names.
+    assert dialog.discriminator_options() == ["Key", "Customer", "Sales", "Revenue"]
+
+
+def test_dedup_unknown_discriminator_is_rejected(qtbot: QtBot) -> None:
+    """Decision 6: an unknown discriminator cannot be selected (no free-text)."""
+    # Arrange: only one declared column.
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_columns([("Customer", "dimension", True, ())])
+
+    # Act: attempt to set a discriminator that is not an existing column.
+    dialog.set_dedup("aggregate", "Nonexistent")
+
+    # Assert: the unknown value was not selected; the dropdown stays on a valid one.
+    _mode, discriminator = dialog.get_dedup()
+    assert discriminator != "Nonexistent"
+    assert discriminator in ("Key", "Customer")

@@ -23,6 +23,7 @@ from src.schema_model import (
     DerivedColumnSpec,
     KeySpec,
     SchemaDefinition,
+    column_ref,
 )
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
@@ -179,7 +180,7 @@ def test_column_builder_constructs_missing_column_from_expression() -> None:
             ColumnSpec(canonical_name="a", role="measure", numeric=True),
             ColumnSpec(canonical_name="b", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("a",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("a",))),
         derived_columns=(DerivedColumnSpec(name="total", expression="a + b"),),
     )
     # Act: apply derived columns directly (isolated from key rebuild).
@@ -198,7 +199,7 @@ def test_ratio_recompute_via_safe_div_expression() -> None:
             ColumnSpec(canonical_name="dollars", role="measure", numeric=True),
             ColumnSpec(canonical_name="volume", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("dollars",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("dollars",))),
         derived_columns=(
             DerivedColumnSpec(name="rate", expression="safe_div(dollars, volume)"),
         ),
@@ -233,7 +234,7 @@ def test_property_ratio_safe_div_zero_and_negative_denominators(
             ColumnSpec(canonical_name="dollars", role="measure", numeric=True),
             ColumnSpec(canonical_name="volume", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("dollars",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("dollars",))),
         derived_columns=(
             DerivedColumnSpec(name="rate", expression="safe_div(dollars, volume)"),
         ),
@@ -270,7 +271,7 @@ def test_property_ratio_safe_div_positive_denominators_divide(
             ColumnSpec(canonical_name="dollars", role="measure", numeric=True),
             ColumnSpec(canonical_name="volume", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("dollars",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("dollars",))),
         derived_columns=(
             DerivedColumnSpec(name="rate", expression="safe_div(dollars, volume)"),
         ),

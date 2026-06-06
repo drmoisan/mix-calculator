@@ -47,13 +47,16 @@ from src._schema_json_helpers import (
     require_str,
 )
 from src.schema_model import (
+    SCHEMA_FORMAT_VERSION,
     ColumnSpec,
     DedupPolicy,
     DerivedColumnSpec,
     FillRule,
+    KeyPart,
     KeySpec,
     MeasureAggregation,
     SchemaDefinition,
+    derive_expected_dtype,
 )
 
 # Declared key sets per object shape. These drive both serialization ordering and
@@ -64,6 +67,7 @@ _COLUMN_KEYS: tuple[str, ...] = (
     "required",
     "aliases",
     "numeric",
+    "expected_dtype",
     "sentinel_clean",
 )
 _MEASURE_AGG_KEYS: tuple[str, ...] = ("measure", "mode", "select_values")
@@ -73,7 +77,11 @@ _DEDUP_KEYS: tuple[str, ...] = (
     "measure_aggregations",
 )
 _DERIVED_KEYS: tuple[str, ...] = ("name", "expression", "copy_from")
-_KEY_KEYS: tuple[str, ...] = ("columns", "sku_coercion")
+# The current key shape uses structured "parts"; the legacy pre-bump shape used a
+# flat "columns" list. Both are accepted on parse (the legacy shape triggers the
+# forward migration) but only "parts" is emitted on write.
+_KEY_KEYS: tuple[str, ...] = ("parts", "columns", "sku_coercion")
+_KEY_PART_KEYS: tuple[str, ...] = ("kind", "value")
 _FILL_RULE_KEYS: tuple[str, ...] = ("total", "components")
 _SCHEMA_KEYS: tuple[str, ...] = (
     "name",
@@ -155,7 +163,9 @@ def _schema_to_object(schema: SchemaDefinition) -> JsonObject:
     """
     return {
         "name": schema.name,
-        "version": schema.version,
+        # Always emit the current write-format version so re-serialized schemas
+        # carry SCHEMA_FORMAT_VERSION regardless of the in-memory version string.
+        "version": SCHEMA_FORMAT_VERSION,
         "description": schema.description,
         "source_sheet_hints": list(schema.source_sheet_hints),
         "header_row": schema.header_row,
@@ -178,6 +188,7 @@ def _column_to_object(column: ColumnSpec) -> JsonObject:
         "required": column.required,
         "aliases": list(column.aliases),
         "numeric": column.numeric,
+        "expected_dtype": column.expected_dtype,
         "sentinel_clean": column.sentinel_clean,
     }
 
@@ -212,10 +223,22 @@ def _derived_to_object(derived: DerivedColumnSpec) -> JsonObject:
     }
 
 
-def _key_to_object(key: KeySpec) -> JsonObject:
-    """Convert a ``KeySpec`` into a JSON-ready ordered object."""
+def _key_part_to_object(part: KeyPart) -> JsonObject:
+    """Convert a ``KeyPart`` into a JSON-ready ordered object."""
     return {
-        "columns": list(key.columns),
+        "kind": part.kind,
+        "value": part.value,
+    }
+
+
+def _key_to_object(key: KeySpec) -> JsonObject:
+    """Convert a ``KeySpec`` into a JSON-ready ordered object.
+
+    Emits the current structured ``parts`` shape (the legacy flat ``columns``
+    shape is never written; it is only accepted on parse for forward migration).
+    """
+    return {
+        "parts": [_key_part_to_object(part) for part in key.parts],
         "sku_coercion": key.sku_coercion,
     }
 
@@ -242,9 +265,14 @@ def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
             wrong value types.
     """
     reject_unknown_keys(obj, _SCHEMA_KEYS, "schema")
+    # The version field is required in the JSON, but the forward-only migration
+    # sets the in-memory version to SCHEMA_FORMAT_VERSION so a re-serialize always
+    # emits the current format. require_str enforces presence/type of the source
+    # field before it is superseded.
+    require_str(obj, "version", "schema")
     return SchemaDefinition(
         name=require_str(obj, "name", "schema"),
-        version=require_str(obj, "version", "schema"),
+        version=SCHEMA_FORMAT_VERSION,
         description=optional_str(obj, "description", "schema", default=""),
         source_sheet_hints=optional_str_tuple(obj, "source_sheet_hints", "schema"),
         header_row=optional_int(obj, "header_row", "schema", default=0),
@@ -267,14 +295,28 @@ def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
 
 
 def _object_to_column(obj: JsonObject) -> ColumnSpec:
-    """Reconstruct a ``ColumnSpec`` from a typed JSON object."""
+    """Reconstruct a ``ColumnSpec`` from a typed JSON object.
+
+    Applies the forward migration for the ``expected_dtype`` field: when the JSON
+    omits ``expected_dtype`` (pre-bump column) but declares ``numeric: true``, the
+    column is backfilled with ``expected_dtype="float"`` so legacy numeric columns
+    carry an explicit dtype after migration.
+    """
     reject_unknown_keys(obj, _COLUMN_KEYS, "column")
+    numeric = optional_bool(obj, "numeric", "column", default=False)
+    explicit_dtype = optional_nullable_str(obj, "expected_dtype", "column")
+    # Backfill the expected dtype from the legacy numeric flag when the JSON did
+    # not declare an explicit dtype; this upgrades pre-bump columns in place.
+    migrated_dtype = derive_expected_dtype(
+        numeric=numeric, expected_dtype=explicit_dtype
+    )
     return ColumnSpec(
         canonical_name=require_str(obj, "canonical_name", "column"),
         role=require_str(obj, "role", "column"),
         required=optional_bool(obj, "required", "column", default=True),
         aliases=optional_str_tuple(obj, "aliases", "column"),
-        numeric=optional_bool(obj, "numeric", "column", default=False),
+        numeric=numeric,
+        expected_dtype=migrated_dtype,
         sentinel_clean=optional_bool(obj, "sentinel_clean", "column", default=False),
     )
 
@@ -319,16 +361,56 @@ def _object_to_derived(obj: JsonObject) -> DerivedColumnSpec:
     )
 
 
+def _object_to_key_part(obj: JsonObject) -> KeyPart:
+    """Reconstruct a single ``KeyPart`` from a typed JSON object."""
+    reject_unknown_keys(obj, _KEY_PART_KEYS, "key_part")
+    return KeyPart(
+        kind=require_str(obj, "kind", "key_part"),
+        value=require_str(obj, "value", "key_part"),
+    )
+
+
 def _object_to_key(parent: JsonObject) -> KeySpec:
-    """Reconstruct the ``KeySpec`` from the parent schema object."""
+    """Reconstruct the ``KeySpec`` from the parent schema object.
+
+    Accepts both the current structured ``parts`` shape and the legacy flat
+    ``columns`` shape. A legacy ``columns`` list is migrated forward into an
+    ordered tuple of ``column-ref`` parts, preserving order. When both shapes are
+    absent the schema is malformed.
+
+    Args:
+        parent: The parent schema JSON object.
+
+    Returns:
+        The reconstructed ``KeySpec`` with structured parts.
+
+    Raises:
+        SchemaSerializationError: If the ``key`` field is absent, or neither a
+            ``parts`` nor a ``columns`` entry is present.
+    """
     raw = parent.get("key")
     if raw is None:
         raise SchemaSerializationError("schema is missing required field 'key'")
     obj = require_object(raw, "key")
     reject_unknown_keys(obj, _KEY_KEYS, "key")
-    return KeySpec(
-        columns=optional_str_tuple(obj, "columns", "key"),
-        sku_coercion=optional_bool(obj, "sku_coercion", "key", default=False),
+    sku_coercion = optional_bool(obj, "sku_coercion", "key", default=False)
+    # Prefer the current structured shape; fall back to the legacy flat columns
+    # list and migrate it forward into column-ref parts in the same order.
+    if "parts" in obj:
+        parts = tuple(
+            _object_to_key_part(item)
+            for item in optional_object_list(obj, "parts", "key")
+        )
+        return KeySpec(parts=parts, sku_coercion=sku_coercion)
+    if "columns" in obj:
+        legacy_columns = optional_str_tuple(obj, "columns", "key")
+        # Each legacy column name becomes an ordered column-ref part.
+        migrated = tuple(
+            KeyPart(kind="column-ref", value=name) for name in legacy_columns
+        )
+        return KeySpec(parts=migrated, sku_coercion=sku_coercion)
+    raise SchemaSerializationError(
+        "key object must contain 'parts' (current) or 'columns' (legacy)"
     )
 
 

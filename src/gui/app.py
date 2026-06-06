@@ -31,8 +31,8 @@ from src.gui._key_mismatch_dialog import build_key_mismatch_resolver
 from src.gui._main_window_view import MainWindowPipelineView
 from src.gui._render_exclusivity import wire_render_checkboxes
 from src.gui._run_wiring import wire_run
+from src.gui._schema_discovery_wiring import wire_schema_discovery_and_gating
 from src.gui._schema_list_wiring import populate_schema_lists
-from src.gui._schema_wiring import wire_build_schema_buttons, wire_schema_builder
 from src.gui._shutdown_wiring import wire_shutdown_cleanup
 from src.gui._velopack_bootstrap import run_velopack_bootstrap
 from src.gui._wiring import (
@@ -431,14 +431,11 @@ def build_application(
     # no running QThread is destroyed (cross-thread QObject teardown abort).
     wire_shutdown_cleanup(application, runner_resolved)
 
-    # Feature D (AC6): connect the "Schema Builder..." action to a builder dialog
-    # driven by a fresh SchemaBuilderPresenter per open over the resolved service;
-    # the default factories live in the wiring module so app.py stays thin.
-    wire_schema_builder(window, schema_service_resolved)
-
-    # WS2 (issue #48, AC-13): connect each source tab's "Build new schema" button
-    # to the same builder dialog so a per-tab build opens the existing builder.
-    wire_build_schema_buttons(window, schema_service_resolved)
+    # Feature D: schema-builder action/buttons (AC6/AC-13) plus per-tab discovery
+    # and Import gating (Decision 8/9), wired in its own module to keep app.py thin.
+    wire_schema_discovery_and_gating(
+        window, _svc, le_presenter, aop_presenter, skulu_presenter
+    )
 
     return WiredApplication(
         qt_app=application,

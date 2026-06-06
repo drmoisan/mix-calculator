@@ -17,7 +17,7 @@ from src.schema_matching import (
     DEFAULT_MAX_CANDIDATES,
     build_mismatch_report,
 )
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 
 
 def _schema_with_columns(columns: tuple[ColumnSpec, ...]) -> SchemaDefinition:
@@ -36,7 +36,7 @@ def _schema_with_columns(columns: tuple[ColumnSpec, ...]) -> SchemaDefinition:
         name="test-schema",
         version="1",
         columns=columns,
-        key=KeySpec(columns=(columns[0].canonical_name,)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in (columns[0].canonical_name,))),
     )
 
 

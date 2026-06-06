@@ -25,7 +25,7 @@ from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
 # The in-memory fixtures live in the tests package and import as package modules.
 from tests import aop_fixtures, le_fixtures
-from tests.gui.fakes.fake_services import FakeSchemaService
+from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
 
 if TYPE_CHECKING:
     import pytest
@@ -194,7 +194,6 @@ def test_end_to_end_schema_flow_auto_select_placeholder_and_build(
     """
     from src.gui.app import build_application
     from src.gui.runners import SynchronousRunner
-    from tests.gui.fakes.fake_services import FakeWorkbookReader
 
     # Arrange: patch the builder dialog at its lazy import location.
     opened: list[object] = []
@@ -260,7 +259,7 @@ def test_end_to_end_schema_flow_auto_select_placeholder_and_build(
 
 def _match_schema() -> SchemaDefinition:
     """Return a small valid schema named ``aop_like`` for the auto-select flow."""
-    from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+    from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 
     return SchemaDefinition(
         name="aop_like",
@@ -269,5 +268,106 @@ def _match_schema() -> SchemaDefinition:
             ColumnSpec(canonical_name="Customer", role="dimension"),
             ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
+
+
+def test_per_tab_open_seeds_presenter_and_menu_open_is_blank(qtbot: QtBot) -> None:
+    """P11-T1: a per-tab build seeds the presenter; the menu open stays blank."""
+    # Arrange: a build-spec provider supplying LE specs, recording presenters.
+    from src.gui._schema_build_specs import CallerBuildSpec
+    from src.gui._schema_wiring import open_schema_builder, wire_build_schema_buttons
+    from src.gui.main_window import MainWindow
+    from src.gui.presenters._schema_builder_state import PreviewSlice
+    from src.gui.widgets.schema_builder_dialog import SchemaBuilderDialog
+    from src.schema_model import ColumnSpec
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    service = FakeSchemaService()
+    le_spec = CallerBuildSpec(
+        required_specs=(ColumnSpec(canonical_name="Customer", role="dimension"),),
+        default_key_pattern="{Customer}",
+        preview_slice=PreviewSlice(header=("col_a",), rows=(("x1",),)),
+    )
+
+    class _Provider:
+        def build_spec_for(self, key: str) -> CallerBuildSpec:
+            return le_spec if key == "LE" else CallerBuildSpec()
+
+    def _dialog_factory() -> SchemaBuilderDialog:
+        dialog = SchemaBuilderDialog()
+        qtbot.addWidget(dialog)
+        return dialog
+
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+
+    def _presenter_factory(
+        dialog: SchemaBuilderDialog, svc: object
+    ) -> SchemaBuilderPresenter:
+        return SchemaBuilderPresenter(dialog, svc)  # type: ignore[arg-type]
+
+    wire_build_schema_buttons(
+        window,
+        service,
+        dialog_factory=_dialog_factory,
+        presenter_factory=_presenter_factory,
+        spec_provider=_Provider(),
+    )
+
+    # Act 1: a per-tab build seeds the presenter from the LE spec.
+    window.le_widget.build_schema_requested.emit()
+    seeded = window.schema_builder_presenter
+    assert isinstance(seeded, SchemaBuilderPresenter)
+    assert [row[0] for row in seeded.state.columns] == ["Customer"]
+    assert seeded.state.source_columns == ["col_a"]
+
+    # Act 2: the menu-equivalent open with no specs leaves the presenter blank.
+    open_schema_builder(
+        window,
+        service,
+        dialog_factory=_dialog_factory,
+        presenter_factory=_presenter_factory,
+    )
+    blank = window.schema_builder_presenter
+    assert isinstance(blank, SchemaBuilderPresenter)
+    assert blank.state.columns == []
+
+
+def test_activation_to_import_gate_transition(qtbot: QtBot) -> None:
+    """P11-T2: activation → match → selection enables Import; no-match disables it."""
+    # Arrange: a wired application whose service proceeds then no-matches.
+    from src.gui.app import build_application
+    from src.gui.runners import SynchronousRunner
+
+    reader = FakeWorkbookReader(
+        sheet_names=["AOP1"], preview_rows=[["Customer", "Sales"]]
+    )
+    full = MatchResult(
+        schema=_match_schema(),
+        score=1.0,
+        report=MismatchReport(unmatched_required=(), unrecognized_actual=()),
+    )
+    service = FakeSchemaService(match_result=full)
+    wired = build_application(
+        runner=SynchronousRunner(), workbook_reader=reader, schema_service=service
+    )
+    qtbot.addWidget(wired.window)
+
+    # Act 1: a matching activation auto-selects the schema, enabling Import.
+    wired.aop_presenter.on_schema_discovery("aop.xlsx", "AOP1")
+
+    # Assert 1: the AOP Import button is enabled after the match.
+    assert wired.window.import_aop_btn.isEnabled() is True
+
+    # Act 2: a no-match activation returns the placeholder, disabling Import.
+    service.match_result = MatchResult(
+        schema=None,
+        score=0.0,
+        report=MismatchReport(unmatched_required=(), unrecognized_actual=()),
+    )
+    wired.aop_presenter.on_schema_discovery("aop.xlsx", "AOP1")
+
+    # Assert 2: the placeholder selection re-disables the AOP Import button.
+    assert wired.window.aop_widget.current_schema() == "<Choose Schema>"
+    assert wired.window.import_aop_btn.isEnabled() is False

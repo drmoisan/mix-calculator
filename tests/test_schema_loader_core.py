@@ -23,6 +23,7 @@ from src.schema_model import (
     KeySpec,
     MeasureAggregation,
     SchemaDefinition,
+    column_ref,
 )
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
@@ -206,7 +207,9 @@ def test_load_minimal_schema_without_fill_or_numeric_columns() -> None:
             ColumnSpec(canonical_name="Type", role="dimension"),
             ColumnSpec(canonical_name="Label", role="dimension"),
         ),
-        key=KeySpec(columns=("Customer", "SKU #", "Type")),
+        key=KeySpec(
+            parts=tuple(column_ref(_n) for _n in ("Customer", "SKU #", "Type"))
+        ),
         dedup=DedupPolicy(mode="none"),
     )
     # Act
@@ -287,7 +290,7 @@ def _select_from_schema() -> SchemaDefinition:
             ColumnSpec(canonical_name="Picked", role="measure", numeric=True),
             ColumnSpec(canonical_name="Added", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
         dedup=DedupPolicy(
             mode="collapse",
             discriminator_column="Half",
@@ -348,7 +351,7 @@ def test_property_collapse_additive_equals_group_sum(values: list[float]) -> Non
             ColumnSpec(canonical_name="Customer", role="dimension"),
             ColumnSpec(canonical_name="Amount", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
         dedup=DedupPolicy(
             mode="collapse",
             discriminator_column="Customer",

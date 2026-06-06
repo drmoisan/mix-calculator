@@ -373,3 +373,43 @@ def test_build_schema_button_emits_build_request(qtbot: QtBot) -> None:
     # Act / Assert: the button click emits the build-request signal.
     with qtbot.waitSignal(widget.build_schema_requested, timeout=_SIGNAL_TIMEOUT_MS):
         widget.build_schema_btn.click()
+
+
+def test_import_button_starts_disabled(qtbot: QtBot) -> None:
+    """Decision 8: the per-tab Import button starts disabled before any selection."""
+    # Arrange / Act
+    widget = SourceInputWidget("LE", import_label="Import LE")
+    qtbot.addWidget(widget)
+
+    # Assert: the Import button is disabled on construction.
+    assert widget.import_btn.isEnabled() is False
+
+
+def test_selecting_schema_enables_import_button(qtbot: QtBot) -> None:
+    """Decision 8: selecting a non-placeholder schema enables Import."""
+    # Arrange
+    widget = SourceInputWidget("LE", import_label="Import LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["le_v1"])
+
+    # Act
+    widget.set_selected_schema("le_v1")
+
+    # Assert
+    assert widget.import_btn.isEnabled() is True
+
+
+def test_returning_to_placeholder_disables_import_button(qtbot: QtBot) -> None:
+    """Decision 8: returning to the placeholder re-disables Import."""
+    # Arrange: select a real schema so Import is enabled.
+    widget = SourceInputWidget("LE", import_label="Import LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["le_v1"])
+    widget.set_selected_schema("le_v1")
+    assert widget.import_btn.isEnabled() is True
+
+    # Act: re-populate the list, which resets the selection to the placeholder.
+    widget.set_schema_list(["le_v1"])
+
+    # Assert: Import is disabled again.
+    assert widget.import_btn.isEnabled() is False
