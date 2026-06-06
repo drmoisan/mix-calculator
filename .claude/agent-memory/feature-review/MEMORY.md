@@ -16,3 +16,4 @@
 - [file-size regression during remediation](file-size-regression-during-remediation.md) — independently re-scan ALL changed .py files vs 500 cap; executor final-file-sizes evidence can omit a file it pushed over (issue #50: test_schema_builder_presenter.py 229→506)
 - [protocol-only module 0% coverage](protocol-only-module-zero-coverage.md) — TYPE_CHECKING-only typing.Protocol modules report 0%; classify non-blocking PARTIAL not FAIL when concrete implementers are covered
 - [policy-audit section-7 row-label parser](policy-audit-section7-row-label-parser.md) — validator misreads non-standard section-7 Code-Quality row labels as coverage rows; reuse cycle-1 wording, no comma qualifiers in label cell
+- [schema_formula col-shadow defect](schema-formula-col-shadow-defect.md) — issue #50 RED suite: a column named `col` shadows the col() helper at src/schema_formula.py:301-307; pre-existing, NOT the cycle's fault

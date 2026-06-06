@@ -272,7 +272,10 @@ class FormulaEvaluator:
         Returns:
             A dict containing only the whitelisted callables, every column value
             keyed by its identifier alias, and a ``col`` accessor bound to the
-            exact-name context.
+            exact-name context. The whitelisted callables are bound last so a
+            column whose identifier alias collides with ``col``/``sum``/
+            ``safe_div`` cannot shadow the helper; ``col`` still reads from the
+            closed-over context, so ``col("col")`` returns the column value.
 
         Raises:
             Never raises.
@@ -295,14 +298,18 @@ class FormulaEvaluator:
                 raise FormulaError(f"col() references unknown column {name!r}")
             return context[name]
 
-        # Start with the whitelisted callables, then bind each column value under
-        # its identifier alias so identifier-safe and special-char columns alike
-        # are reachable directly; col() covers exact-name access.
-        symtable: dict[str, object] = {
-            "safe_div": safe_div,
-            "sum": formula_sum,
-            "col": col,
-        }
+        # Bind each column value under its identifier alias first so identifier-safe
+        # and special-char columns alike are reachable directly; col() covers
+        # exact-name access. Populate the aliases before the whitelisted callables.
+        symtable: dict[str, object] = {}
         for alias, column in alias_map.items():
             symtable[alias] = context[column]
+        # Bind the whitelisted callables LAST so a column whose identifier alias
+        # collides with "col"/"sum"/"safe_div" cannot shadow the helper. The col
+        # accessor reads from the closed-over context (not symtable), so
+        # col("col"), col("sum"), and col("safe_div") still resolve the
+        # exact-name column value for every column name.
+        symtable["safe_div"] = safe_div
+        symtable["sum"] = formula_sum
+        symtable["col"] = col
         return symtable
