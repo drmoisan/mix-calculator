@@ -65,6 +65,7 @@ _COLUMN_KEYS: tuple[str, ...] = (
     "canonical_name",
     "role",
     "required",
+    "in_output",
     "aliases",
     "numeric",
     "expected_dtype",
@@ -186,6 +187,7 @@ def _column_to_object(column: ColumnSpec) -> JsonObject:
         "canonical_name": column.canonical_name,
         "role": column.role,
         "required": column.required,
+        "in_output": column.in_output,
         "aliases": list(column.aliases),
         "numeric": column.numeric,
         "expected_dtype": column.expected_dtype,
@@ -301,6 +303,10 @@ def _object_to_column(obj: JsonObject) -> ColumnSpec:
     omits ``expected_dtype`` (pre-bump column) but declares ``numeric: true``, the
     column is backfilled with ``expected_dtype="float"`` so legacy numeric columns
     carry an explicit dtype after migration.
+
+    The ``in_output`` field is additive with a safe default of ``True``: JSON that
+    predates the field (no ``in_output`` key) parses as ``in_output=True``, so the
+    column's output-membership is unchanged unless the schema declares otherwise.
     """
     reject_unknown_keys(obj, _COLUMN_KEYS, "column")
     numeric = optional_bool(obj, "numeric", "column", default=False)
@@ -314,6 +320,9 @@ def _object_to_column(obj: JsonObject) -> ColumnSpec:
         canonical_name=require_str(obj, "canonical_name", "column"),
         role=require_str(obj, "role", "column"),
         required=optional_bool(obj, "required", "column", default=True),
+        # in_output is additive: absent in older JSON means the column is in the
+        # output (default True), so legacy schemas keep their full output set.
+        in_output=optional_bool(obj, "in_output", "column", default=True),
         aliases=optional_str_tuple(obj, "aliases", "column"),
         numeric=numeric,
         expected_dtype=migrated_dtype,

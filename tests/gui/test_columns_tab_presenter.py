@@ -63,8 +63,8 @@ def _state_with_pool() -> SchemaBuilderState:
     """
     return SchemaBuilderState(
         columns=[
-            ("Customer", "dimension", True, ()),
-            ("Sales", "measure", True, ()),
+            ("Customer", "dimension", True, True, ()),
+            ("Sales", "measure", True, True, ()),
         ],
         column_dtypes={"Customer": "string", "Sales": "float"},
         source_columns=["customer", "sales", "extra_col"],
@@ -97,7 +97,7 @@ def test_prepopulate_persists_alias() -> None:
 
     # Assert: the Customer row's aliases now include its matched source.
     customer_row = next(row for row in state.columns if row[0] == "Customer")
-    assert "customer" in customer_row[3]
+    assert "customer" in customer_row[4]
 
 
 def test_consumed_column_excluded_from_pool() -> None:
@@ -120,8 +120,8 @@ def test_consumed_column_cannot_match_second_row() -> None:
     view = FakeColumnsTabView()
     state = SchemaBuilderState(
         columns=[
-            ("Amount", "measure", True, ()),
-            ("Amount Total", "measure", True, ()),
+            ("Amount", "measure", True, True, ()),
+            ("Amount Total", "measure", True, True, ()),
         ],
         column_dtypes={"Amount": "float", "Amount Total": "float"},
         source_columns=["amount"],
@@ -173,7 +173,7 @@ def test_dtype_indicator_pushed_for_coercible_match() -> None:
     # Arrange: a float column whose source values all coerce.
     view = FakeColumnsTabView()
     state = SchemaBuilderState(
-        columns=[("Sales", "measure", True, ())],
+        columns=[("Sales", "measure", True, True, ())],
         column_dtypes={"Sales": "float"},
         source_columns=["sales"],
         preview_slice=PreviewSlice(header=("sales",), rows=(("1.5",), ("2.0",))),
@@ -192,7 +192,7 @@ def test_derived_column_appears_as_selectable_row() -> None:
     # Arrange: a state with a declared column and one derived column.
     view = FakeColumnsTabView()
     state = SchemaBuilderState(
-        columns=[("Customer", "dimension", True, ())],
+        columns=[("Customer", "dimension", True, True, ())],
         column_dtypes={"Customer": "string"},
         source_columns=["customer"],
         derived=[("Revenue", "Sales * Units")],
@@ -212,7 +212,7 @@ def test_dtype_indicator_reports_failing_example_for_non_coercible() -> None:
     # Arrange: a float column whose source values include a non-numeric token.
     view = FakeColumnsTabView()
     state = SchemaBuilderState(
-        columns=[("Sales", "measure", True, ())],
+        columns=[("Sales", "measure", True, True, ())],
         column_dtypes={"Sales": "float"},
         source_columns=["sales"],
         preview_slice=PreviewSlice(header=("sales",), rows=(("1.5",), ("bad",))),

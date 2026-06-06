@@ -277,7 +277,7 @@ def test_build_application_per_tab_button_seeds_via_injected_provider(
 
     presenter = wired.window.schema_builder_presenter
     assert isinstance(presenter, SchemaBuilderPresenter)
-    seeded_columns = [name for name, _r, _req, _a in presenter.state.columns]
+    seeded_columns = [name for name, _r, _req, _io, _a in presenter.state.columns]
     assert "Customer" in seeded_columns
     assert presenter.state.preview_slice is not None
     # The seeded preview slice is synthetic/masked (no real workbook values).
@@ -344,7 +344,7 @@ def test_build_application_new_from_template_seeds_live_dialog(qtbot: QtBot) -> 
     assert presenter.state.name == ""
     # The retained presenter drives the live dialog; assert the dialog's drag Columns
     # tab rendered the template's canonical columns (proving the open path is live).
-    assert "Customer" in [n for n, _r, _q, _a in presenter.state.columns]
+    assert "Customer" in [n for n, _r, _q, _io, _a in presenter.state.columns]
     # Sanity: the production open path uses the real drag Columns widget class.
     assert ColumnsTabWidget is not None
 

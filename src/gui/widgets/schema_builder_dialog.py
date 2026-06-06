@@ -156,12 +156,15 @@ class SchemaBuilderDialog(QDialog):
             self._identity.description.text(),
         )
 
-    def set_columns(self, rows: list[tuple[str, str, bool, tuple[str, ...]]]) -> None:
+    def set_columns(
+        self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
+    ) -> None:
         """Render the column rows on the drag Columns tab.
 
         Args:
-            rows: One ``(canonical_name, role, required, aliases)`` tuple per
-                column.
+            rows: One ``(canonical_name, role, required, in_output, aliases)``
+                tuple per column. ``in_output`` carries output membership,
+                distinct from ``required`` (source-presence).
 
         Returns:
             ``None``.
@@ -172,11 +175,12 @@ class SchemaBuilderDialog(QDialog):
         """
         self._drag.set_columns(rows)
 
-    def get_columns(self) -> list[tuple[str, str, bool, tuple[str, ...]]]:
+    def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the live column rows from the drag Columns tab.
 
         Returns:
-            One ``(canonical_name, role, required, aliases)`` tuple per column.
+            One ``(canonical_name, role, required, in_output, aliases)`` tuple per
+            column.
         """
         return self._drag.get_columns()
 
@@ -325,7 +329,7 @@ class SchemaBuilderDialog(QDialog):
         # The Key sentinel is always offered as the default discriminator; the
         # existing canonical and derived names follow so only real targets appear.
         options = [self._KEY_DISCRIMINATOR]
-        options.extend(canonical for canonical, _r, _req, _a in self.get_columns())
+        options.extend(canonical for canonical, _r, _req, _io, _a in self.get_columns())
         options.extend(name for name, _expr in self.get_derived())
         self._dedup.discriminator.clear()
         self._dedup.discriminator.addItems(options)

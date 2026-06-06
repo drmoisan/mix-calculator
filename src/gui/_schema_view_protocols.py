@@ -192,12 +192,15 @@ class SchemaBuilderViewProtocol(Protocol):
         """
         ...
 
-    def set_columns(self, rows: list[tuple[str, str, bool, tuple[str, ...]]]) -> None:
+    def set_columns(
+        self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
+    ) -> None:
         """Render the column rows.
 
         Args:
-            rows: One ``(canonical_name, role, required, aliases)`` tuple per
-                column, in schema order.
+            rows: One ``(canonical_name, role, required, in_output, aliases)``
+                tuple per column, in schema order. ``in_output`` carries output
+                membership, distinct from ``required`` (source-presence).
 
         Returns:
             ``None``.
@@ -207,11 +210,12 @@ class SchemaBuilderViewProtocol(Protocol):
         """
         ...
 
-    def get_columns(self) -> list[tuple[str, str, bool, tuple[str, ...]]]:
+    def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the user-entered column rows.
 
         Returns:
-            One ``(canonical_name, role, required, aliases)`` tuple per column.
+            One ``(canonical_name, role, required, in_output, aliases)`` tuple per
+            column.
         """
         ...
 

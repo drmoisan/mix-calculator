@@ -231,6 +231,58 @@ def test_aggregate_dedup_mode_round_trips() -> None:
     assert restored == schema
 
 
+def test_absent_in_output_defaults_to_true() -> None:
+    """A column JSON lacking an in_output key parses as in_output=True (additive)."""
+    # Arrange: hand-author column JSON that omits the in_output field entirely,
+    # simulating schema text that predates the additive in_output field.
+    legacy_json = (
+        "{"
+        '"name":"legacy","version":"2.0","description":"",'
+        '"source_sheet_hints":[],"header_row":0,'
+        '"columns":[{"canonical_name":"Customer","role":"dimension",'
+        '"required":true,"aliases":[],"numeric":false,'
+        '"expected_dtype":null,"sentinel_clean":false}],'
+        '"key":{"parts":[{"kind":"column-ref","value":"Customer"}],'
+        '"sku_coercion":false},'
+        '"dedup":{"mode":"none","discriminator_column":null,'
+        '"measure_aggregations":[]},'
+        '"derived_columns":[],"fill_rules":[],"drop_columns":[]'
+        "}"
+    )
+
+    # Act
+    restored = schema_from_json(legacy_json)
+
+    # Assert: the absent field defaults to True so output-membership is preserved.
+    assert restored.columns[0].in_output is True
+
+
+def test_in_output_false_round_trips() -> None:
+    """A column declared in_output=False survives a JSON round-trip unchanged."""
+    # Arrange: a processing-only discriminator column excluded from output.
+    schema = SchemaDefinition(
+        name="proc",
+        version=SCHEMA_FORMAT_VERSION,
+        columns=(
+            ColumnSpec(
+                canonical_name="YTD/YTG",
+                role="discriminator",
+                required=False,
+                in_output=False,
+            ),
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+        ),
+        key=_key("Customer"),
+    )
+
+    # Act
+    restored = schema_from_json(schema_to_json(schema))
+
+    # Assert: in_output=False is preserved and the object is byte-equal.
+    assert restored.columns[0].in_output is False
+    assert restored == schema
+
+
 def test_serialized_json_carries_current_format_version() -> None:
     """Serialized JSON always emits SCHEMA_FORMAT_VERSION as the version."""
     # Arrange
@@ -296,6 +348,9 @@ def _draw_column(draw: st.DrawFn, name: str) -> ColumnSpec:
         canonical_name=name,
         role=draw(st.sampled_from(["dimension", "measure", "discriminator"])),
         required=draw(st.booleans()),
+        # in_output is drawn independently of required to exercise the four
+        # required/in_output combinations through the round-trip.
+        in_output=draw(st.booleans()),
         aliases=tuple(draw(st.lists(_NAME, max_size=2))),
         numeric=numeric,
         expected_dtype=expected_dtype,

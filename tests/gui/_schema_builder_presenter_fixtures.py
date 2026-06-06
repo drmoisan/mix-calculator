@@ -32,10 +32,10 @@ def configure_valid_keyable_view(view: FakeSchemaBuilderView) -> None:
     """
     view.identity = ("keyable", "1.0", "test schema")
     view.columns = [
-        ("Customer", "dimension", True, ()),
-        ("SKU #", "dimension", True, ()),
-        ("Type", "dimension", True, ()),
-        ("Sales", "measure", True, ()),
+        ("Customer", "dimension", True, True, ()),
+        ("SKU #", "dimension", True, True, ()),
+        ("Type", "dimension", True, True, ()),
+        ("Sales", "measure", True, True, ()),
     ]
     view.key = (("Customer", "SKU #", "Type"), False)
     view.dedup = ("none", None)

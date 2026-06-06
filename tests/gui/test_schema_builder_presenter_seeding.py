@@ -43,7 +43,7 @@ def test_new_from_template_seeds_clears_name() -> None:
         ("column-ref", "SKU #"),
     ]
     # The template column's persisted alias is carried into the new state.
-    assert presenter.state.columns[0][3] == ("cust_col",)
+    assert presenter.state.columns[0][4] == ("cust_col",)
 
 
 def test_new_from_template_save_as_does_not_overwrite_template() -> None:
@@ -57,9 +57,9 @@ def test_new_from_template_save_as_does_not_overwrite_template() -> None:
     # The user names the new schema and saves; the view returns the new name.
     view.identity = ("tmpl_variant", "2.0", "")
     view.columns = [
-        ("Customer", "dimension", True, ("cust_col",)),
-        ("SKU #", "dimension", True, ()),
-        ("Sales", "measure", True, ()),
+        ("Customer", "dimension", True, True, ("cust_col",)),
+        ("SKU #", "dimension", True, True, ()),
+        ("Sales", "measure", True, True, ()),
     ]
     view.key = (("Customer", "SKU #"), False)
     view.dedup = ("aggregate", "Customer")

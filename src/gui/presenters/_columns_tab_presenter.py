@@ -96,7 +96,9 @@ class ColumnsTabPresenter:
         """
         # Match required columns first (they appear first in the column rows), so
         # the most important rows claim their best source before optional rows.
-        for canonical, _role, _required, _aliases in list(self._state.columns):
+        for canonical, _role, _required, _in_output, _aliases in list(
+            self._state.columns
+        ):
             best = self._best_unconsumed_match(canonical)
             if best is not None:
                 self._bind(canonical, best)
@@ -289,10 +291,18 @@ class ColumnsTabPresenter:
         """
         # Rebuild the single matching row tuple with its transformed aliases,
         # leaving every other row untouched and preserving order.
-        for index, (name, role, required, aliases) in enumerate(self._state.columns):
+        for index, (name, role, required, in_output, aliases) in enumerate(
+            self._state.columns
+        ):
             if name == canonical:
                 new_aliases = transform(aliases)
-                self._state.columns[index] = (name, role, required, new_aliases)
+                self._state.columns[index] = (
+                    name,
+                    role,
+                    required,
+                    in_output,
+                    new_aliases,
+                )
                 return
 
     def _render(self) -> None:
@@ -310,7 +320,7 @@ class ColumnsTabPresenter:
         # and the expected dtype carried on the state.
         rows = [
             (name, "", self._state.column_dtypes.get(name))
-            for name, _role, _required, _aliases in self._state.columns
+            for name, _role, _required, _in_output, _aliases in self._state.columns
         ]
         # Decision 7: derived columns authored on the Derived tab become selectable
         # on the Columns tab, so append them as rows (no source match or dtype).
@@ -334,7 +344,7 @@ class ColumnsTabPresenter:
         slice_ = self._state.preview_slice
         # Push each row's current assignment, then its dtype indicator when both a
         # source is bound and an expected dtype is declared.
-        for canonical, _role, _required, _aliases in self._state.columns:
+        for canonical, _role, _required, _in_output, _aliases in self._state.columns:
             source = self._state.consumed_columns.get(canonical)
             self._view.set_assignment(canonical, source)
             expected = self._state.column_dtypes.get(canonical)

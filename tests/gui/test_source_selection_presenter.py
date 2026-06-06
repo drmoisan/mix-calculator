@@ -125,7 +125,7 @@ def test_build_application_partial_match_reaches_new_from_template(
     # the template (mirrored columns) with a cleared name (Decision 6).
     presenter = wired.window.schema_builder_presenter
     assert isinstance(presenter, SchemaBuilderPresenter)
-    seeded_columns = [name for name, _r, _req, _a in presenter.state.columns]
+    seeded_columns = [name for name, _r, _req, _io, _a in presenter.state.columns]
     assert "Customer" in seeded_columns
     assert "Sales" in seeded_columns
     # The template's name is cleared so save-as never overwrites the template.

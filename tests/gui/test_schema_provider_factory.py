@@ -136,3 +136,33 @@ def test_missing_schema_degrades_to_blank_spec() -> None:
     # Assert: the open path stays blank rather than failing.
     assert le_spec.required_specs == ()
     assert le_spec.preview_slice is None
+
+
+def test_real_bundled_le_ytd_ytg_is_in_optional_specs() -> None:
+    """The real bundled LE schema's YTD/YTG (required:false) lands in optional specs.
+
+    After the #54 change, the LE discriminator is required:false, so the
+    provider-factory split (which keys on column.required) must place it in the
+    optional specs, not the required specs (AC-7).
+    """
+    from pathlib import Path
+
+    from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
+
+    # Arrange: load the real bundled LE schema and provide it to the factory under
+    # the LE source key via a fake service.
+    registry = SchemaRegistry(Path("."), DiskSchemaFileStore())
+    bundled_le = registry.load_bundled_default("default_le")
+    service = FakeSchemaService(
+        schema_names=["default_le"], schemas={"default_le": bundled_le}
+    )
+    provider = build_spec_provider(service)
+
+    # Act
+    le_spec = provider.build_spec_for("LE")
+
+    # Assert: YTD/YTG is optional (not required), reflecting the new flags.
+    optional_names = tuple(c.canonical_name for c in le_spec.optional_specs)
+    required_names = tuple(c.canonical_name for c in le_spec.required_specs)
+    assert "YTD/YTG" in optional_names
+    assert "YTD/YTG" not in required_names

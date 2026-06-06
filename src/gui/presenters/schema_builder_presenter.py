@@ -166,17 +166,24 @@ class SchemaBuilderPresenter:
         self._render_state()
 
     @staticmethod
-    def _spec_to_row(spec: ColumnSpec) -> tuple[str, str, bool, tuple[str, ...]]:
+    def _spec_to_row(spec: ColumnSpec) -> tuple[str, str, bool, bool, tuple[str, ...]]:
         """Convert a caller column spec into a builder column row tuple.
 
         Args:
             spec: The caller-supplied column spec.
 
         Returns:
-            A ``(canonical_name, role, required, aliases)`` row tuple mirroring the
-            state's column-row shape.
+            A ``(canonical_name, role, required, in_output, aliases)`` row tuple
+            mirroring the state's column-row shape. ``in_output`` carries the
+            spec's output-membership flag through the builder.
         """
-        return (spec.canonical_name, spec.role, spec.required, spec.aliases)
+        return (
+            spec.canonical_name,
+            spec.role,
+            spec.required,
+            spec.in_output,
+            spec.aliases,
+        )
 
     @property
     def state(self) -> SchemaBuilderState:
@@ -275,7 +282,7 @@ class SchemaBuilderPresenter:
             version=schema.version,
             description=schema.description,
             columns=[
-                (c.canonical_name, c.role, c.required, c.aliases)
+                (c.canonical_name, c.role, c.required, c.in_output, c.aliases)
                 for c in schema.columns
             ],
             # Carry each column's expected dtype so the Columns tab can render it
@@ -336,7 +343,9 @@ class SchemaBuilderPresenter:
             set_column_dtypes(
                 [
                     (canonical, self._state.column_dtypes.get(canonical))
-                    for canonical, _role, _required, _aliases in self._state.columns
+                    for canonical, _role, _required, _in_output, _aliases in (
+                        self._state.columns
+                    )
                 ]
             )
 

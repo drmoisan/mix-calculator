@@ -39,7 +39,7 @@ class FakeSchemaBuilderView:
     def __init__(self) -> None:
         """Initialize empty records and default controlled edit values."""
         self.identity_set: list[tuple[str, str, str]] = []
-        self.columns_set: list[list[tuple[str, str, bool, tuple[str, ...]]]] = []
+        self.columns_set: list[list[tuple[str, str, bool, bool, tuple[str, ...]]]] = []
         self.keys_set: list[tuple[tuple[str, ...], bool]] = []
         self.key_parts_set: list[list[tuple[str, str]]] = []
         self.column_dtypes_set: list[list[tuple[str, str | None]]] = []
@@ -51,7 +51,7 @@ class FakeSchemaBuilderView:
         self.errors: list[str] = []
         # Controlled getter values the presenter reads on sync_from_view.
         self.identity: tuple[str, str, str] = ("", "1.0", "")
-        self.columns: list[tuple[str, str, bool, tuple[str, ...]]] = []
+        self.columns: list[tuple[str, str, bool, bool, tuple[str, ...]]] = []
         self.key: tuple[tuple[str, ...], bool] = ((), False)
         self.dedup: tuple[str, str | None] = ("none", None)
         self.derived: list[tuple[str, str]] = []
@@ -77,7 +77,9 @@ class FakeSchemaBuilderView:
         """
         return self.identity
 
-    def set_columns(self, rows: list[tuple[str, str, bool, tuple[str, ...]]]) -> None:
+    def set_columns(
+        self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
+    ) -> None:
         """Record a columns render call.
 
         Args:
@@ -88,7 +90,7 @@ class FakeSchemaBuilderView:
         """
         self.columns_set.append(list(rows))
 
-    def get_columns(self) -> list[tuple[str, str, bool, tuple[str, ...]]]:
+    def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the controlled column rows.
 
         Returns:

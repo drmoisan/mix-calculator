@@ -110,8 +110,10 @@ class SchemaBuilderState:
         name: The schema name.
         version: The schema version.
         description: The schema description.
-        columns: One ``(canonical_name, role, required, aliases)`` tuple per
-            column, in schema order.
+        columns: One ``(canonical_name, role, required, in_output, aliases)``
+            tuple per column, in schema order. ``in_output`` records output
+            membership (whether the column appears in the final table), distinct
+            from ``required`` (source-presence).
         key_columns: The ordered key column names.
         sku_coercion: Whether SKU coercion is enabled for the key.
         dedup_mode: The dedup mode (``"none"``, ``"collapse"``, or
@@ -141,7 +143,7 @@ class SchemaBuilderState:
     name: str = ""
     version: str = "1.0"
     description: str = ""
-    columns: list[tuple[str, str, bool, tuple[str, ...]]] = field(
+    columns: list[tuple[str, str, bool, bool, tuple[str, ...]]] = field(
         default_factory=lambda: []
     )
     key_columns: tuple[str, ...] = ()
@@ -168,7 +170,9 @@ def known_column_names(state: SchemaBuilderState) -> list[str]:
     """
     # Both source columns and already-declared derived columns are valid formula
     # references, matching the model's reference-resolution rules.
-    declared = [canonical for canonical, _role, _required, _aliases in state.columns]
+    declared = [
+        canonical for canonical, _role, _required, _in_output, _aliases in state.columns
+    ]
     derived_names = [name for name, _expression in state.derived]
     return [*declared, *derived_names]
 
@@ -248,10 +252,11 @@ def assemble_schema(state: SchemaBuilderState) -> SchemaDefinition:
             canonical_name=canonical,
             role=role,
             required=required,
+            in_output=in_output,
             aliases=aliases,
             expected_dtype=state.column_dtypes.get(canonical),
         )
-        for canonical, role, required, aliases in state.columns
+        for canonical, role, required, in_output, aliases in state.columns
     )
 
     # Prefer the structured key parts authored on the Key tab when present so

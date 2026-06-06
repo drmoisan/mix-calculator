@@ -42,14 +42,14 @@ def test_column_row_round_trip(qtbot: QtBot) -> None:
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
     rows = [
-        ("Customer", "dimension", True, ("Cust",)),
-        ("Sales", "measure", False, ()),
+        ("Customer", "dimension", True, True, ("Cust",)),
+        ("Sales", "measure", False, True, ()),
     ]
 
     # Act
     dialog.set_columns(rows)
 
-    # Assert: both rows, with role/required/aliases, survive the round-trip.
+    # Assert: both rows, with role/required/in_output/aliases, survive the round-trip.
     assert dialog.get_columns() == rows
 
 
@@ -72,7 +72,7 @@ def test_dedup_mode_switch_reveals_discriminator(qtbot: QtBot) -> None:
     # option (Decision 6: the discriminator must reference an existing column).
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
-    dialog.set_columns([("YTD/YTG", "discriminator", True, ())])
+    dialog.set_columns([("YTD/YTG", "discriminator", False, False, ())])
 
     # Act
     dialog.set_dedup("collapse", "YTD/YTG")
@@ -182,7 +182,10 @@ def test_dedup_discriminator_is_dropdown_of_existing_columns(qtbot: QtBot) -> No
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
     dialog.set_columns(
-        [("Customer", "dimension", True, ()), ("Sales", "measure", True, ())]
+        [
+            ("Customer", "dimension", True, True, ()),
+            ("Sales", "measure", True, True, ()),
+        ]
     )
     dialog.set_derived([("Revenue", "Sales * 2")])
 
@@ -198,7 +201,7 @@ def test_dedup_unknown_discriminator_is_rejected(qtbot: QtBot) -> None:
     # Arrange: only one declared column.
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
-    dialog.set_columns([("Customer", "dimension", True, ())])
+    dialog.set_columns([("Customer", "dimension", True, True, ())])
 
     # Act: attempt to set a discriminator that is not an existing column.
     dialog.set_dedup("aggregate", "Nonexistent")

@@ -92,7 +92,9 @@ class DragTabBinder:
         columns_widget.assign_column = self._columns_presenter.assign_column
         key_widget.add_key_part = self._key_presenter.add_part
 
-    def set_columns(self, rows: list[tuple[str, str, bool, tuple[str, ...]]]) -> None:
+    def set_columns(
+        self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
+    ) -> None:
         """Mirror the pushed column rows and render the Columns tab.
 
         Replaces the shared state's column rows, repopulates the source-token pool
@@ -101,8 +103,9 @@ class DragTabBinder:
         parts are composed from the current canonical columns.
 
         Args:
-            rows: One ``(canonical_name, role, required, aliases)`` tuple per
-                column, in schema order.
+            rows: One ``(canonical_name, role, required, in_output, aliases)``
+                tuple per column, in schema order. ``in_output`` carries output
+                membership, distinct from ``required`` (source-presence).
 
         Returns:
             ``None``.
@@ -138,11 +141,12 @@ class DragTabBinder:
         # newly-declared expected types.
         self._columns_presenter.prepopulate()
 
-    def get_columns(self) -> list[tuple[str, str, bool, tuple[str, ...]]]:
+    def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the live column rows from the shared state.
 
         Returns:
-            One ``(canonical_name, role, required, aliases)`` tuple per column.
+            One ``(canonical_name, role, required, in_output, aliases)`` tuple per
+            column.
         """
         return list(self._state.columns)
 
@@ -264,7 +268,7 @@ class DragTabBinder:
         Returns:
             The declared canonical column names, in order.
         """
-        return [canonical for canonical, _r, _req, _a in self._state.columns]
+        return [canonical for canonical, _r, _req, _io, _a in self._state.columns]
 
     def _refresh_source_pool(self) -> None:
         """Rebuild the source-token pool from the held preview slice header.

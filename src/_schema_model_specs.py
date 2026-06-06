@@ -92,10 +92,22 @@ class ColumnSpec:
     """A single canonical column in a schema.
 
     Purpose:
-        Describe one output column: its canonical name, semantic role, whether
-        it is required in the source, the match aliases used to resolve it from
-        a raw header, whether it carries numeric data, its optional expected
-        data type, and whether its sentinel values are cleaned to ``None``.
+        Describe one canonical column: its name, semantic role, whether it is
+        required in the source, whether it appears in the final output, the match
+        aliases used to resolve it from a raw header, whether it carries numeric
+        data, its optional expected data type, and whether its sentinel values
+        are cleaned to ``None``.
+
+    Required vs. in_output:
+        ``required`` and ``in_output`` are independent concepts. ``required``
+        governs source-presence (must the column exist in the source workbook for
+        the load to succeed; enforced by ``resolve_columns``). ``in_output``
+        governs output-membership (does the column appear in the final table).
+        They genuinely differ: ``KEY`` is ``required=False`` but ``in_output``
+        (created by the loader, kept in output); the LE ``YTD/YTG`` discriminator
+        is ``required=False, in_output=False`` (present in source, used for dedup,
+        excluded from output); AOP ``YTG`` is ``required=False`` but ``in_output``
+        (optional in source, produced by a fill rule, kept in output).
 
     Attributes:
         canonical_name: The canonical output column name (verbatim, including
@@ -103,6 +115,12 @@ class ColumnSpec:
         role: One of :data:`COLUMN_ROLES` (``dimension``, ``measure``,
             ``discriminator``, ``drop``).
         required: Whether the column must be present in the source to resolve.
+            This is source-presence only; it does not determine output-membership.
+        in_output: Whether the column appears in the final output table. Defaults
+            to ``True``. Set ``False`` for processing-only columns (such as a
+            dedup discriminator) that must be carried through resolve/collapse but
+            excluded from the emitted output. Distinct from ``required``, which is
+            source-presence.
         aliases: Ordered match aliases used to resolve the column from a raw
             header. This is also the persisted store for matched
             source-column-to-canonical mappings produced by the schema builder:
@@ -126,6 +144,7 @@ class ColumnSpec:
     canonical_name: str
     role: str
     required: bool = True
+    in_output: bool = True
     aliases: tuple[str, ...] = ()
     numeric: bool = False
     expected_dtype: str | None = None

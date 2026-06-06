@@ -218,12 +218,22 @@ def test_le_derived_ytg_and_super_category_quirk() -> None:
 
 
 def test_le_drops_ytd_ytg_source_column() -> None:
-    """LE drops the source YTD/YTG column from the output."""
+    """LE excludes YTD/YTG from output by in_output=false, not by drop_columns.
+
+    The discriminator is required:false (located by name, not source-required),
+    in_output:false (carried through dedup but excluded from the output by
+    inclusion), and drop_columns is empty (no column is required only to be
+    dropped).
+    """
     # Arrange / Act
     schema = _load_bundled("default_le")
 
-    # Assert
-    assert schema.drop_columns == ("YTD/YTG",)
+    # Assert: output exclusion is now expressed by in_output, and the schema no
+    # longer names the column in drop_columns.
+    assert schema.drop_columns == ()
+    ytd_ytg = next(c for c in schema.columns if c.canonical_name == "YTD/YTG")
+    assert ytd_ytg.required is False
+    assert ytd_ytg.in_output is False
 
 
 def test_le_fill_rules_cover_fy_and_quarters() -> None:

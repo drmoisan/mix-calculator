@@ -173,7 +173,7 @@ def test_load_existing_renders_schema_into_view() -> None:
 
     # Assert: identity and columns were rendered from the loaded schema.
     assert view.identity_set[-1] == ("stored", "2.0", "")
-    assert view.columns_set[-1] == [("Customer", "dimension", True, ())]
+    assert view.columns_set[-1] == [("Customer", "dimension", True, True, ())]
 
 
 def test_update_preview_surfaces_loader_error() -> None:
@@ -232,9 +232,9 @@ def test_edit_load_modify_save_round_trips() -> None:
     # The user changes the description; everything else mirrors the loaded state.
     view.identity = ("tmpl", "2.0", "edited description")
     view.columns = [
-        ("Customer", "dimension", True, ("cust_col",)),
-        ("SKU #", "dimension", True, ()),
-        ("Sales", "measure", True, ()),
+        ("Customer", "dimension", True, True, ("cust_col",)),
+        ("SKU #", "dimension", True, True, ()),
+        ("Sales", "measure", True, True, ()),
     ]
     view.key = (("Customer", "SKU #"), False)
     view.dedup = ("aggregate", "Customer")
