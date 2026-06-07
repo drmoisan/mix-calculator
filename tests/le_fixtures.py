@@ -258,12 +258,15 @@ def build_workbook(
     rows: list[dict[str, object]],
     sheet_name: str = "LE-8 + 4",
     header: list[str] | None = None,
+    *,
+    leading_rows: int = 2,
 ) -> io.BytesIO:
     """Build an in-memory ``.xlsx`` matching the source layout.
 
-    The sheet has two leading non-data rows, the header on Excel row 3, and the
-    data rows beginning on row 4. The data cells are written in the order of the
-    chosen header so a reordered or pruned header produces a correspondingly
+    By default the sheet has two leading non-data rows, the header on Excel row 3
+    (index 2), and the data rows beginning on row 4, reproducing the standard
+    ``LE-8 + 4`` layout. The data cells are written in the order of the chosen
+    header so a reordered or pruned header produces a correspondingly
     reordered/pruned workbook (used by the column-resolution tests).
 
     The default header omits the optional ``KEY`` column (so the absent-KEY
@@ -275,6 +278,11 @@ def build_workbook(
         sheet_name: Name of the worksheet to create.
         header: Optional explicit header row; defaults to the source columns with
             the ``KEY`` column removed. Cells are emitted in this header's order.
+        leading_rows: Number of leading non-data padding rows written before the
+            header row. Defaults to ``2`` so the header lands on Excel row 3
+            (index 2), preserving every existing caller's behavior. Pass
+            ``leading_rows=0`` to produce a flat workbook whose header is on the
+            first row (index 0).
 
     Returns:
         A ``BytesIO`` positioned at offset 0 containing the workbook bytes.
@@ -285,9 +293,11 @@ def build_workbook(
     assert worksheet is not None
     worksheet.title = sheet_name
 
-    # Two leading padding rows precede the header on Excel row 3.
-    worksheet.append(["leading note row 1"])
-    worksheet.append(["leading note row 2"])
+    # Write the requested number of leading padding rows before the header so the
+    # header lands on index ``leading_rows`` (default 2 keeps the standard layout;
+    # 0 produces a flat header-at-index-0 sheet).
+    for note_index in range(leading_rows):
+        worksheet.append([f"leading note row {note_index + 1}"])
     worksheet.append(columns)
 
     # Append each data row in the chosen header's column order so the on-sheet

@@ -23,6 +23,7 @@ Boundaries:
 from __future__ import annotations
 
 import argparse
+import io
 import logging
 import sqlite3
 import sys
@@ -30,6 +31,7 @@ from typing import IO, TYPE_CHECKING
 
 import pandas as pd
 
+from src._header_detection import detect_header_row
 from src._normalize_le_columns import (
     EXPECTED_COLUMNS,
     MONTH_COLUMNS,
@@ -42,7 +44,7 @@ from src._normalize_le_columns import (
     YTG_MONTHS,
     resolve_le_columns,
 )
-from src.etl_columns import resolve_columns
+from src.etl_columns import normalize_name, resolve_columns
 from src.etl_key import coerce_sku, decide_key_action, rebuild_key, resolve_key
 from src.etl_totals import fill_blank_totals, total_vs_months_violations
 from src.pandas_io import read_excel_sheet, write_table
@@ -99,11 +101,16 @@ def load_source(
 ) -> pd.DataFrame:
     """Load and clean the source sheet (Excel read boundary).
 
-    Reads the workbook with openpyxl treating Excel row 3 as the header
-    (``header=2``), resolves the source columns to the canonical expected names
-    (position pass then fuzzy pass via :func:`resolve_columns`), renames the
-    frame to those canonical names, drops rows with a blank ``Customer``, and
-    establishes the ``KEY`` column per :func:`resolve_key`.
+    Detects the header row rather than hardcoding it: it probes the sheet and
+    selects the row that matches the expected canonical column tokens (via
+    :func:`detect_header_row`), reads the workbook with openpyxl using that
+    detected header index, resolves the source columns to the canonical expected
+    names (position pass then fuzzy pass via :func:`resolve_columns`), renames
+    the frame to those canonical names, drops rows with a blank ``Customer``, and
+    establishes the ``KEY`` column per :func:`resolve_key`. The standard
+    ``LE-8 + 4`` sheet keeps its header on row index 2, so detection selects 2
+    and the loader output is unchanged; flat sheets whose header is on a
+    different row (for example index 0) now also resolve.
 
     Args:
         path: Filesystem path or binary file-like buffer accepted by
@@ -137,9 +144,22 @@ def load_source(
         emits ``logging`` warnings for extra source columns and for
         ``trust``/``overwrite`` KEY resolution.
     """
+    # Detect the header row instead of hardcoding header=2. min_match=20 of the
+    # 25 expected LE tokens tolerates up to five absent/aliased label columns
+    # while staying well above the 12 month tokens a coincidental data row could
+    # supply, so a data row is rejected and only a true label row is selected.
+    expected_tokens = frozenset(normalize_name(column) for column in EXPECTED_COLUMNS)
+    detected = detect_header_row(path, sheet_name, expected_tokens, min_match=20)
+
+    # Rewind a seekable buffer (the in-memory BytesIO fixtures) so the final read
+    # starts at offset 0; the detection probe consumed the buffer above. A
+    # filesystem path is reopened by pandas on each read and needs no rewind.
+    if isinstance(path, io.IOBase) and path.seekable():
+        path.seek(0)
+
     # Route the read through the typed pandas_io boundary, which contains the
     # openpyxl-driven unknown member type so it does not surface here.
-    frame: pd.DataFrame = read_excel_sheet(path, sheet_name=sheet_name, header=2)
+    frame: pd.DataFrame = read_excel_sheet(path, sheet_name=sheet_name, header=detected)
     actual_columns = list(frame.columns.astype(str))
 
     # Resolve the source columns to canonical names and locate the optional KEY
