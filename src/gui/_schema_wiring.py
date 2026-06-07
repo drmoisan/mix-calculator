@@ -22,14 +22,21 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.etl_columns import DEFAULT_THRESHOLD
+from src.gui._schema_open_helpers import (
+    install_new_derived_handler,
+    seed_dialog_preview_slice,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from src.gui._schema_build_specs import BuildSpecProvider
     from src.gui.main_window import MainWindow
+    from src.gui.presenters._schema_builder_state import PreviewSlice
     from src.gui.services.schema_service import SchemaServiceProtocol
     from src.gui.widgets.schema_builder_dialog import SchemaBuilderDialog
     from src.schema_matching import MatchResult
+    from src.schema_model import ColumnSpec
 
 __all__ = [
     "SchemaDiscoveryDecision",
@@ -85,14 +92,23 @@ def open_schema_builder(
     presenter_factory: (
         Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object] | None
     ) = None,
+    required_specs: Sequence[ColumnSpec] | None = None,
+    optional_specs: Sequence[ColumnSpec] | None = None,
+    default_key_pattern: str | None = None,
+    preview_slice: PreviewSlice | None = None,
 ) -> None:
     """Open the schema-builder dialog driven by a fresh presenter.
 
     This is the imperative open path shared by the ``schema_builder_requested``
-    menu action and the per-tab "Build new schema" button (WS2). A new dialog and
-    presenter are built per open so the builder is repeatable; the presenter is
-    retained on the window to keep it alive for the lifetime of the (modeless)
+    menu action and the per-tab "Build/Edit schema" button (WS2). A new dialog
+    and presenter are built per open so the builder is repeatable; the presenter
+    is retained on the window to keep it alive for the lifetime of the (modeless)
     dialog.
+
+    When the per-tab caller supplies its source-specific required/optional specs,
+    a default key pattern, and a masked preview slice, the presenter is seeded
+    from them (Decision 7). When all of these are omitted — the menu-action path —
+    a blank builder opens unchanged.
 
     Args:
         window: The shell the presenter is retained on.
@@ -101,12 +117,21 @@ def open_schema_builder(
             :class:`SchemaBuilderDialog` factory.
         presenter_factory: Optional presenter factory; defaults to the production
             :class:`SchemaBuilderPresenter` factory.
+        required_specs: The source's required column specs, or ``None`` for the
+            blank menu path.
+        optional_specs: The source's optional column specs, or ``None`` for the
+            blank menu path.
+        default_key_pattern: The source's default key pattern string parsed into
+            structured key parts, or ``None`` for the blank menu path.
+        preview_slice: The masked preview slice the builder reads for the token
+            pool and dtype check, or ``None`` for the blank menu path.
 
     Returns:
         ``None``.
 
     Side effects:
-        Builds and shows a dialog, retaining the presenter on ``window``.
+        Builds and shows a dialog, retaining the presenter on ``window``; seeds
+        the presenter from caller specs when supplied.
     """
     # Resolve the factories: callers (tests) may inject recording factories;
     # otherwise use the lazy production defaults so app.py stays thin.
@@ -117,8 +142,100 @@ def open_schema_builder(
     dialog = dialog_factory()
     # Retain the presenter on the window so it outlives this call while the dialog
     # is open; without a reference it would be collected immediately.
-    window.schema_builder_presenter = presenter_factory(dialog, service)
+    presenter = presenter_factory(dialog, service)
+    window.schema_builder_presenter = presenter
+    # Push the masked preview slice into the dialog's drag Columns tab BEFORE
+    # seeding so the draggable source-token pool and the dtype check reflect the
+    # opened sheet when the presenter's set_columns render runs (Decision 4/5).
+    seed_dialog_preview_slice(dialog, preview_slice)
+    # Install the "New derived column" handler so the Derived tab can open the
+    # PowerQuery-style formula dialog seeded from the live presenter state.
+    install_new_derived_handler(dialog, presenter)
+    # Seed from caller specs only when the per-tab path supplies them; the blank
+    # menu path leaves the presenter empty. seed_from_caller is a no-op for empty
+    # inputs, so guarding on "any input present" keeps the menu path blank.
+    if _has_caller_specs(
+        required_specs, optional_specs, default_key_pattern, preview_slice
+    ):
+        _seed_presenter(
+            presenter,
+            required_specs,
+            optional_specs,
+            default_key_pattern,
+            preview_slice,
+        )
     dialog.show()
+
+
+def _has_caller_specs(
+    required_specs: Sequence[ColumnSpec] | None,
+    optional_specs: Sequence[ColumnSpec] | None,
+    default_key_pattern: str | None,
+    preview_slice: PreviewSlice | None,
+) -> bool:
+    """Report whether the per-tab caller supplied any seeding input.
+
+    Args:
+        required_specs: The required specs, or ``None``.
+        optional_specs: The optional specs, or ``None``.
+        default_key_pattern: The default key pattern, or ``None``.
+        preview_slice: The masked preview slice, or ``None``.
+
+    Returns:
+        ``True`` when at least one seeding input is present (the per-tab path);
+        ``False`` when all are absent or empty (the blank menu path). An empty
+        ``CallerBuildSpec`` (for example a source with no bundled default) carries
+        empty collections rather than ``None``, so truthiness — not ``is not None`` —
+        is used to keep that path blank.
+    """
+    return any(
+        bool(value)
+        for value in (
+            required_specs,
+            optional_specs,
+            default_key_pattern,
+            preview_slice,
+        )
+    )
+
+
+def _seed_presenter(
+    presenter: object,
+    required_specs: Sequence[ColumnSpec] | None,
+    optional_specs: Sequence[ColumnSpec] | None,
+    default_key_pattern: str | None,
+    preview_slice: PreviewSlice | None,
+) -> None:
+    """Invoke the presenter's caller-seeding path when it supports it.
+
+    The presenter factory's return type is ``object`` so the wiring need not
+    import the concrete presenter. This helper calls ``seed_from_caller`` when the
+    built presenter exposes it (the production presenter does), letting recording
+    test factories that return a bare stub remain compatible.
+
+    Args:
+        presenter: The presenter the factory produced.
+        required_specs: The required specs to seed, or ``None``.
+        optional_specs: The optional specs to seed, or ``None``.
+        default_key_pattern: The default key pattern to parse, or ``None``.
+        preview_slice: The masked preview slice to seed, or ``None``.
+
+    Returns:
+        ``None``.
+
+    Side effects:
+        Seeds the presenter state when the presenter supports seeding.
+    """
+    seed = getattr(presenter, "seed_from_caller", None)
+    # Only seed when the presenter exposes the seeding contract; recording test
+    # factories that return a minimal stub simply skip seeding.
+    if callable(seed):
+        seed(
+            required_specs=required_specs,
+            optional_specs=optional_specs,
+            default_key_pattern=default_key_pattern,
+            preview_slice=preview_slice,
+        )
 
 
 @dataclass(frozen=True)
@@ -230,15 +347,17 @@ def wire_build_schema_buttons(
     presenter_factory: (
         Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object] | None
     ) = None,
+    spec_provider: BuildSpecProvider | None = None,
 ) -> None:
-    """Wire each source tab's "Build new schema" button to the builder (WS2).
+    """Wire each source tab's "Build/Edit schema" button to the builder (WS2).
 
     Connects the three source widgets' ``build_schema_requested`` signals to the
-    shared :func:`open_schema_builder` path so the per-tab "Build new schema"
+    shared :func:`open_schema_builder` path so the per-tab "Build/Edit schema"
     button opens the same existing schema builder dialog as the
-    ``Tools > Schema Builder...`` menu action (AC-13). The factories are optional
-    so the composition root uses the production defaults while tests inject
-    recording factories.
+    ``Tools > Schema Builder...`` menu action (AC-13). When a ``spec_provider`` is
+    supplied, each per-tab button passes its source-specific required/optional
+    specs, default key pattern, and masked preview slice so the presenter is
+    seeded (Decision 7); without a provider every button opens a blank builder.
 
     Args:
         window: The shell whose three source widgets carry the build buttons.
@@ -247,25 +366,52 @@ def wire_build_schema_buttons(
             factory.
         presenter_factory: Optional presenter factory; defaults to the production
             factory.
+        spec_provider: Optional per-source build-spec provider mapping a source
+            key to its :class:`~src.gui._schema_build_specs.CallerBuildSpec`. When
+            ``None``, each button opens a blank builder.
 
     Returns:
         ``None``.
 
     Side effects:
         Connects each source widget's ``build_schema_requested`` signal to a
-        handler that opens the schema builder dialog.
+        handler that opens the schema builder dialog seeded for that source.
     """
 
-    def _open() -> None:
-        """Open the schema builder via the shared open path."""
-        open_schema_builder(
-            window,
-            service,
-            dialog_factory=dialog_factory,
-            presenter_factory=presenter_factory,
-        )
+    def _make_open(key: str) -> Callable[[], None]:
+        """Build the per-key open handler that seeds from the source's spec.
 
-    # Wire all three per-tab build buttons to the same shared open path so any
-    # tab's "Build new schema" button opens the existing builder dialog.
-    for widget in (window.le_widget, window.aop_widget, window.skulu_widget):
-        widget.build_schema_requested.connect(_open)
+        Args:
+            key: The source key (``"LE"``, ``"aop"``, ``"sku_lu"``) bound to the
+                widget whose build button triggers this handler.
+
+        Returns:
+            A zero-argument handler opening the builder seeded for ``key``.
+        """
+
+        def _open() -> None:
+            """Open the schema builder, seeding from the source's build spec."""
+            # Resolve this source's caller spec when a provider is present so the
+            # per-tab path seeds the presenter; otherwise open a blank builder.
+            spec = spec_provider.build_spec_for(key) if spec_provider else None
+            open_schema_builder(
+                window,
+                service,
+                dialog_factory=dialog_factory,
+                presenter_factory=presenter_factory,
+                required_specs=spec.required_specs if spec else None,
+                optional_specs=spec.optional_specs if spec else None,
+                default_key_pattern=spec.default_key_pattern if spec else None,
+                preview_slice=spec.preview_slice if spec else None,
+            )
+
+        return _open
+
+    # Wire all three per-tab build buttons to a per-key open handler so each tab's
+    # "Build/Edit schema" button opens the builder seeded for its own source.
+    for key, widget in (
+        ("LE", window.le_widget),
+        ("aop", window.aop_widget),
+        ("sku_lu", window.skulu_widget),
+    ):
+        widget.build_schema_requested.connect(_make_open(key))

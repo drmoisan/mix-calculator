@@ -311,9 +311,11 @@ def test_adapter_set_import_button_unknown_key_is_no_op(qtbot: QtBot) -> None:
 
     adapter.set_import_button_enabled("unknown", False)
 
-    assert window.import_le_btn.isEnabled() is True
-    assert window.import_aop_btn.isEnabled() is True
-    assert window.import_skulu_btn.isEnabled() is True
+    # Decision 8: the three per-tab buttons start disabled and the unknown-key
+    # no-op leaves every button at its construction state (Import-All enabled).
+    assert window.import_le_btn.isEnabled() is False
+    assert window.import_aop_btn.isEnabled() is False
+    assert window.import_skulu_btn.isEnabled() is False
     assert window.import_all_btn.isEnabled() is True
 
 

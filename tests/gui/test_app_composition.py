@@ -146,10 +146,11 @@ def test_build_application_synchronous_runner_smoke(qtbot: QtBot) -> None:
 
     # (a) The runner is the injected SynchronousRunner.
     assert isinstance(wired.runner, SynchronousRunner)
-    # (b) All four import buttons start enabled.
-    assert wired.window.import_le_btn.isEnabled() is True
-    assert wired.window.import_aop_btn.isEnabled() is True
-    assert wired.window.import_skulu_btn.isEnabled() is True
+    # (b) Decision 8: the three per-tab import buttons start disabled (until a
+    # schema is selected); the Import-All button starts enabled.
+    assert wired.window.import_le_btn.isEnabled() is False
+    assert wired.window.import_aop_btn.isEnabled() is False
+    assert wired.window.import_skulu_btn.isEnabled() is False
     assert wired.window.import_all_btn.isEnabled() is True
     # (c) The preview model starts empty.
     assert wired.window.preview_widget.model.rowCount() == 0

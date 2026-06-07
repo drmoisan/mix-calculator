@@ -20,6 +20,9 @@ class FakeSchemaBuilderView:
         identity_set: Each ``set_identity`` call as ``(name, version, desc)``.
         columns_set: Each ``set_columns`` argument, in order.
         keys_set: Each ``set_key`` call as ``(columns, sku_coercion)``.
+        key_parts_set: Each ``set_key_parts`` call as a list of ``(kind, value)``.
+        column_dtypes_set: Each ``set_column_dtypes`` call as a list of
+            ``(canonical_name, expected_dtype)``.
         dedups_set: Each ``set_dedup`` call as ``(mode, discriminator)``.
         deriveds_set: Each ``set_derived`` argument, in order.
         previews: Each ``show_preview`` argument, in order.
@@ -36,8 +39,10 @@ class FakeSchemaBuilderView:
     def __init__(self) -> None:
         """Initialize empty records and default controlled edit values."""
         self.identity_set: list[tuple[str, str, str]] = []
-        self.columns_set: list[list[tuple[str, str, bool, tuple[str, ...]]]] = []
+        self.columns_set: list[list[tuple[str, str, bool, bool, tuple[str, ...]]]] = []
         self.keys_set: list[tuple[tuple[str, ...], bool]] = []
+        self.key_parts_set: list[list[tuple[str, str]]] = []
+        self.column_dtypes_set: list[list[tuple[str, str | None]]] = []
         self.dedups_set: list[tuple[str, str | None]] = []
         self.deriveds_set: list[list[tuple[str, str]]] = []
         self.previews: list[list[list[str]]] = []
@@ -46,7 +51,7 @@ class FakeSchemaBuilderView:
         self.errors: list[str] = []
         # Controlled getter values the presenter reads on sync_from_view.
         self.identity: tuple[str, str, str] = ("", "1.0", "")
-        self.columns: list[tuple[str, str, bool, tuple[str, ...]]] = []
+        self.columns: list[tuple[str, str, bool, bool, tuple[str, ...]]] = []
         self.key: tuple[tuple[str, ...], bool] = ((), False)
         self.dedup: tuple[str, str | None] = ("none", None)
         self.derived: list[tuple[str, str]] = []
@@ -72,7 +77,9 @@ class FakeSchemaBuilderView:
         """
         return self.identity
 
-    def set_columns(self, rows: list[tuple[str, str, bool, tuple[str, ...]]]) -> None:
+    def set_columns(
+        self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
+    ) -> None:
         """Record a columns render call.
 
         Args:
@@ -83,7 +90,7 @@ class FakeSchemaBuilderView:
         """
         self.columns_set.append(list(rows))
 
-    def get_columns(self) -> list[tuple[str, str, bool, tuple[str, ...]]]:
+    def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the controlled column rows.
 
         Returns:
@@ -110,6 +117,28 @@ class FakeSchemaBuilderView:
             The configured ``(columns, sku_coercion)``.
         """
         return self.key
+
+    def set_key_parts(self, parts: list[tuple[str, str]]) -> None:
+        """Record a structured key-parts render call.
+
+        Args:
+            parts: One ``(kind, value)`` tuple per key part, in order.
+
+        Returns:
+            ``None``.
+        """
+        self.key_parts_set.append(list(parts))
+
+    def set_column_dtypes(self, dtypes: list[tuple[str, str | None]]) -> None:
+        """Record a per-column expected-dtype render call.
+
+        Args:
+            dtypes: One ``(canonical_name, expected_dtype)`` tuple per column.
+
+        Returns:
+            ``None``.
+        """
+        self.column_dtypes_set.append(list(dtypes))
 
     def set_dedup(self, mode: str, discriminator: str | None) -> None:
         """Record a dedup render call.

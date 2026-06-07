@@ -246,6 +246,28 @@ def test_evaluate_col_unknown_column_raises() -> None:
         evaluator.evaluate('col("Missing")', {"Jan": 1.0})
 
 
+def test_evaluate_column_named_col_round_trips_via_col_callable() -> None:
+    """A column literally named ``col`` round-trips via col("col") without shadowing.
+
+    Regression for C1: when a column's identifier alias collides with a
+    whitelisted callable name (``col``/``sum``/``safe_div``), the alias binding
+    must not overwrite the callable in the symbol table. The col() accessor must
+    remain callable and return the exact-name column value for the colliding name.
+    """
+    # Arrange: a context whose column names collide with whitelisted callables.
+    evaluator = FormulaEvaluator()
+    context = {"col": 7.0, "sum": 3.0, "safe_div": 11.0}
+    # Act: resolve each colliding column by its exact name through col().
+    col_value = evaluator.evaluate('col("col")', context)
+    sum_value = evaluator.evaluate('col("sum")', context)
+    safe_div_value = evaluator.evaluate('col("safe_div")', context)
+    # Assert: each colliding column returns its stored value; the helper is not
+    # shadowed by the column value.
+    assert col_value == 7.0
+    assert sum_value == 3.0
+    assert safe_div_value == 11.0
+
+
 # ---------------------------------------------------------------------------
 # Hypothesis property tests (T1: >= 1 property test per pure function)
 # ---------------------------------------------------------------------------

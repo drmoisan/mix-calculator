@@ -13,7 +13,13 @@ from pathlib import Path
 from src.gui._schema_wiring import discover_schema
 from src.gui.services.schema_service import SchemaService
 from src.schema_matching import find_best_match_in_registry
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import (
+    SCHEMA_FORMAT_VERSION,
+    ColumnSpec,
+    KeySpec,
+    SchemaDefinition,
+    column_ref,
+)
 from src.schema_registry import SCHEMA_SUFFIX, SchemaRegistry
 from src.schema_serialization import schema_to_json
 
@@ -92,9 +98,9 @@ def _schema(name: str, columns: tuple[ColumnSpec, ...]) -> SchemaDefinition:
     """
     return SchemaDefinition(
         name=name,
-        version="1",
+        version=SCHEMA_FORMAT_VERSION,
         columns=columns,
-        key=KeySpec(columns=(columns[0].canonical_name,)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in (columns[0].canonical_name,))),
     )
 
 

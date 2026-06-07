@@ -10,15 +10,21 @@ Fabricated data only; no confidential values.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
 from src.gui.protocols import SourceSelectionViewProtocol
 from src.schema_matching import MatchResult, MismatchReport, UnmatchedColumn
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
 from tests.gui.fakes.fake_views import FakeSourceSelectionView
+
+if TYPE_CHECKING:
+    from pytestqt.qtbot import QtBot
 
 
 def _schema() -> SchemaDefinition:
@@ -30,7 +36,7 @@ def _schema() -> SchemaDefinition:
             ColumnSpec(canonical_name="Customer", role="dimension"),
             ColumnSpec(canonical_name="Sales", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
 
 
@@ -61,6 +67,71 @@ def test_fake_view_satisfies_source_selection_protocol() -> None:
 
     # Assert: the runtime-checkable Protocol confirms structural compatibility.
     assert isinstance(view, SourceSelectionViewProtocol)
+
+
+def _partial_match() -> MatchResult:
+    """Return a partial-band match result (0.5 <= score < 0.85) selecting ``_schema``.
+
+    Returns:
+        A :class:`MatchResult` whose score lands in the partial-match band so
+        ``classify_activation`` returns the ``"partial"`` action.
+    """
+    return MatchResult(
+        schema=_schema(),
+        score=0.6,
+        report=MismatchReport(
+            unmatched_required=(
+                UnmatchedColumn(canonical_name="Sales", aliases=(), candidates=()),
+            ),
+            unrecognized_actual=(),
+        ),
+    )
+
+
+def test_build_application_partial_match_reaches_new_from_template(
+    qtbot: QtBot,
+) -> None:
+    """R6/R5: a partial activation match through build_application opens the template.
+
+    Drives the composition root (``build_application``): a partial-band header match
+    on a source tab invokes the injected ``on_partial_match`` callback, which opens
+    the builder seeded from the closest existing schema as a template (R5 path). The
+    seeded dialog mirrors the template with a cleared Identity name (Decision 6).
+    """
+    # Arrange: a reader returning a header row and a service whose match lands in the
+    # partial band and can load the closest schema as the template.
+    from src.gui.app import build_application
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+    from src.gui.runners import SynchronousRunner
+
+    reader = FakeWorkbookReader(
+        sheet_names=["AOP1"], preview_rows=[["Customer", "Net Sales"]]
+    )
+    service = FakeSchemaService(
+        schema_names=["aop_like"],
+        schemas={"aop_like": _schema()},
+        match_result=_partial_match(),
+    )
+    wired = build_application(
+        runner=SynchronousRunner(), workbook_reader=reader, schema_service=service
+    )
+    qtbot.addWidget(wired.window)
+
+    # Act: a partial-band discovery on the AOP tab reaches on_partial_match, which
+    # opens the new-from-template builder for the closest existing schema.
+    wired.aop_presenter.on_schema_discovery("aop.xlsx", "AOP1")
+
+    # Assert: the new-from-template builder opened and its presenter is seeded from
+    # the template (mirrored columns) with a cleared name (Decision 6).
+    presenter = wired.window.schema_builder_presenter
+    assert isinstance(presenter, SchemaBuilderPresenter)
+    seeded_columns = [name for name, _r, _req, _io, _a in presenter.state.columns]
+    assert "Customer" in seeded_columns
+    assert "Sales" in seeded_columns
+    # The template's name is cleared so save-as never overwrites the template.
+    assert presenter.state.name == ""
+    # The placeholder stays selected so Import remains disabled on a partial match.
+    assert wired.window.aop_widget.current_schema() != "aop_like"
 
 
 def test_source_selection_protocol_declares_schema_view_methods() -> None:
@@ -287,9 +358,9 @@ def test_on_schema_discovery_proceed_selects_matched_schema() -> None:
     assert view.selected_schemas == ["aop_like"]
 
 
-def test_on_schema_discovery_resolve_leaves_placeholder() -> None:
-    """WS2: a no-match leaves the placeholder and does not auto-select (AC-12)."""
-    # Arrange: a reader returning a header row and a service that resolves.
+def test_on_schema_discovery_no_match_sets_placeholder() -> None:
+    """Decision 9: a no-match sets the placeholder so Import stays disabled."""
+    # Arrange: a reader returning a header row and a service that does not match.
     view = FakeSourceSelectionView()
     reader = FakeWorkbookReader(preview_rows=[["Customer", "Net Sales"]])
     service = FakeSchemaService(match_result=_no_match())
@@ -298,8 +369,32 @@ def test_on_schema_discovery_resolve_leaves_placeholder() -> None:
     # Act
     presenter.on_schema_discovery("workbook.xlsx", "AOP1")
 
-    # Assert: no schema was auto-selected; the placeholder remains.
-    assert view.selected_schemas == []
+    # Assert: the placeholder is explicitly selected (keeps Import disabled).
+    assert view.selected_schemas == ["<Choose Schema>"]
+
+
+def test_on_schema_discovery_partial_match_offers_new_from_template() -> None:
+    """Decision 6: a partial match keeps the placeholder and offers a template."""
+    # Arrange: a partial-band score (>= 0.5, < threshold) with a selected schema.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Net Sales"]])
+    partial = MatchResult(
+        schema=_schema(),
+        score=0.6,
+        report=MismatchReport(unmatched_required=(), unrecognized_actual=()),
+    )
+    service = FakeSchemaService(match_result=partial)
+    seen: list[str] = []
+    presenter = SourceSelectionPresenter(
+        view, reader, schema_service=service, on_partial_match=seen.append
+    )
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "AOP1")
+
+    # Assert: the placeholder stays selected and the closest schema is offered.
+    assert view.selected_schemas == ["<Choose Schema>"]
+    assert seen == ["aop_like"]
 
 
 def test_on_schema_discovery_no_service_is_noop() -> None:
@@ -347,3 +442,59 @@ def test_on_schema_discovery_reader_value_error_routes_to_show_error() -> None:
     # Assert: the error surfaced and no schema was auto-selected.
     assert view.errors == ["unreadable header"]
     assert view.selected_schemas == []
+
+
+def test_on_schema_discovery_stale_sheet_value_error_routes_to_show_error() -> None:
+    """B2: a stale/absent-sheet reader ValueError routes to show_error (issue #50).
+
+    Confirms the chosen B2 contract end-to-end at the presenter: the reader raises
+    ValueError for an absent worksheet (the converted KeyError), and the presenter's
+    existing ValueError catch routes the message to view.show_error with no
+    exception propagated and no schema auto-selected.
+    """
+    # Arrange: a reader that raises the reader's own absent-sheet ValueError, a
+    # service that would proceed, and a non-blank path and sheet so the guard does
+    # not short-circuit before the reader.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader()
+    reader.raise_on_preview = ValueError("Worksheet 'Stale' does not exist.")
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery("workbook.xlsx", "Stale")
+
+    # Assert: the reader message surfaced and no schema was auto-selected.
+    assert view.errors == ["Worksheet 'Stale' does not exist."]
+    assert view.selected_schemas == []
+
+
+@pytest.mark.parametrize(
+    ("path", "sheet"),
+    [
+        ("", "AOP1"),  # blank path, valid sheet
+        ("workbook.xlsx", ""),  # valid path, blank sheet (the field crash trigger)
+        ("workbook.xlsx", "   "),  # valid path, whitespace-only sheet
+    ],
+)
+def test_on_schema_discovery_blank_path_or_sheet_is_noop(path: str, sheet: str) -> None:
+    """B1: a blank/whitespace path or sheet short-circuits before the reader.
+
+    Covers the three guard cases ([P1-T1], issue #50): a blank path with a valid
+    sheet, a valid path with a blank sheet, and a valid path with a whitespace-only
+    sheet. In every case the guard short-circuits before any reader call, with
+    nothing selected and no error shown, so the reader never sees a blank sheet.
+    """
+    # Arrange: a service that would proceed, so only the guard can prevent a select.
+    view = FakeSourceSelectionView()
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "Sales"]])
+    service = FakeSchemaService(match_result=_full_match())
+    presenter = SourceSelectionPresenter(view, reader, schema_service=service)
+
+    # Act
+    presenter.on_schema_discovery(path, sheet)
+
+    # Assert: the guard short-circuited before the reader; nothing selected or shown.
+    assert reader.preview_calls == []
+    assert view.selected_schemas == []
+    assert view.errors == []

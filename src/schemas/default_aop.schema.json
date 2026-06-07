@@ -1,47 +1,357 @@
 {
   "name": "default_aop",
-  "version": "1.0",
+  "version": "2.0",
   "description": "Bundled default schema encoding the current AOP loader behavior from src/_load_aop_helpers.py. AOP preserves the full source layout (no column dropped, no derived column added) and does not collapse rows.",
   "source_sheet_hints": [],
   "header_row": 0,
   "columns": [
-    {"canonical_name": "KEY", "role": "dimension", "required": false, "aliases": [], "numeric": false, "sentinel_clean": false},
-    {"canonical_name": "Customer", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": false},
-    {"canonical_name": "SKU Descripiton", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": false},
-    {"canonical_name": "SKU #", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": false},
-    {"canonical_name": "Customer Master", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": false},
-    {"canonical_name": "Type", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": false},
-    {"canonical_name": "Jan", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Feb", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Mar", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Apr", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "May", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Jun", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Jul", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Aug", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Sep", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Oct", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Nov", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Dec", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "YTD", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Q1", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Q2", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Q3", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Q4", "role": "measure", "required": true, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "YTG", "role": "measure", "required": false, "aliases": [], "numeric": true, "sentinel_clean": false},
-    {"canonical_name": "Super Category", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": true},
-    {"canonical_name": "PPG", "role": "dimension", "required": true, "aliases": [], "numeric": false, "sentinel_clean": true}
+    {
+      "canonical_name": "KEY",
+      "role": "dimension",
+      "required": false,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Customer",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "SKU Descripiton",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "SKU #",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Customer Master",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Type",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Jan",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Feb",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Mar",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Apr",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "May",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Jun",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Jul",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Aug",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Sep",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Oct",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Nov",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Dec",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "YTD",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Q1",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Q2",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Q3",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Q4",
+      "role": "measure",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "YTG",
+      "role": "measure",
+      "required": false,
+      "in_output": true,
+      "aliases": [],
+      "numeric": true,
+      "expected_dtype": "float",
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Super Category",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": true
+    },
+    {
+      "canonical_name": "PPG",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": true
+    }
   ],
-  "key": {"columns": ["Customer", "SKU #", "Type"], "sku_coercion": true},
-  "dedup": {"mode": "none", "discriminator_column": null, "measure_aggregations": []},
+  "key": {
+    "parts": [
+      {
+        "kind": "column-ref",
+        "value": "Customer"
+      },
+      {
+        "kind": "column-ref",
+        "value": "SKU #"
+      },
+      {
+        "kind": "column-ref",
+        "value": "Type"
+      }
+    ],
+    "sku_coercion": true
+  },
+  "dedup": {
+    "mode": "none",
+    "discriminator_column": null,
+    "measure_aggregations": []
+  },
   "derived_columns": [],
   "fill_rules": [
-    {"total": "YTD", "components": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]},
-    {"total": "Q1", "components": ["Jan", "Feb", "Mar"]},
-    {"total": "Q2", "components": ["Apr", "May", "Jun"]},
-    {"total": "Q3", "components": ["Jul", "Aug", "Sep"]},
-    {"total": "Q4", "components": ["Oct", "Nov", "Dec"]},
-    {"total": "YTG", "components": ["May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]}
+    {
+      "total": "YTD",
+      "components": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec"
+      ]
+    },
+    {
+      "total": "Q1",
+      "components": [
+        "Jan",
+        "Feb",
+        "Mar"
+      ]
+    },
+    {
+      "total": "Q2",
+      "components": [
+        "Apr",
+        "May",
+        "Jun"
+      ]
+    },
+    {
+      "total": "Q3",
+      "components": [
+        "Jul",
+        "Aug",
+        "Sep"
+      ]
+    },
+    {
+      "total": "Q4",
+      "components": [
+        "Oct",
+        "Nov",
+        "Dec"
+      ]
+    },
+    {
+      "total": "YTG",
+      "components": [
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec"
+      ]
+    }
   ],
   "drop_columns": []
 }

@@ -13,7 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import (
+    SCHEMA_FORMAT_VERSION,
+    ColumnSpec,
+    KeySpec,
+    SchemaDefinition,
+    column_ref,
+)
 from src.schema_registry import (
     SCHEMA_SUFFIX,
     DiskSchemaFileStore,
@@ -101,9 +107,9 @@ def _sample_schema(name: str = "sample") -> SchemaDefinition:
     """
     return SchemaDefinition(
         name=name,
-        version="1.0",
+        version=SCHEMA_FORMAT_VERSION,
         columns=(ColumnSpec(canonical_name="Customer", role="dimension"),),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
 
 
@@ -235,9 +241,9 @@ def test_list_schemas_user_override_appears_once_and_resolves_to_user() -> None:
     bundled = _seed_bundled(store, bundled_dir, "default_aop")
     user_schema = SchemaDefinition(
         name="default_aop",
-        version="2.0",
+        version=SCHEMA_FORMAT_VERSION,
         columns=(ColumnSpec(canonical_name="Region", role="dimension"),),
-        key=KeySpec(columns=("Region",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Region",))),
     )
     registry.save(user_schema)
 
@@ -276,9 +282,9 @@ def test_load_colliding_name_returns_user_saved_schema() -> None:
     _seed_bundled(store, bundled_dir, "default_le")
     user_schema = SchemaDefinition(
         name="default_le",
-        version="9.9",
+        version=SCHEMA_FORMAT_VERSION,
         columns=(ColumnSpec(canonical_name="Segment", role="dimension"),),
-        key=KeySpec(columns=("Segment",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Segment",))),
     )
     registry.save(user_schema)
 

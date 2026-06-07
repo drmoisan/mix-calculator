@@ -1,0 +1,1 @@
+- [Integration-test standard for wiring remediation](feedback-integration-test-standard.md) — closed findings need a production-call-site assertion (build_application / opened dialog), not an isolated unit test

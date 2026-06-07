@@ -13,7 +13,7 @@ network, or temp-file usage.
 from __future__ import annotations
 
 from src.schema_matching import MatchResult, find_best_match
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 
 
 def _schema(
@@ -35,7 +35,7 @@ def _schema(
         name=name,
         version=version,
         columns=columns,
-        key=KeySpec(columns=(columns[0].canonical_name,)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in (columns[0].canonical_name,))),
     )
 
 

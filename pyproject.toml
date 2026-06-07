@@ -78,6 +78,8 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "*/site-packages/*",
+    "src/gui/_columns_tab_protocol.py",
+    "src/gui/_key_tab_protocol.py",
 ]
 
 [tool.coverage.report]

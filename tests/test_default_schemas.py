@@ -137,7 +137,7 @@ def test_aop_key_dedup_and_no_derived() -> None:
     schema = _load_bundled("default_aop")
 
     # Assert
-    assert schema.key.columns == ("Customer", "SKU #", "Type")
+    assert schema.key.column_names == ("Customer", "SKU #", "Type")
     assert schema.key.sku_coercion is True
     assert schema.dedup.mode == "none"
     assert schema.derived_columns == ()
@@ -182,17 +182,17 @@ def test_le_key_and_sku_coercion() -> None:
     schema = _load_bundled("default_le")
 
     # Assert
-    assert schema.key.columns == ("Customer", "SKU #", "Type")
+    assert schema.key.column_names == ("Customer", "SKU #", "Type")
     assert schema.key.sku_coercion is True
 
 
 def test_le_collapse_dedup_is_additive_over_sum_columns() -> None:
-    """LE collapses on YTD/YTG with additive aggregation over the SUM_COLUMNS."""
+    """LE aggregates on YTD/YTG with additive aggregation over the SUM_COLUMNS."""
     # Arrange / Act
     schema = _load_bundled("default_le")
 
-    # Assert
-    assert schema.dedup.mode == "collapse"
+    # Assert: Decision 1 renamed the collapsing mode to ``aggregate``.
+    assert schema.dedup.mode == "aggregate"
     assert schema.dedup.discriminator_column == "YTD/YTG"
     aggregated = {agg.measure for agg in schema.dedup.measure_aggregations}
     assert aggregated == {*_MONTHS, "FY", *_QUARTERS}
@@ -218,12 +218,22 @@ def test_le_derived_ytg_and_super_category_quirk() -> None:
 
 
 def test_le_drops_ytd_ytg_source_column() -> None:
-    """LE drops the source YTD/YTG column from the output."""
+    """LE excludes YTD/YTG from output by in_output=false, not by drop_columns.
+
+    The discriminator is required:false (located by name, not source-required),
+    in_output:false (carried through dedup but excluded from the output by
+    inclusion), and drop_columns is empty (no column is required only to be
+    dropped).
+    """
     # Arrange / Act
     schema = _load_bundled("default_le")
 
-    # Assert
-    assert schema.drop_columns == ("YTD/YTG",)
+    # Assert: output exclusion is now expressed by in_output, and the schema no
+    # longer names the column in drop_columns.
+    assert schema.drop_columns == ()
+    ytd_ytg = next(c for c in schema.columns if c.canonical_name == "YTD/YTG")
+    assert ytd_ytg.required is False
+    assert ytd_ytg.in_output is False
 
 
 def test_le_fill_rules_cover_fy_and_quarters() -> None:
@@ -248,3 +258,30 @@ def test_bundled_schema_parses_without_raising(name: str) -> None:
     # Assert
     assert isinstance(schema, SchemaDefinition)
     assert schema.name == name
+
+
+def test_bundled_defaults_are_format_2_0_with_structured_key_parts() -> None:
+    """P12-T4: bundled defaults are version 2.0 with structured column-ref key parts."""
+    from src.schema_model import SCHEMA_FORMAT_VERSION
+
+    # Both bundled schemas migrated forward to the current write format.
+    for name in ("default_le", "default_aop"):
+        schema = _load_bundled(name)
+        assert schema.version == SCHEMA_FORMAT_VERSION
+        # The structured key carries column-ref parts (not a flat columns list).
+        assert all(part.kind == "column-ref" for part in schema.key.parts)
+        assert schema.key.column_names == ("Customer", "SKU #", "Type")
+
+
+def test_le_default_uses_aggregate_dedup_mode() -> None:
+    """P12-T4: the migrated LE default uses the aggregate dedup mode (Decision 1)."""
+    schema = _load_bundled("default_le")
+    assert schema.dedup.mode == "aggregate"
+
+
+def test_bundled_numeric_columns_have_float_expected_dtype() -> None:
+    """P12-T4: numeric columns carry expected_dtype float after migration."""
+    schema = _load_bundled("default_le")
+    # A representative numeric measure column resolves to the float expected dtype.
+    jan = next(c for c in schema.columns if c.canonical_name == "Jan")
+    assert jan.expected_dtype == "float"

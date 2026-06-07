@@ -23,6 +23,7 @@ from src.schema_model import (
     DerivedColumnSpec,
     KeySpec,
     SchemaDefinition,
+    column_ref,
 )
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
@@ -111,20 +112,131 @@ def test_expression_derives_ytg_as_sum_may_to_dec() -> None:
 
 
 # ---------------------------------------------------------------------------
-# drop-columns removal
+# output-membership (in_output inclusion) exclusion
 # ---------------------------------------------------------------------------
 
 
-def test_drop_columns_removed_from_output() -> None:
-    """The schema drop-columns (LE YTD/YTG) are absent from the output (AC1)."""
+def test_in_output_false_excludes_le_discriminator_from_output() -> None:
+    """The LE YTD/YTG column (in_output=false) is excluded from the output (AC1).
+
+    Output membership is determined by in_output inclusion, not by drop_columns:
+    the discriminator carries through processing but is omitted from the emitted
+    frame because its in_output flag is false.
+    """
     rows = [
         le_fixtures.make_row(
             customer="A", sku="1", type_="Net", ppg="P", months=_MONTHS_A
         ),
     ]
     out = SchemaLoader(_load_default("default_le")).load(_le_raw(rows))
-    # The discriminator YTD/YTG column is dropped from the output.
+    # The discriminator YTD/YTG column is excluded by in_output=false.
     assert "YTD/YTG" not in out.columns
+
+
+# ---------------------------------------------------------------------------
+# output-membership semantics: in_output inclusion/exclusion + dedup discriminator
+# ---------------------------------------------------------------------------
+
+
+def _membership_schema(*, disc_in_output: bool) -> SchemaDefinition:
+    """Build a collapse schema with a discriminator whose in_output is parametric.
+
+    The schema keys on Customer/SKU #/Type, collapses two rows sharing the key
+    using the Discriminator column, and sums the single measure. The
+    discriminator's in_output flag is supplied by the caller so a single fixture
+    exercises both the included and excluded cases.
+
+    Args:
+        disc_in_output: The in_output flag for the Discriminator column.
+
+    Returns:
+        A structurally valid collapse :class:`SchemaDefinition`.
+    """
+    from src.schema_model import DedupPolicy, MeasureAggregation
+
+    return SchemaDefinition(
+        name="membership",
+        version="1",
+        columns=(
+            ColumnSpec(canonical_name="KEY", role="dimension", required=False),
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+            ColumnSpec(canonical_name="SKU #", role="dimension"),
+            ColumnSpec(canonical_name="Type", role="dimension"),
+            ColumnSpec(
+                canonical_name="Discriminator",
+                role="discriminator",
+                required=False,
+                in_output=disc_in_output,
+            ),
+            ColumnSpec(canonical_name="Amt", role="measure", numeric=True),
+        ),
+        key=KeySpec(
+            parts=(column_ref("Customer"), column_ref("SKU #"), column_ref("Type"))
+        ),
+        dedup=DedupPolicy(
+            mode="collapse",
+            discriminator_column="Discriminator",
+            measure_aggregations=(MeasureAggregation(measure="Amt", mode="additive"),),
+        ),
+    )
+
+
+def _membership_frame() -> pd.DataFrame:
+    """Return two rows sharing one business key with distinct discriminators.
+
+    Returns:
+        A raw frame: one (Customer, SKU #, Type) key, a YTD half and a YTG half,
+        whose measures sum to a single collapsed row.
+    """
+    return pd.DataFrame(
+        {
+            "Customer": ["A", "A"],
+            "SKU #": ["1", "1"],
+            "Type": ["Net", "Net"],
+            "Discriminator": ["YTD", "YTG"],
+            "Amt": [10.0, 5.0],
+        }
+    )
+
+
+def test_in_output_true_column_is_included_in_output() -> None:
+    """A column with in_output=true appears in the loader output (AC2)."""
+    # Arrange: the discriminator is marked in_output=true, so it is kept.
+    schema = _membership_schema(disc_in_output=True)
+    out = SchemaLoader(schema).load(_membership_frame())
+
+    # Assert: the in_output=true discriminator column is present.
+    assert "Discriminator" in out.columns
+
+
+def test_in_output_false_column_is_excluded_from_output() -> None:
+    """A column with in_output=false is excluded from the loader output (AC2)."""
+    # Arrange: the discriminator is marked in_output=false, so it is excluded.
+    schema = _membership_schema(disc_in_output=False)
+    out = SchemaLoader(schema).load(_membership_frame())
+
+    # Assert: the in_output=false discriminator column is absent.
+    assert "Discriminator" not in out.columns
+
+
+def test_processing_only_discriminator_used_for_dedup_but_excluded() -> None:
+    """A required:false, in_output:false column drives dedup yet is excluded (AC5).
+
+    The discriminator is present in the source and used by collapse_by_key to
+    merge the YTD and YTG halves of one key into a single additive row, but it is
+    excluded from the emitted output by in_output=false.
+    """
+    # Arrange: discriminator excluded from output but present for dedup.
+    schema = _membership_schema(disc_in_output=False)
+
+    # Act
+    out = SchemaLoader(schema).load(_membership_frame())
+
+    # Assert: the two halves collapsed into one row with the summed measure, and
+    # the discriminator is not in the output.
+    assert "Discriminator" not in out.columns
+    assert len(out) == 1
+    assert out.loc[0, "Amt"] == 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +291,7 @@ def test_column_builder_constructs_missing_column_from_expression() -> None:
             ColumnSpec(canonical_name="a", role="measure", numeric=True),
             ColumnSpec(canonical_name="b", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("a",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("a",))),
         derived_columns=(DerivedColumnSpec(name="total", expression="a + b"),),
     )
     # Act: apply derived columns directly (isolated from key rebuild).
@@ -198,7 +310,7 @@ def test_ratio_recompute_via_safe_div_expression() -> None:
             ColumnSpec(canonical_name="dollars", role="measure", numeric=True),
             ColumnSpec(canonical_name="volume", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("dollars",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("dollars",))),
         derived_columns=(
             DerivedColumnSpec(name="rate", expression="safe_div(dollars, volume)"),
         ),
@@ -233,7 +345,7 @@ def test_property_ratio_safe_div_zero_and_negative_denominators(
             ColumnSpec(canonical_name="dollars", role="measure", numeric=True),
             ColumnSpec(canonical_name="volume", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("dollars",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("dollars",))),
         derived_columns=(
             DerivedColumnSpec(name="rate", expression="safe_div(dollars, volume)"),
         ),
@@ -270,7 +382,7 @@ def test_property_ratio_safe_div_positive_denominators_divide(
             ColumnSpec(canonical_name="dollars", role="measure", numeric=True),
             ColumnSpec(canonical_name="volume", role="measure", numeric=True),
         ),
-        key=KeySpec(columns=("dollars",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("dollars",))),
         derived_columns=(
             DerivedColumnSpec(name="rate", expression="safe_div(dollars, volume)"),
         ),

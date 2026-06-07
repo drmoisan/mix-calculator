@@ -28,6 +28,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.gui.widgets._source_input_button_wiring import (
+    apply_schema_list,
+    is_real_schema,
+    select_schema,
+    set_import_enabled,
+)
+
 __all__ = ["SourceInputWidget"]
 
 # File dialog filter restricting selection to Excel workbooks.
@@ -132,6 +139,10 @@ class SourceInputWidget(QWidget):
         self._import_button = (
             QPushButton(import_label) if import_label is not None else None
         )
+        # Decision 8: the Import button starts disabled and enables only when a
+        # non-placeholder schema is selected for this tab.
+        if self._import_button is not None:
+            self._import_button.setEnabled(False)
 
         file_row = QHBoxLayout()
         file_row.addWidget(QLabel(input_label))
@@ -197,6 +208,15 @@ class SourceInputWidget(QWidget):
             The "Build new schema" :class:`QPushButton` owned by this widget.
         """
         return self._build_schema_button
+
+    @property
+    def tab_combo(self) -> QComboBox:
+        """Return the worksheet-tab dropdown (Decision 9 discovery seam).
+
+        Returns:
+            The worksheet-tab :class:`QComboBox` owned by this widget.
+        """
+        return self._tab_combo
 
     @property
     def render_checkbox(self) -> QCheckBox:
@@ -313,12 +333,7 @@ class SourceInputWidget(QWidget):
             Replaces the dropdown items with the placeholder followed by
             ``names`` and leaves the placeholder selected.
         """
-        # Rebuild the list with the placeholder first so the no-match path can
-        # always return to the unselected state.
-        self._schema_combo.clear()
-        self._schema_combo.addItem(_SCHEMA_PLACEHOLDER)
-        self._schema_combo.addItems(names)
-        self._schema_combo.setCurrentIndex(0)
+        apply_schema_list(self._schema_combo, _SCHEMA_PLACEHOLDER, names)
 
     def set_selected_schema(self, name: str) -> None:
         """Select a schema by name in the dropdown (WS2 auto-select).
@@ -334,13 +349,19 @@ class SourceInputWidget(QWidget):
             Updates the dropdown selection, which emits ``schema_selected`` when
             the selected name is not the placeholder.
         """
-        # Find the matching index; append the name if missing so the selection
-        # always reflects the requested schema.
-        index = self._schema_combo.findText(name)
-        if index < 0:
-            self._schema_combo.addItem(name)
-            index = self._schema_combo.findText(name)
-        self._schema_combo.setCurrentIndex(index)
+        select_schema(self._schema_combo, name)
+
+    def set_import_button_enabled(self, enabled: bool) -> None:
+        """Toggle this tab's Import button enabled state (Decision 8).
+
+        Args:
+            enabled: ``True`` to enable Import, ``False`` to disable it; a no-op
+                when the widget has no import button.
+
+        Returns:
+            ``None``.
+        """
+        set_import_enabled(self._import_button, enabled)
 
     def current_schema(self) -> str:
         """Return the currently selected schema name (the placeholder if none).
@@ -463,10 +484,14 @@ class SourceInputWidget(QWidget):
             ``None``.
 
         Side effects:
-            Emits ``schema_selected`` with ``name`` only when ``name`` is a real
-            schema (not the placeholder and non-empty).
+            Self-gates the Import button (enable for a real schema, disable on
+            the placeholder) and emits ``schema_selected`` only for a real schema.
         """
-        # Suppress the placeholder selection so only a genuine schema choice
-        # propagates to the presenter/composition root.
-        if name and name != _SCHEMA_PLACEHOLDER:
+        # Decision 8: a real schema selection enables Import; returning to the
+        # placeholder (or empty) re-disables it. The widget self-gates so the
+        # enable/disable state always tracks the dropdown, and only a genuine
+        # choice propagates to the presenter/composition root.
+        is_real = is_real_schema(name, _SCHEMA_PLACEHOLDER)
+        set_import_enabled(self._import_button, is_real)
+        if is_real:
             self.schema_selected.emit(name)

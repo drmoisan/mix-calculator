@@ -22,6 +22,9 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from src.gui._schema_activation import ActivationDecision
     from src.gui.pipeline_service import ImportSpec
     from src.gui.protocols import PreviewSinkProtocol, SourceSelectionViewProtocol
     from src.gui.services.schema_service import SchemaServiceProtocol
@@ -38,6 +41,10 @@ _PREVIEW_MAX_ROWS = 200
 
 # Rows read to extract the header for schema discovery (the first/header row).
 _HEADER_PREVIEW_ROWS = 1
+
+# The dropdown's "no schema selected" placeholder. Setting it on a no-match or a
+# partial match keeps Import disabled (the widget self-gates on the placeholder).
+_SCHEMA_PLACEHOLDER = "<Choose Schema>"
 
 
 class SourceSelectionPresenter:
@@ -71,6 +78,7 @@ class SourceSelectionPresenter:
         *,
         preview_sink: PreviewSinkProtocol | None = None,
         schema_service: SchemaServiceProtocol | None = None,
+        on_partial_match: Callable[[str], None] | None = None,
     ) -> None:
         """Initialize the presenter with its view, reader, and optional sinks.
 
@@ -88,11 +96,16 @@ class SourceSelectionPresenter:
                 registry (WS2). The composition root injects the production
                 service; tests inject a fake. Defaults to ``None`` (discovery
                 unavailable).
+            on_partial_match: Optional callback invoked with the closest existing
+                schema name when activation matching detects a partial match
+                (many alias columns match but not all), surfacing the
+                new-from-template entry point (Decision 6). Defaults to ``None``.
         """
         self._view = view
         self._reader = workbook_reader
         self._preview_sink = preview_sink
         self._schema_service = schema_service
+        self._on_partial_match = on_partial_match
 
     @property
     def preview_sink(self) -> PreviewSinkProtocol | None:
@@ -180,18 +193,26 @@ class SourceSelectionPresenter:
             self._preview_sink.show_preview([])
 
     def on_schema_discovery(self, path: str, sheet: str) -> None:
-        """Auto-select a matching import schema for a source tab (WS2).
+        """Auto-select a matching import schema for a source tab (Decision 6/9).
 
-        Reads the header row of ``sheet``, matches it against the registry via
-        the injected schema service, and applies the discovery decision:
+        Reads the header row of ``sheet`` and runs alias-aware activation matching
+        against the persisted schemas (the registry's required-column matching
+        consults each column's persisted aliases first), then routes the outcome:
 
-        - ``action == "proceed"`` (a suitable match): select the matched schema
-          name in the view's dropdown (AC-11).
-        - ``action == "resolve"`` (no suitable match): leave the
-          ``<Choose Schema>`` placeholder selected; do not auto-select (AC-12).
+        - ``"proceed"`` (a schema bound at/above the threshold): select the
+          matched schema name in the view's dropdown, which enables Import.
+        - ``"partial"`` (many alias columns match but not all): leave the
+          placeholder selected and invoke the new-from-template callback with the
+          closest existing schema name (Decision 6).
+        - ``"none"`` (no usable match): set the ``<Choose Schema>`` placeholder so
+          the dropdown is unselected and Import stays disabled.
 
-        A no-op when no schema service was injected or when the header preview is
-        empty (no header to match).
+        A no-op when no schema service was injected, when ``path`` or ``sheet``
+        is blank/whitespace-only, or when the header preview is empty (no header
+        to match). The blank/whitespace guard exists because tab-combo activation
+        fires ``currentTextChanged`` during combo population and placeholder
+        events, before a file and worksheet are selected; discovery must not call
+        the reader with a blank sheet in that window (issue #50 cycle 3, B1).
 
         Args:
             path: The workbook path of the activated source tab.
@@ -201,12 +222,19 @@ class SourceSelectionPresenter:
             ``None``.
 
         Side effects:
-            May call ``view.set_selected_schema`` on a proceed decision; routes a
-            reader ``ValueError`` to ``view.show_error``.
+            Calls ``view.set_selected_schema`` on a proceed; sets the placeholder
+            on a no-match; invokes the partial-match callback on a partial; routes
+            a reader ``ValueError`` to ``view.show_error``.
         """
         # Discovery is only available when a schema service was injected; without
         # one the per-tab dropdown stays at the placeholder.
         if self._schema_service is None:
+            return
+        # Tab activation fires currentTextChanged before a file/worksheet is
+        # chosen, so a blank or whitespace-only path or sheet is a no-op: there is
+        # nothing to read and the reader must never be called with a blank sheet
+        # (issue #50 cycle 3, B1).
+        if not path.strip() or not sheet.strip():
             return
         logger.info("Schema discovery requested: %r on %r.", sheet, path)
         # Read just the header row; a reader ValueError is user-facing and shown
@@ -223,15 +251,45 @@ class SourceSelectionPresenter:
         if not rows:
             return
         headers = rows[0]
-        # Import the discovery decision locally so the presenter module does not
-        # depend on the wiring module at import time.
-        from src.gui._schema_wiring import discover_schema
+        # Import the activation classifier locally so the presenter module does
+        # not depend on the activation module at import time.
+        from src.gui._schema_activation import classify_activation
 
-        decision = discover_schema(self._schema_service, headers)
-        # Decision routing: a proceed selects the matched schema name; a resolve
-        # leaves the <Choose Schema> placeholder so the user picks manually.
-        if decision.action == "proceed" and decision.result.schema is not None:
-            self._view.set_selected_schema(decision.result.schema.name)
+        decision = classify_activation(self._schema_service, headers)
+        self._apply_activation_decision(decision)
+
+    def _apply_activation_decision(self, decision: ActivationDecision) -> None:
+        """Route an activation decision to the view and partial-match callback.
+
+        Routing table (by ``decision.action``):
+            - ``"proceed"`` → select the matched schema (enables Import).
+            - ``"partial"`` → keep the placeholder and offer new-from-template.
+            - ``"none"`` → set the placeholder (Import stays disabled).
+
+        Args:
+            decision: The activation decision to apply.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Calls ``view.set_selected_schema`` and may invoke the partial-match
+            callback.
+        """
+        # A full match auto-selects the schema, which enables the Import button.
+        if decision.action == "proceed" and decision.schema_name is not None:
+            self._view.set_selected_schema(decision.schema_name)
+            return
+        # A partial match keeps the placeholder selected and surfaces the
+        # new-from-template entry point for the closest existing schema.
+        if decision.action == "partial" and decision.schema_name is not None:
+            self._view.set_selected_schema(_SCHEMA_PLACEHOLDER)
+            if self._on_partial_match is not None:
+                self._on_partial_match(decision.schema_name)
+            return
+        # No usable match: keep the dropdown at the placeholder so Import stays
+        # disabled and the user can choose or build a schema manually.
+        self._view.set_selected_schema(_SCHEMA_PLACEHOLDER)
 
     def build_import_spec(
         self,

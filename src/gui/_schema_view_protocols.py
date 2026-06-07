@@ -192,12 +192,15 @@ class SchemaBuilderViewProtocol(Protocol):
         """
         ...
 
-    def set_columns(self, rows: list[tuple[str, str, bool, tuple[str, ...]]]) -> None:
+    def set_columns(
+        self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
+    ) -> None:
         """Render the column rows.
 
         Args:
-            rows: One ``(canonical_name, role, required, aliases)`` tuple per
-                column, in schema order.
+            rows: One ``(canonical_name, role, required, in_output, aliases)``
+                tuple per column, in schema order. ``in_output`` carries output
+                membership, distinct from ``required`` (source-presence).
 
         Returns:
             ``None``.
@@ -207,11 +210,12 @@ class SchemaBuilderViewProtocol(Protocol):
         """
         ...
 
-    def get_columns(self) -> list[tuple[str, str, bool, tuple[str, ...]]]:
+    def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the user-entered column rows.
 
         Returns:
-            One ``(canonical_name, role, required, aliases)`` tuple per column.
+            One ``(canonical_name, role, required, in_output, aliases)`` tuple per
+            column.
         """
         ...
 
@@ -235,6 +239,42 @@ class SchemaBuilderViewProtocol(Protocol):
 
         Returns:
             A ``(columns, sku_coercion)`` tuple.
+        """
+        ...
+
+    def set_key_parts(self, parts: list[tuple[str, str]]) -> None:
+        """Render the ordered structured key parts.
+
+        Pushes the full structured key composition (column-ref and literal-text
+        parts) so the Key tab can display interleaved literal segments, not just
+        the column-ref names :meth:`set_key` carries.
+
+        Args:
+            parts: One ``(kind, value)`` tuple per key part in order, where
+                ``kind`` is ``"column-ref"`` or ``"literal-text"`` and ``value``
+                is the referenced column name or the literal string.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's structured key-part display.
+        """
+        ...
+
+    def set_column_dtypes(self, dtypes: list[tuple[str, str | None]]) -> None:
+        """Render the per-column expected data type.
+
+        Args:
+            dtypes: One ``(canonical_name, expected_dtype)`` tuple per column, in
+                schema order, where ``expected_dtype`` is one of the dtype
+                vocabulary values or ``None`` when no explicit type is declared.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's per-column expected-dtype display.
         """
         ...
 

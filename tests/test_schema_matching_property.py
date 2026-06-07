@@ -16,7 +16,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from src.schema_matching import find_best_match
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 
 # A small fixed vocabulary keeps generated names realistic and bounds the search
 # space so the property runs quickly while still exercising matches and misses.
@@ -52,7 +52,7 @@ def _schemas(draw: st.DrawFn) -> SchemaDefinition:
         name=schema_name,
         version=version,
         columns=columns,
-        key=KeySpec(columns=(names[0],)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in (names[0],))),
     )
 
 

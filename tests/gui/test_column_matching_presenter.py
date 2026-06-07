@@ -17,7 +17,7 @@ from src.schema_matching import (
     MismatchReport,
     UnmatchedColumn,
 )
-from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
 from tests.gui.fakes.fake_services import FakeSchemaService
 from tests.gui.fakes.fake_views import FakeColumnMatchingView
 
@@ -41,7 +41,7 @@ def _schema_with_sales() -> SchemaDefinition:
                 aliases=("Revenue",),
             ),
         ),
-        key=KeySpec(columns=("Customer",)),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer",))),
     )
 
 

@@ -144,6 +144,37 @@ def test_read_sheet_preview_renders_blank_cells_as_empty_string() -> None:
     assert preview == [["a", "", "c"]]
 
 
+def test_read_sheet_preview_unknown_sheet_raises_value_error() -> None:
+    """B2: an absent sheet name raises ValueError (not KeyError) (issue #50).
+
+    The presenter's reader-error policy catches only ValueError, so the reader
+    must convert openpyxl's KeyError for an unknown sheet into a ValueError to
+    keep discovery from crashing.
+    """
+    # Arrange: a workbook whose only sheet is "Data".
+    reader = WorkbookReader()
+    workbook = _build_workbook_with_rows([["Customer", "Sales"]])
+
+    # Act / Assert: requesting a non-existent sheet raises ValueError, not KeyError.
+    with pytest.raises(ValueError):
+        reader.read_sheet_preview(workbook, "DoesNotExist")
+
+
+def test_read_sheet_preview_blank_sheet_name_raises_value_error() -> None:
+    """B2: a blank sheet name raises ValueError (not KeyError) (issue #50).
+
+    A blank worksheet name is the crash trigger seen in the field report; it must
+    surface as a ValueError so the presenter routes it to show_error.
+    """
+    # Arrange: a workbook whose only sheet is "Data".
+    reader = WorkbookReader()
+    workbook = _build_workbook_with_rows([["Customer", "Sales"]])
+
+    # Act / Assert: a blank sheet name raises ValueError, not KeyError.
+    with pytest.raises(ValueError):
+        reader.read_sheet_preview(workbook, "")
+
+
 def test_get_sheet_names_invalid_workbook_raises() -> None:
     """An unreadable/invalid workbook surfaces an error."""
     # Arrange: bytes that are not a valid .xlsx workbook.

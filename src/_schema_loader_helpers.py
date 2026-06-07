@@ -12,8 +12,9 @@ Responsibilities:
     - :func:`collapse_by_key`: collapse duplicate-key rows per the dedup policy.
     - :func:`apply_derived_columns`: populate ``copy_from`` and ``expression``
       derived columns.
-    - :func:`emit_output_columns`: drop the drop-columns and emit the canonical
-      output column set in schema order.
+    - :func:`emit_output_columns`: emit the canonical output column set in schema
+      order, determined by each column's ``in_output`` flag (inclusion), not by a
+      ``drop_columns`` by-name list.
 
 Key invariants:
     First-appearance ordering is preserved exactly like the protected loaders
@@ -43,11 +44,14 @@ logger = logging.getLogger(__name__)
 def _output_column_order(schema: SchemaDefinition) -> list[str]:
     """Return the canonical output column order for ``schema``.
 
-    The output order is the schema's declared ``columns`` order with the
-    ``drop_columns`` removed and any ``derived_columns`` whose name is not already
-    a declared column inserted in their declared position relative to the
-    columns. Derived columns that share a name with a declared column (the LE
-    ``Super Category`` copy_from quirk) keep the declared column's position.
+    Output membership is determined by inclusion: a declared column appears in the
+    output only when its ``in_output`` flag is ``True`` (plus the ``KEY`` and any
+    derived columns, below). This replaces the former ``drop_columns`` by-name
+    exclusion. The schema's declared ``columns`` order is preserved, and any
+    ``derived_columns`` whose name is not already an output column is inserted in
+    its declared position relative to the columns. Derived columns that share a
+    name with a declared column (the LE ``Super Category`` copy_from quirk) keep
+    the declared column's position.
 
     Args:
         schema: The active schema.
@@ -55,9 +59,10 @@ def _output_column_order(schema: SchemaDefinition) -> list[str]:
     Returns:
         The ordered list of canonical output column names.
     """
-    drop = set(schema.drop_columns)
-    # Start from declared columns minus the drop set, preserving schema order.
-    order = [c.canonical_name for c in schema.columns if c.canonical_name not in drop]
+    # Start from declared columns marked for output (in_output=True), preserving
+    # schema order. Columns with in_output=False (the LE YTD/YTG discriminator)
+    # are carried through processing but excluded here by omission.
+    order = [c.canonical_name for c in schema.columns if c.in_output]
 
     # Insert each derived column that is not already an output column. The LE
     # YTG derived column is not a declared source column, so it is appended in
@@ -65,7 +70,7 @@ def _output_column_order(schema: SchemaDefinition) -> list[str]:
     # quirks (Super Category) reuse an existing declared position.
     existing = set(order)
     for derived in schema.derived_columns:
-        if derived.name in drop or derived.name in existing:
+        if derived.name in existing:
             continue
         order = _insert_derived(order, derived.name, schema)
         existing.add(derived.name)
@@ -148,8 +153,9 @@ def resolve_and_rename(raw: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFr
     actual_columns = list(raw.columns.astype(str))
 
     # Columns resolved by name only (not fuzzy) and not treated as required:
-    # KEY plus any optional column (the AOP optional YTG; the LE discriminator
-    # YTD/YTG is required and resolved normally).
+    # KEY plus any optional column (the AOP optional YTG; and the LE discriminator
+    # YTD/YTG, which is now required=false and located by name, carried through for
+    # the dedup collapse, and excluded from output by in_output=false).
     by_name_optional = _by_name_optional_columns(schema)
 
     # Map each by-name-optional canonical name to its actual source column (if
@@ -205,10 +211,14 @@ def _by_name_optional_columns(schema: SchemaDefinition) -> list[str]:
     """Return canonical names resolved by name only, KEY first then optionals.
 
     These are ``KEY`` (always optional/by-name) followed by any declared column
-    marked ``required=False`` in schema order (the AOP optional ``YTG``). The LE
-    discriminator column (``YTD/YTG``) is required and resolved normally, so it is
-    not included here. The order is deterministic (KEY first), matching the
-    protected loaders' ``if key ... if ytg ...`` append sequence.
+    marked ``required=False`` in schema order. This includes the AOP optional
+    ``YTG`` and, after the bundled-schema change, the LE discriminator
+    ``YTD/YTG`` (now ``required=false, in_output=false``): it is located by name
+    (no fuzzy, no raise on absence), carried through ``resolve_and_rename`` and
+    ``collapse_by_key`` as the dedup discriminator, and excluded from the output
+    only at emit by its ``in_output=false`` flag. The order is deterministic
+    (KEY first), matching the protected loaders' ``if key ... if ytg ...`` append
+    sequence.
 
     Args:
         schema: The active schema.
@@ -411,33 +421,44 @@ def emit_output_columns(
     frame: pd.DataFrame,
     schema: SchemaDefinition,
 ) -> pd.DataFrame:
-    """Drop the schema's drop-columns and emit the canonical output columns.
+    """Emit the canonical output columns determined by ``in_output`` inclusion.
 
-    The output column order is mode-dependent to match the protected loaders
-    exactly. A ``collapse`` schema (LE) rebuilds the canonical
-    ``columns``-minus-drop order with the derived ``YTG`` inserted in its declared
+    Output membership is determined by each column's ``in_output`` flag, not by a
+    ``drop_columns`` by-name list. The output column order is mode-dependent to
+    match the protected loaders exactly. A collapsing schema (LE, ``collapse`` or
+    ``aggregate`` mode) rebuilds the canonical declared order from the
+    ``in_output`` columns with the derived ``YTG`` inserted in its declared
     position (matching ``normalize_le.TARGET_COLUMNS``). A ``none`` schema (AOP)
     preserves the working frame's natural column order (resolution order with the
-    created ``KEY`` appended last), only dropping the schema's drop-columns,
-    because ``load_aop`` returns the validated frame without reordering.
+    created ``KEY`` appended last), excluding any frame column whose declared spec
+    has ``in_output=False``, because ``load_aop`` returns the validated frame
+    without reordering.
 
     Args:
         frame: The fully transformed working frame.
-        schema: The active schema describing drop-columns, dedup mode, and order.
+        schema: The active schema describing column output-membership, dedup mode,
+            and order.
 
     Returns:
         A DataFrame containing exactly the canonical output columns. The row index
         is preserved from ``frame`` (the collapse phase reset it for LE; the AOP
         path keeps its filtered index).
     """
-    drop = set(schema.drop_columns)
-    # Decide the output column order by dedup mode: the collapse path rebuilds the
-    # canonical declared order; the none path preserves the frame's natural order.
-    if schema.dedup.mode == "collapse":
+    # Decide the output column order by dedup mode: the collapsing modes
+    # (collapse/aggregate) rebuild the canonical declared order; the none path
+    # preserves the frame's natural order. Aggregate is the renamed collapse mode
+    # (Decision 1) and shares the same canonical-ordering behavior.
+    if schema.dedup.mode in {"collapse", "aggregate"}:
         order = _output_column_order(schema)
     else:
-        # Preserve the frame's existing column order, dropping only drop-columns,
-        # so the AOP output matches load_aop's un-reordered validated frame.
-        order = [str(name) for name in frame.columns if str(name) not in drop]
-    # Select exactly the output columns; any dropped column is removed by omission.
+        # Build the set of declared columns excluded from output (in_output=False)
+        # so the none path filters by inclusion like the collapsing path. A column
+        # not declared in the schema (none today) is kept by default.
+        excluded = {c.canonical_name for c in schema.columns if not c.in_output}
+        # Preserve the frame's existing column order, omitting only the excluded
+        # columns, so the AOP output matches load_aop's un-reordered validated
+        # frame.
+        order = [str(name) for name in frame.columns if str(name) not in excluded]
+    # Select exactly the output columns; any non-output column is removed by
+    # omission.
     return frame[order]
