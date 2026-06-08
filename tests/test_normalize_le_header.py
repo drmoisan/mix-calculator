@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.normalize_le import load_source
-from tests.le_fixtures import build_workbook, make_row
+from src.normalize_le import TARGET_COLUMNS, load_source, normalize
+from tests.le_fixtures import build_workbook, make_row, source_header_without_key
 
 # A small two-row sample reused for both the flat and standard layouts so the
 # only difference between the two loads is the header row position.
@@ -57,3 +57,17 @@ def test_flat_sheet_load_equals_standard_header_at_index_two() -> None:
         flat_frame.reset_index(drop=True),
         standard_frame.reset_index(drop=True),
     )
+
+
+def test_flat_le84data_style_sheet_imports_to_target_columns() -> None:
+    """A flat LE84Data sheet (index 0, no YTD/YTG, no KEY) imports to TARGET_COLUMNS."""
+    # Arrange: a flat workbook whose header is on index 0 and omits both the
+    # optional YTD/YTG column and the KEY column (the LE84Data-style layout).
+    header = [c for c in source_header_without_key() if c != "YTD/YTG"]
+    flat_buffer = build_workbook(_SAMPLE_ROWS, header=header, leading_rows=0)
+
+    # Act: load (detection selects index 0) then normalize the loaded frame.
+    out = normalize(load_source(flat_buffer, "LE-8 + 4"))
+
+    # Assert: the full 26-column target schema is produced from the must-have set.
+    assert set(out.columns) == set(TARGET_COLUMNS)

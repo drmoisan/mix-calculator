@@ -35,8 +35,10 @@ from src._header_detection import detect_header_row
 from src._normalize_le_columns import (
     EXPECTED_COLUMNS,
     MONTH_COLUMNS,
+    OPTIONAL_BY_NAME,
     QUARTER_COLUMNS,
     QUARTER_TO_MONTHS,
+    REQUIRED_COLUMNS,
     SOURCE_COLUMNS,
     SUM_COLUMNS,
     TARGET_COLUMNS,
@@ -61,8 +63,10 @@ if TYPE_CHECKING:
 __all__ = [
     "EXPECTED_COLUMNS",
     "MONTH_COLUMNS",
+    "OPTIONAL_BY_NAME",
     "QUARTER_COLUMNS",
     "QUARTER_TO_MONTHS",
+    "REQUIRED_COLUMNS",
     "SOURCE_COLUMNS",
     "SUM_COLUMNS",
     "TARGET_COLUMNS",
@@ -144,10 +148,11 @@ def load_source(
         emits ``logging`` warnings for extra source columns and for
         ``trust``/``overwrite`` KEY resolution.
     """
-    # Detect the header row instead of hardcoding header=2. min_match=20 of the
-    # 25 expected LE tokens tolerates up to five absent/aliased label columns
-    # while staying well above the 12 month tokens a coincidental data row could
-    # supply, so a data row is rejected and only a true label row is selected.
+    # Detect the header row instead of hardcoding header=2. EXPECTED_COLUMNS is
+    # now the 23 required-only token set, so min_match=20 tolerates up to three
+    # absent/aliased label columns while staying well above the 12 month tokens a
+    # coincidental data row could supply, so a data row is rejected and only a
+    # true label row is selected. min_match is unchanged from prior behavior.
     expected_tokens = frozenset(normalize_name(column) for column in EXPECTED_COLUMNS)
     detected = detect_header_row(path, sheet_name, expected_tokens, min_match=20)
 
@@ -168,13 +173,17 @@ def load_source(
     # source column to its canonical name, carrying KEY through when present.
     selection, key_actual = resolve_le_columns(actual_columns)
 
-    # Select and rename to canonical expected names so all downstream logic uses
-    # canonical names regardless of source order. Build the keep-list in canonical
-    # expected order with the KEY column appended last, matching the prior
-    # in-place behavior; invert the selection map to find each canonical column's
-    # source name.
+    # Select and rename to canonical names so all downstream logic uses canonical
+    # names regardless of source order (mirrors src/load_aop.py). Build the keep
+    # list from the required columns first, then append the located optional
+    # (YTD/YTG, Super Category) and KEY columns carried in the selection, when
+    # present. Absent optionals are simply not selected: YTD/YTG is dropped at emit
+    # and the output Super Category is derived from PPG, so neither is needed.
     canonical_to_actual = {canonical: actual for actual, canonical in selection.items()}
-    columns_to_keep = [canonical_to_actual[expected] for expected in EXPECTED_COLUMNS]
+    columns_to_keep = [canonical_to_actual[required] for required in REQUIRED_COLUMNS]
+    for canonical in OPTIONAL_BY_NAME:
+        if canonical in canonical_to_actual:
+            columns_to_keep.append(canonical_to_actual[canonical])
     if key_actual is not None:
         columns_to_keep.append(key_actual)
     frame = frame[columns_to_keep].rename(columns=selection).copy()
