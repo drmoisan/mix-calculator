@@ -32,6 +32,7 @@ from tests.le_fixtures import (
     close,
     loaded_frame,
     make_row,
+    source_header_without_key,
 )
 
 # ---------------------------------------------------------------------------
@@ -444,3 +445,55 @@ def test_normalize_property_row_count_and_sums(
         key = str(output_row["KEY"])
         for month_index, month in enumerate(MONTH_COLUMNS):
             assert close(output_row[month], expected_sums[key][month_index], tol=1e-6)
+
+
+# load_source optional-by-name handling (issue #57: required vs output columns).
+# Each helper returns the no-KEY source header with the named optionals pruned.
+def _row() -> dict[str, object]:
+    """Return one standard source row for the optional-column load tests."""
+    return make_row(customer="CustA", sku=5, type_="GS", ppg="PX", months=[1.0] * 12)
+
+
+def _pruned(*drop: str) -> list[str]:
+    """Return the no-KEY source header with the named optional columns removed."""
+    return [c for c in source_header_without_key() if c not in drop]
+
+
+def test_load_source_without_ytd_ytg_succeeds_and_drops_it() -> None:
+    """A source lacking YTD/YTG loads; the loaded frame has no YTD/YTG column."""
+    # Act: load a workbook whose header omits the optional YTD/YTG column.
+    frame = load_source(build_workbook([_row()], header=_pruned("YTD/YTG")), "LE-8 + 4")
+    # Assert: load succeeds and the optional column is absent (not required).
+    assert "YTD/YTG" not in frame.columns
+
+
+def test_load_source_without_super_category_output_super_from_ppg() -> None:
+    """A source lacking Super Category loads; output Super Category equals PPG."""
+    # Act: load + normalize a workbook lacking the source Super Category column.
+    buffer = build_workbook([_row()], header=_pruned("Super Category"))
+    out = normalize(load_source(buffer, "LE-8 + 4"))
+    # Assert: the output Super Category is derived from PPG regardless of source.
+    assert out.iloc[0]["Super Category"] == "PX"
+    assert out.iloc[0]["PPG"] == "PX"
+
+
+def test_load_source_without_both_optionals_yields_all_target_columns() -> None:
+    """With both optionals absent, normalize still produces all 26 target columns."""
+    # Act: load + normalize a workbook lacking both optional columns.
+    buffer = build_workbook([_row()], header=_pruned("YTD/YTG", "Super Category"))
+    out = normalize(load_source(buffer, "LE-8 + 4"))
+    # Assert: the full target schema is produced from the must-have columns alone.
+    assert set(out.columns) == set(TARGET_COLUMNS)
+
+
+def test_full_column_source_output_parity_with_standard_fixture() -> None:
+    """A full-column source produces output identical to the standard fixture."""
+    # Arrange: both the default and the explicit full headers carry both optionals.
+    rows = [_row()]
+    standard = normalize(load_source(build_workbook(rows), "LE-8 + 4"))
+    explicit = build_workbook(rows, header=source_header_without_key())
+    full = normalize(load_source(explicit, "LE-8 + 4"))
+    # Assert: byte-identical output for the standard full-column source (parity).
+    pd.testing.assert_frame_equal(
+        standard.reset_index(drop=True), full.reset_index(drop=True)
+    )

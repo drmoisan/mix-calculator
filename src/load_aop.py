@@ -27,12 +27,14 @@ Boundaries:
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import sqlite3
 import sys
 from typing import IO, TYPE_CHECKING
 
+from src._header_detection import detect_header_row
 from src._load_aop_helpers import (
     EXPECTED_COLUMNS,
     INDEX_COLUMNS,
@@ -132,10 +134,15 @@ def load_aop(
 ) -> pd.DataFrame:
     """Load, clean, validate, and return the ``AOP1`` sheet as a DataFrame.
 
-    Reads the workbook treating Excel row 3 as the header (``header=2``),
-    resolves the source columns to canonical names position-independently,
-    establishes the ``KEY`` column per the shared reconcile policy, validates
-    per-row total identities, and finally applies the optional ``transform``.
+    Detects the header row rather than hardcoding it: it probes the sheet and
+    selects the row matching the expected canonical column tokens (via
+    :func:`detect_header_row`), reads the workbook with openpyxl using that
+    detected header index, resolves the source columns to canonical names
+    position-independently, establishes the ``KEY`` column per the shared
+    reconcile policy, validates per-row total identities, and finally applies the
+    optional ``transform``. The standard ``AOP1`` sheet keeps its header on row
+    index 2, so detection selects 2 and loader output is unchanged; flat sheets
+    whose header sits on a different row now also resolve.
 
     Both ``KEY`` and ``YTG`` are optional columns resolved by name. ``YTG`` is
     used when present (carried through, coerced, blank-filled, and validated as
@@ -179,9 +186,22 @@ def load_aop(
         Reads from the filesystem (or buffer) via openpyxl and emits ``logging``
         warnings for extra source columns, KEY resolution, and duplicate KEYs.
     """
+    # Detect the header row instead of hardcoding header=2. min_match=17 of the
+    # 24 expected AOP tokens tolerates several absent/aliased label columns while
+    # staying above the 12 month tokens a coincidental data row could supply, so
+    # a data row is rejected and only a true label row is selected.
+    expected_tokens = frozenset(normalize_name(column) for column in EXPECTED_COLUMNS)
+    detected = detect_header_row(source, sheet, expected_tokens, min_match=17)
+
+    # Rewind a seekable buffer (the in-memory BytesIO fixtures) so the final read
+    # starts at offset 0; the detection probe consumed the buffer above. A
+    # filesystem path is reopened by pandas on each read and needs no rewind.
+    if isinstance(source, io.IOBase) and source.seekable():
+        source.seek(0)
+
     # Route the read through the typed pandas_io boundary, which contains the
     # openpyxl-driven unknown member type so it does not surface here.
-    frame: pd.DataFrame = read_excel_sheet(source, sheet_name=sheet, header=2)
+    frame: pd.DataFrame = read_excel_sheet(source, sheet_name=sheet, header=detected)
     actual_columns = list(frame.columns.astype(str))
 
     # Locate an optional KEY column by normalized name only (no fuzzy match) so

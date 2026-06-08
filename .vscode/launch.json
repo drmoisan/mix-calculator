@@ -2,6 +2,32 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: mix-pipeline-gui (debug)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.gui.app",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "justMyCode": true,
+            "env": {
+                "QT_QPA_PLATFORM": "windows"
+            }
+        },
+        {
+            "name": "Python: mix-pipeline-gui (debug, step into libraries)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.gui.app",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "justMyCode": false,
+            "env": {
+                "QT_QPA_PLATFORM": "windows"
+            }
+        },
+        {
             "name": "Python: normalize-le Input Files.xlsx",
             "type": "debugpy",
             "request": "launch",

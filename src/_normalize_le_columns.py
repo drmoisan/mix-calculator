@@ -9,9 +9,10 @@ tests that import them from ``src.normalize_le`` continue to work unchanged.
 
 Responsibilities:
     - Declare the LE month/quarter/sum/text source and target column constants.
-    - ``resolve_le_columns``: a pure helper that locates an optional ``KEY``
-      column, resolves every required expected column to its canonical name, and
-      returns the actual-to-canonical rename map plus the located KEY column.
+    - ``resolve_le_columns``: a pure helper that locates the optional ``KEY``
+      column and each optional-by-name column (``YTD/YTG``, ``Super Category``),
+      resolves every required column to its canonical name, and returns the
+      actual-to-canonical rename map plus the located KEY column.
 
 Boundaries:
     - This module is pure: it performs no disk, network, or database I/O. It only
@@ -27,8 +28,10 @@ from src.etl_columns import normalize_name, resolve_columns
 __all__ = [
     "EXPECTED_COLUMNS",
     "MONTH_COLUMNS",
+    "OPTIONAL_BY_NAME",
     "QUARTER_COLUMNS",
     "QUARTER_TO_MONTHS",
+    "REQUIRED_COLUMNS",
     "SOURCE_COLUMNS",
     "SUM_COLUMNS",
     "TARGET_COLUMNS",
@@ -85,9 +88,29 @@ SOURCE_COLUMNS: list[str] = [
     "PPG",
 ]
 
-# Required expected columns for resolution: every source column except the
-# optional "KEY" (which is resolved by name only and handled separately).
-EXPECTED_COLUMNS: list[str] = [c for c in SOURCE_COLUMNS if c != "KEY"]
+# Must-have source columns: those that contribute to the final output and are
+# therefore genuinely required. This is the 23-column set (5 text + 12 months +
+# FY + 4 quarters + PPG). It deliberately excludes "KEY" (created/located when
+# present), "YTD/YTG" (dropped, never read), and source "Super Category" (the
+# output "Super Category" is derived from "PPG", so the source value is ignored).
+# A source missing any of these still fails resolution naming the missing column.
+REQUIRED_COLUMNS: list[str] = TEXT_COLUMNS + [
+    *MONTH_COLUMNS,
+    "FY",
+    *QUARTER_COLUMNS,
+    "PPG",
+]
+
+# Columns located by normalized name when present and tolerated when absent. They
+# are not required: "YTD/YTG" is dropped at emit and the source "Super Category"
+# is overwritten by "PPG" in normalize(). When present they are carried so the
+# standard LE-8 + 4 source still drops "YTD/YTG" exactly as before (parity).
+OPTIONAL_BY_NAME: list[str] = ["YTD/YTG", "Super Category"]
+
+# The required-only resolution set, matching the AOP module convention where
+# EXPECTED_COLUMNS holds only the must-have columns and optional-by-name columns
+# (KEY/YTG for AOP; YTD/YTG/Super Category here) are handled separately.
+EXPECTED_COLUMNS: list[str] = REQUIRED_COLUMNS
 
 # Target output header, 26 columns in exact order. "YTD/YTG" is dropped and a
 # derived "YTG" column is inserted after "Q4", before "Super Category".
@@ -110,14 +133,16 @@ TARGET_COLUMNS: list[str] = [
 def resolve_le_columns(
     actual_columns: list[str],
 ) -> tuple[dict[str, str], str | None]:
-    """Resolve LE source columns to canonical names and locate the KEY column.
+    """Resolve LE source columns to canonical names; locate KEY and optionals.
 
-    Performs the KEY-column lookup and the required-column resolution that the LE
-    loader previously inlined in ``load_source``: it finds an optional ``KEY``
-    column by normalized name (no fuzzy match), resolves every required expected
-    column to its actual source name via :func:`resolve_columns`, warns about any
-    extra source columns, and returns an actual-to-canonical rename map that also
-    carries the KEY column through under the canonical name ``"KEY"`` when present.
+    Performs the column resolution that the LE loader previously inlined in
+    ``load_source``, mirroring the AOP ``load_aop`` optional-by-name pattern. It
+    locates the optional ``KEY`` column and each :data:`OPTIONAL_BY_NAME` column
+    (``YTD/YTG``, ``Super Category``) by normalized name only (no fuzzy match, no
+    raise on absence), resolves every :data:`REQUIRED_COLUMNS` entry to its actual
+    source name via :func:`resolve_columns`, warns about any extra source columns,
+    and returns an actual-to-canonical rename map that also carries the located
+    KEY and optional columns through under their canonical names when present.
 
     Args:
         actual_columns: The source frame's column names rendered as strings, in
@@ -125,31 +150,46 @@ def resolve_le_columns(
 
     Returns:
         A ``(selection, key_actual)`` tuple where ``selection`` maps each actual
-        source column name to its canonical name (every required expected column,
-        plus the located KEY column mapped to ``"KEY"`` when present), and
-        ``key_actual`` is the located source KEY column name or ``None`` when the
-        source has no KEY column.
+        source column name to its canonical name (every required column, plus the
+        located KEY column mapped to ``"KEY"`` and each located optional mapped to
+        its canonical name, when present), and ``key_actual`` is the located
+        source KEY column name or ``None`` when the source has no KEY column.
 
     Raises:
-        ValueError: When a required expected column cannot be resolved
-            (propagated from :func:`resolve_columns`).
+        ValueError: When a required column cannot be resolved (propagated from
+            :func:`resolve_columns`, which names the missing column).
 
     Side effects:
-        Emits a ``logging`` warning naming any extra (unmatched, non-KEY) source
-        columns; they are not included in the returned rename map.
+        Emits a ``logging`` warning naming any extra (unmatched, non-located)
+        source columns; they are not included in the returned rename map.
     """
-    # Locate an optional KEY column by normalized name only (no fuzzy match) so
-    # it is neither a required expected column nor reported as an extra.
+    # Locate the optional KEY column and each optional-by-name column by
+    # normalized name only (no fuzzy match), so none of them is treated as a
+    # required column or reported as an extra. Absent optionals are simply not
+    # located; YTD/YTG and source Super Category are dropped/ignored downstream
+    # and are not derived, so tolerating their absence is safe.
     key_actual: str | None = None
+    optional_actual: dict[str, str] = {}
     for column in actual_columns:
-        if normalize_name(column) == "key":
+        normalized = normalize_name(column)
+        if normalized == "key":
             key_actual = column
-            break
+            continue
+        # Carry each optional-by-name column under its canonical name when its
+        # normalized form matches; the first match per canonical name wins.
+        for canonical in OPTIONAL_BY_NAME:
+            if (
+                normalized == normalize_name(canonical)
+                and canonical not in optional_actual
+            ):
+                optional_actual[canonical] = column
 
-    # Resolve every required expected column; resolve_columns raises naming any
-    # unmatched required column. Extras exclude the located KEY column below.
-    resolvable = [c for c in actual_columns if c != key_actual]
-    mapping, extras = resolve_columns(resolvable, EXPECTED_COLUMNS)
+    # Resolve every required column; resolve_columns raises naming any unmatched
+    # required column. Exclude the located KEY and optional columns from the
+    # resolvable set so they are neither required nor reported as extras.
+    located = {key_actual, *optional_actual.values()}
+    resolvable = [c for c in actual_columns if c not in located]
+    mapping, extras = resolve_columns(resolvable, REQUIRED_COLUMNS)
 
     # Surface extra source columns as a warning and continue (the caller drops
     # them from the working frame by selecting only the canonical columns).
@@ -157,10 +197,13 @@ def resolve_le_columns(
         logger.warning("Ignoring extra source column(s): %s.", extras)
 
     # Build the actual-to-canonical rename map from the resolved required columns,
-    # then carry the KEY column through under the canonical name when present so
-    # the caller can select and rename in one pass.
-    selection = {mapping[expected]: expected for expected in EXPECTED_COLUMNS}
+    # then carry the located KEY and optional columns through under their canonical
+    # names so the caller can select and rename in one pass. Absent optionals are
+    # never added to the selection.
+    selection = {mapping[required]: required for required in REQUIRED_COLUMNS}
     if key_actual is not None:
         selection[key_actual] = "KEY"
+    for canonical, actual in optional_actual.items():
+        selection[actual] = canonical
 
     return selection, key_actual

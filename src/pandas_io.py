@@ -49,7 +49,7 @@ if TYPE_CHECKING:
             io: ExcelSource,
             *,
             sheet_name: str,
-            header: int,
+            header: int | None,
             engine: str,
         ) -> pd.DataFrame:
             """Read a single Excel sheet into a DataFrame."""
@@ -90,14 +90,17 @@ def read_excel_sheet(
     source: ExcelSource,
     *,
     sheet_name: str,
-    header: int,
+    header: int | None,
 ) -> pd.DataFrame:
     """Read a single Excel sheet into a DataFrame via the openpyxl engine.
 
     Args:
         source: Filesystem path or binary file-like buffer to read.
         sheet_name: Name of the worksheet to read.
-        header: Zero-based index of the header row within the sheet.
+        header: Zero-based index of the header row within the sheet, or
+            ``None`` to read with no header row (every sheet row, including the
+            label row, is returned as data with a positional integer column
+            index). ``None`` is used by the header-detection probe read.
 
     Returns:
         The sheet contents as a typed ``pd.DataFrame``.
