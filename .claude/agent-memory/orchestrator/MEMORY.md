@@ -16,6 +16,7 @@
 - [new_active_feature_folder date prefix](new-active-feature-folder-date-prefix.md) — standalone feature folders get the YYYY-MM-DD- prefix automatically; epic-child feature folders don't (git mv those)
 - [orchestrator-state validator divergence](orchestrator-state-validator-divergence.md) — MCP orchestrator-state check is stricter than the real SubagentStop hook; conform to the canonical schema's remediation_loop shape
 - [AOP partial-year 8+4 convention](aop-partial-year-8plus4-convention.md) — YTD is actuals-through-cutoff (e.g. Jan..Apr), YTG is the rest; validate_aop must keep the YTD/YTG split consistent (fixed in #48)
+- [AOP YTD convention varies by workbook](aop-ytd-convention-varies-by-workbook.md) — v3 workbook uses full-year YTD WITH YTG present; LE_NEW uses partial Jan..Apr; YTG presence does not determine the YTD month set
 - [Real pipeline workbook location](real-pipeline-workbook-location.md) — user's real .xlsx at artifacts/LE_NEW v LE_ORIG...; gitignored; orchestrator runs loaders against it for end-to-end checks
 - [Audit: verify production call site](audit-verify-production-call-site.md) — a unit-tested view/seam method can pass AC review with zero production callers; grep for the wiring call site, not just the test (caused empty schema dropdown in #48)
 - [Configurable-schema persisted matching](configurable-schema-persisted-matching.md) — schema column matching is persisted as ColumnSpec aliases (not ephemeral); partial match -> "new from template" (#50 decision)
