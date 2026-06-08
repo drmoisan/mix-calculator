@@ -48,6 +48,7 @@ Side effects:
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from src._load_aop_helpers import clean_label_sentinels, coerce_numeric
@@ -62,6 +63,8 @@ from src.etl_totals import fill_blank_totals
 from src.schema_formula import FormulaEvaluator
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pandas as pd
 
     from src.schema_model import SchemaDefinition
@@ -124,6 +127,10 @@ class SchemaLoader:
         self,
         raw: pd.DataFrame,
         schema: SchemaDefinition | None = None,
+        *,
+        resolver: Callable[[list[tuple[str, str]]], str] | None = None,
+        is_tty: Callable[[], bool] = sys.stdin.isatty,
+        prompt: Callable[[str], str] = input,
     ) -> pd.DataFrame:
         """Transform a raw source frame into the schema's canonical output frame.
 
@@ -133,6 +140,23 @@ class SchemaLoader:
                 The input is not mutated.
             schema: An optional schema overriding the construction-time schema for
                 this call.
+            resolver: Optional example-aware KEY-mismatch resolver forwarded to
+                :func:`src.etl_key.resolve_key`. It is invoked ONLY on a genuine
+                ``KEY`` divergence (an existing source ``KEY`` column whose values
+                differ from the rebuilt pattern), receiving up to three
+                ``(existing, rebuilt)`` example pairs and returning the resolved
+                action (``"trust"`` or ``"overwrite"``). When ``None`` (the
+                default), divergence is resolved via the ``"prompt"`` policy using
+                ``is_tty``/``prompt`` exactly as before; the GUI path supplies a
+                resolver so no stdin prompt is reached.
+            is_tty: Zero-arg callable returning whether stdin is interactive,
+                forwarded to :func:`resolve_key`. Defaults to ``sys.stdin.isatty``.
+                Injectable so non-interactive callers (the GUI) can report a
+                non-TTY environment.
+            prompt: Callable used to ask the user on the interactive prompt path,
+                forwarded to :func:`resolve_key`. Defaults to the built-in
+                ``input``. Injectable so non-interactive callers can supply a
+                stdin-free prompt that never blocks.
 
         Returns:
             A DataFrame with exactly the schema's canonical output columns in
@@ -168,7 +192,14 @@ class SchemaLoader:
         # source without a pre-existing KEY column, so the loader creates it from
         # the rebuilt pattern; a present KEY is reconciled per the default policy.
         has_key = "KEY" in frame.columns
-        frame = resolve_key(frame, "prompt", has_key_column=has_key)
+        frame = resolve_key(
+            frame,
+            "prompt",
+            has_key_column=has_key,
+            is_tty=is_tty,
+            prompt=prompt,
+            resolver=resolver,
+        )
 
         # Coerce numeric measures and clean label sentinels only when the schema
         # marks columns for it (the AOP path); the LE path marks none, so these

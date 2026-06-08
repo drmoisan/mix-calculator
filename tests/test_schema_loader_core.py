@@ -9,8 +9,6 @@ files, no network.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 from hypothesis import given
 from hypothesis import strategies as st
@@ -25,41 +23,14 @@ from src.schema_model import (
     SchemaDefinition,
     column_ref,
 )
-from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 
 # The in-memory fixtures live in the tests package and import as package modules.
 from tests import aop_fixtures, le_fixtures
 
-# Twelve monthly vectors reused across tests.
-_MONTHS_A: list[float] = [
-    10.0,
-    20.0,
-    30.0,
-    40.0,
-    50.0,
-    60.0,
-    70.0,
-    80.0,
-    90.0,
-    100.0,
-    110.0,
-    120.0,
-]
-_MONTHS_B: list[float] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0]
-
-
-def _load_default(name: str) -> SchemaDefinition:
-    """Load a bundled default schema by name through a real disk store.
-
-    Args:
-        name: The bundled schema name (``"default_le"`` or ``"default_aop"``).
-
-    Returns:
-        The parsed :class:`SchemaDefinition`.
-    """
-    registry = SchemaRegistry(Path("."), DiskSchemaFileStore())
-    return registry.load_bundled_default(name)
-
+# The monthly vectors and the bundled-default loader are shared with the seam
+# test module; they live in a dedicated underscore-prefixed fixtures module so
+# the two cohesive modules reuse identical fixtures without duplication.
+from tests._schema_loader_fixtures import _MONTHS_A, _MONTHS_B, _load_default
 
 # ---------------------------------------------------------------------------
 # Resolve / rename / blank-drop

@@ -255,31 +255,49 @@ def test_build_application_injects_resolver_callable(
     """The composition root injects the resolver callable into the service (AC-5).
 
     Drives an AOP import through the production pipeline service (no injected
-    service); asserts the AOP loader received the example-aware resolver as its
-    ``resolver`` argument (a callable), proving the resolver reaches the loaders
-    as the divergence-only seam and that no eager invocation or stdin occurs.
+    service); asserts the schema-driven AOP loader received the example-aware
+    resolver as its ``resolver`` argument (a callable), proving the resolver
+    reaches the loader as the divergence-only seam and that no eager invocation or
+    stdin occurs. Issue #58 routed ``import_aop`` through ``SchemaLoader.load``,
+    so the resolver is intercepted there; the AOP header-detect and frame-read
+    boundaries are stubbed so no workbook I/O occurs.
     """
-    # Arrange: record the resolver the AOP loader receives.
+    # Arrange: record the resolver the schema-driven AOP load receives.
     recorded: list[object] = []
 
-    def _fake_load_aop(
-        _path: str,
+    def _fake_schema_load(
+        _self: object,
+        _raw: object,
+        _schema: object = None,
         *,
-        sheet: str = "AOP1",
         resolver: object = None,
         **_kwargs: object,
     ) -> pd.DataFrame:
         recorded.append(resolver)
         return pd.DataFrame({"KEY": ["k1"]})
 
-    monkeypatch.setattr("src.load_aop.load_aop", _fake_load_aop)
+    def _fake_detect_header_row(
+        _source: object, _sheet: str, _tokens: object, **_kwargs: object
+    ) -> int:
+        return 0
+
+    def _fake_read_excel_sheet(
+        _source: object, *, sheet_name: str = "", header: object = 0
+    ) -> pd.DataFrame:
+        return pd.DataFrame({"Customer": ["A"]})
+
+    monkeypatch.setattr("src.schema_loader.SchemaLoader.load", _fake_schema_load)
+    monkeypatch.setattr(
+        "src._header_detection.detect_header_row", _fake_detect_header_row
+    )
+    monkeypatch.setattr("src.pandas_io.read_excel_sheet", _fake_read_excel_sheet)
     wired = build_application(runner=SynchronousRunner())
     qtbot.addWidget(wired.window)
 
     # Act: import AOP through the production service's injected resolver.
     wired.pipeline_service.import_aop("aop.xlsx", "AOP1")
 
-    # Assert: the loader received a callable resolver (the divergence-only seam),
-    # not an eagerly computed policy string.
+    # Assert: the schema loader received a callable resolver (the divergence-only
+    # seam), not an eagerly computed policy string.
     assert len(recorded) == 1
     assert callable(recorded[0])

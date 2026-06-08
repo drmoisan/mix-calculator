@@ -250,6 +250,70 @@ def build_aop_workbook(
     return buffer
 
 
+def build_full_year_ytd_workbook(
+    rows: list[dict[str, object]],
+    *,
+    leading_rows: int = 2,
+) -> io.BytesIO:
+    """Build a full-year-YTD AOP workbook (header without the optional YTG column).
+
+    Produces a no-YTG (full-year) layout in which each well-formed row's ``YTD``
+    is rewritten to the full-year month sum (via :func:`build_aop_workbook`'s
+    full-year rewrite). This reproduces the issue #58 regression source: a
+    full-year-YTD workbook the schema-driven ``import_aop`` must import
+    successfully.
+
+    Args:
+        rows: AOP source-row dicts (see :func:`make_aop_row`).
+        leading_rows: Number of leading padding rows before the header (default
+            ``2`` keeps the standard header-at-index-2 layout).
+
+    Returns:
+        A ``BytesIO`` positioned at offset 0 containing the workbook bytes.
+    """
+    # A header that omits both KEY and YTG yields the full-year layout, so
+    # build_aop_workbook rewrites each row's YTD to the full Jan..Dec month sum.
+    header = aop_header_without_key(include_ytg=False)
+    return build_aop_workbook(rows, header=header, leading_rows=leading_rows)
+
+
+def build_offset_header_workbook(
+    rows: list[dict[str, object]],
+    *,
+    leading_rows: int = 0,
+) -> io.BytesIO:
+    """Build an AOP workbook whose header sits at a non-default offset.
+
+    Used to prove the schema-driven ``import_aop`` resolves the header row via
+    :func:`src._header_detection.detect_header_row` rather than a hardcoded
+    ``header=2``: the header lands at index ``leading_rows`` (default ``0``), so
+    a hardcoded ``header=2`` would misread the sheet while detection succeeds.
+
+    Args:
+        rows: AOP source-row dicts (see :func:`make_aop_row`).
+        leading_rows: Number of leading padding rows before the header. Must keep
+            the header inside ``detect_header_row``'s scan window
+            (``0 <= leading_rows <= 4``; the scan default is ``max_rows=5``).
+            Defaults to ``0`` (a flat header-at-index-0 sheet).
+
+    Returns:
+        A ``BytesIO`` positioned at offset 0 containing the workbook bytes.
+
+    Raises:
+        ValueError: When ``leading_rows`` is outside the supported
+            ``0 <= leading_rows <= 4`` scan window.
+    """
+    # Keep the header within the five-row detection scan window so a non-default
+    # offset is still discoverable; a value outside this range is rejected so the
+    # fixture cannot silently produce an undetectable header.
+    if not 0 <= leading_rows <= 4:
+        raise ValueError(
+            "leading_rows must be between 0 and 4 to stay within the "
+            "detect_header_row scan window (max_rows=5)"
+        )
+    return build_aop_workbook(rows, leading_rows=leading_rows)
+
+
 def loaded_aop_frame(
     rows: list[dict[str, object]], *, include_ytg: bool = True
 ) -> pd.DataFrame:

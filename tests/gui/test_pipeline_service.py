@@ -22,6 +22,7 @@ from openpyxl import Workbook
 from src.gui.pipeline_service import ImportSpec, PipelineService
 from src.gui.services.db_service import DbService
 from tests.aop_fixtures import aop_header_without_key, make_aop_row
+from tests.gui._pipeline_service_fixtures import _patch_loaders
 from tests.le_fixtures import make_row, patch_connect, source_header_without_key
 
 if TYPE_CHECKING:
@@ -209,41 +210,6 @@ def _build_combined_workbook() -> io.BytesIO:
     workbook.save(buffer)
     buffer.seek(0)
     return buffer
-
-
-def _patch_loaders(monkeypatch: pytest.MonkeyPatch, buffer: io.BytesIO) -> None:
-    """Patch the three loader reads to read a single shared in-memory buffer."""
-    from src import load_aop, load_skulu, normalize_le
-
-    real_load_source = normalize_le.load_source
-    real_load_aop = load_aop.load_aop
-    real_load_skulu = load_skulu.load_skulu
-
-    def _fake_load_source(
-        _path: str, sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
-    ) -> object:
-        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
-        buffer.seek(0)
-        return real_load_source(buffer, sheet, key_mismatch=key_mismatch)
-
-    def _fake_load_aop(
-        _path: str,
-        *,
-        sheet: str = "AOP1",
-        key_mismatch: str = "prompt",
-        **_kwargs: object,
-    ) -> object:
-        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
-        buffer.seek(0)
-        return real_load_aop(buffer, sheet=sheet, key_mismatch=key_mismatch)
-
-    def _fake_load_skulu(_path: str, *, sheet: str = "SKU_LU") -> object:
-        buffer.seek(0)
-        return real_load_skulu(buffer, sheet=sheet)
-
-    monkeypatch.setattr("src.normalize_le.load_source", _fake_load_source)
-    monkeypatch.setattr("src.load_aop.load_aop", _fake_load_aop)
-    monkeypatch.setattr("src.load_skulu.load_skulu", _fake_load_skulu)
 
 
 def test_import_le_returns_normalized_frame(
