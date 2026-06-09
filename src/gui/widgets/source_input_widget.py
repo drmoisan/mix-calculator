@@ -20,18 +20,17 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from src.gui.widgets._source_input_button_wiring import (
     apply_schema_list,
+    assemble_source_input_layout,
+    build_source_input_controls,
     is_real_schema,
     select_schema,
+    set_edit_enabled,
     set_import_enabled,
 )
 
@@ -73,6 +72,9 @@ class SourceInputWidget(QWidget):
             schema dropdown (WS2 / issue #48).
         build_schema_requested: Emitted when the user clicks the per-tab "Build
             new schema" button (WS2 / issue #48).
+        edit_schema_requested: Emitted when the user clicks the per-tab "Edit
+            Schema" button (issue #60 Defect 1). The composition root opens the
+            schema builder seeded from the currently-selected schema.
         _import_button: The optional per-input Import button, constructed only
             when an ``import_label`` is supplied (issue #27 AC11). ``None`` when
             the widget is built without an import button.
@@ -85,6 +87,9 @@ class SourceInputWidget(QWidget):
     schema_selected: Signal = Signal(str)
     # WS2: emitted when the user clicks the per-tab "Build new schema" button.
     build_schema_requested: Signal = Signal()
+    # Issue #60 Defect 1: emitted when the user clicks the per-tab "Edit Schema"
+    # button so the composition root opens the builder seeded from the selection.
+    edit_schema_requested: Signal = Signal()
 
     def __init__(
         self,
@@ -117,50 +122,25 @@ class SourceInputWidget(QWidget):
         super().__init__(parent)
         self._path = ""
 
-        # Build the controls: a labeled file row, the tab dropdown, the render
-        # checkbox, and an error label.
-        self._path_edit = QLineEdit()
-        self._path_edit.setReadOnly(True)
-        self._browse_button = QPushButton("Select File...")
-        self._tab_combo = QComboBox()
-        if default_sheet:
-            self._tab_combo.addItem(default_sheet)
-        self._render_checkbox = QCheckBox("Render tab")
-        # WS2: the schema dropdown with the placeholder as its first item, plus
-        # the "Build new schema" button. The combo starts at the placeholder so
-        # no schema is auto-selected until discovery proceeds.
-        self._schema_combo = QComboBox()
-        self._schema_combo.addItem(_SCHEMA_PLACEHOLDER)
-        self._build_schema_button = QPushButton("Build new schema")
-        self._error_label = QLabel("")
-        # Construct the per-input Import button only when the caller opts in by
-        # supplying an import label (issue #27 AC11); otherwise leave it None so
-        # callers that do not want an in-widget button get no extra control.
-        self._import_button = (
-            QPushButton(import_label) if import_label is not None else None
+        # Construct the child controls and assemble the layout via the helper
+        # module so this widget stays under the 500-line cap (issue #60 Defect 1
+        # adds the Edit Schema button). The widget retains ownership of the
+        # controls by assigning them onto its own attributes below.
+        controls = build_source_input_controls(
+            default_sheet=default_sheet,
+            schema_placeholder=_SCHEMA_PLACEHOLDER,
+            import_label=import_label,
         )
-        # Decision 8: the Import button starts disabled and enables only when a
-        # non-placeholder schema is selected for this tab.
-        if self._import_button is not None:
-            self._import_button.setEnabled(False)
-
-        file_row = QHBoxLayout()
-        file_row.addWidget(QLabel(input_label))
-        file_row.addWidget(self._path_edit)
-        file_row.addWidget(self._browse_button)
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(file_row)
-        layout.addWidget(self._tab_combo)
-        # WS2: the schema selector and build button live below the tab dropdown.
-        layout.addWidget(self._schema_combo)
-        layout.addWidget(self._build_schema_button)
-        layout.addWidget(self._render_checkbox)
-        # Place the optional Import button beside the render checkbox so the
-        # per-input import control lives inside this widget (issue #27 AC11).
-        if self._import_button is not None:
-            layout.addWidget(self._import_button)
-        layout.addWidget(self._error_label)
+        self._path_edit = controls.path_edit
+        self._browse_button = controls.browse_button
+        self._tab_combo = controls.tab_combo
+        self._render_checkbox = controls.render_checkbox
+        self._schema_combo = controls.schema_combo
+        self._build_schema_button = controls.build_schema_button
+        self._edit_schema_button = controls.edit_schema_button
+        self._error_label = controls.error_label
+        self._import_button = controls.import_button
+        assemble_source_input_layout(self, input_label, controls)
 
         # Wire internal controls to the widget's signal-emitting handlers.
         self._browse_button.clicked.connect(self.open_file_dialog)
@@ -171,6 +151,9 @@ class SourceInputWidget(QWidget):
         # WS2: forward schema selection and build-new requests as signals.
         self._schema_combo.currentTextChanged.connect(self._on_schema_changed)
         self._build_schema_button.clicked.connect(self.build_schema_requested.emit)
+        # Issue #60 Defect 1: forward Edit-Schema clicks as a signal the
+        # composition root wires to open the builder seeded from the selection.
+        self._edit_schema_button.clicked.connect(self.edit_schema_requested.emit)
 
     @property
     def import_btn(self) -> QPushButton:
@@ -208,6 +191,20 @@ class SourceInputWidget(QWidget):
             The "Build new schema" :class:`QPushButton` owned by this widget.
         """
         return self._build_schema_button
+
+    @property
+    def edit_schema_btn(self) -> QPushButton:
+        """Return the per-tab "Edit Schema" button (issue #60 Defect 1).
+
+        Exposed read-only so the composition root can connect the button (in
+        addition to the ``edit_schema_requested`` signal) and tests can click it
+        and assert its enabled state deterministically. The button is disabled
+        until a real (non-placeholder) schema is selected.
+
+        Returns:
+            The "Edit Schema" :class:`QPushButton` owned by this widget.
+        """
+        return self._edit_schema_button
 
     @property
     def tab_combo(self) -> QComboBox:
@@ -484,14 +481,18 @@ class SourceInputWidget(QWidget):
             ``None``.
 
         Side effects:
-            Self-gates the Import button (enable for a real schema, disable on
-            the placeholder) and emits ``schema_selected`` only for a real schema.
+            Self-gates the Import and Edit-Schema buttons (enable for a real
+            schema, disable on the placeholder) and emits ``schema_selected``
+            only for a real schema.
         """
         # Decision 8: a real schema selection enables Import; returning to the
         # placeholder (or empty) re-disables it. The widget self-gates so the
         # enable/disable state always tracks the dropdown, and only a genuine
-        # choice propagates to the presenter/composition root.
+        # choice propagates to the presenter/composition root. Issue #60 Defect 1:
+        # the Edit Schema button tracks the same real-vs-placeholder gate as
+        # Import so it is editable only for a real schema.
         is_real = is_real_schema(name, _SCHEMA_PLACEHOLDER)
         set_import_enabled(self._import_button, is_real)
+        set_edit_enabled(self._edit_schema_button, is_real)
         if is_real:
             self.schema_selected.emit(name)

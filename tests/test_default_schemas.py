@@ -273,9 +273,118 @@ def test_le_fill_rules_cover_fy_and_quarters() -> None:
     assert "YTD" not in rules
 
 
-@pytest.mark.parametrize("name", ["default_aop", "default_le"])
+# Canonical declared column set for SKU_LU (issue #60 Defect 2): a flat lookup of
+# SKU to its description, category, and country.
+_SKU_LU_COLUMNS = ["SKU", "SKU Description", "Category", "Country"]
+
+
+def test_sku_lu_columns_and_order_match_canonical() -> None:
+    """The SKU_LU schema declares SKU, SKU Description, Category, Country in order."""
+    # Arrange / Act
+    schema = _load_bundled("default_sku_lu")
+
+    # Assert
+    assert [column.canonical_name for column in schema.columns] == _SKU_LU_COLUMNS
+
+
+def test_sku_lu_country_carries_international_alias() -> None:
+    """The SKU_LU Country column carries the ``International`` alias (and only it)."""
+    # Arrange / Act
+    schema = _load_bundled("default_sku_lu")
+
+    # Assert: Country aliases ``International``; the other columns carry no aliases.
+    country = next(c for c in schema.columns if c.canonical_name == "Country")
+    assert country.aliases == ("International",)
+    non_country_aliases = [
+        c.aliases for c in schema.columns if c.canonical_name != "Country"
+    ]
+    assert all(aliases == () for aliases in non_country_aliases)
+
+
+def test_sku_lu_key_is_sku_without_coercion() -> None:
+    """The SKU_LU key is the single SKU column with sku_coercion disabled."""
+    # Arrange / Act
+    schema = _load_bundled("default_sku_lu")
+
+    # Assert
+    assert schema.key.column_names == ("SKU",)
+    assert schema.key.sku_coercion is False
+
+
+def test_sku_lu_header_row_zero_and_no_dedup_or_transforms() -> None:
+    """SKU_LU uses header_row 0, no dedup, and no derived/fill/drop transforms."""
+    # Arrange / Act
+    schema = _load_bundled("default_sku_lu")
+
+    # Assert: a flat lookup — header on row 0, no collapse, no transforms.
+    assert schema.header_row == 0
+    assert schema.dedup.mode == "none"
+    assert schema.derived_columns == ()
+    assert schema.fill_rules == ()
+    assert schema.drop_columns == ()
+
+
+def test_sku_lu_schema_does_not_encode_country_code_value_mapping() -> None:
+    """AC-6: the country-code value mapping (0->US, 1->Canada) is not in the schema.
+
+    The country-code transform is a loader-side cell-value mapping in
+    ``load_skulu`` with no representation in the schema model. This asserts the
+    bundled SKU_LU schema encodes no such value mapping structurally: the
+    ColumnSpec model exposes no value-map/recode attribute, the Country column's
+    only metadata is the ``International`` header-matching alias (not a cell-value
+    map), and the schema's structured fields (key/dedup/derived/fill/drop) carry
+    no recode of the country codes. The description prose may *document* that the
+    mapping stays loader-only; the structural assertions below — not a prose scan
+    — are the AC-6 guard.
+    """
+    # Arrange / Act
+    schema = _load_bundled("default_sku_lu")
+    country = next(c for c in schema.columns if c.canonical_name == "Country")
+
+    # Assert: the ColumnSpec model has no value-mapping/recode construct at all, so
+    # a country-code map cannot be encoded on the column.
+    value_map_attrs = ("value_map", "value_mapping", "recode", "code_map", "mapping")
+    for attr in value_map_attrs:
+        assert not hasattr(country, attr)
+    # The only Country metadata is the header-matching alias, not a value map.
+    assert country.aliases == ("International",)
+    # No transform field recodes the country codes: SKU_LU is a flat lookup with no
+    # derived columns, fill rules, drop columns, or dedup.
+    assert schema.derived_columns == ()
+    assert schema.fill_rules == ()
+    assert schema.drop_columns == ()
+    assert schema.dedup.mode == "none"
+
+
+def test_sku_lu_is_auto_discovered_in_registry_listing() -> None:
+    """AC-5: a real registry over src/schemas/ lists default_sku_lu (dropdown).
+
+    The schema dropdown is populated from the registry's listed names. A real
+    disk-backed registry scanning the packaged ``src/schemas/`` directory must
+    surface ``default_sku_lu`` (alongside the existing bundled defaults) so it
+    appears in the dropdown at startup, confirming auto-discovery of the new file.
+    """
+    from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
+
+    # Arrange: a real registry whose bundled directory is the packaged schemas dir.
+    registry = SchemaRegistry(
+        Path("/nonexistent-registry"),
+        DiskSchemaFileStore(),
+        bundled_dir=_SCHEMAS_DIR,
+    )
+
+    # Act
+    listed = registry.list_schemas()
+
+    # Assert: all three bundled defaults are auto-discovered and listed.
+    assert "default_sku_lu" in listed
+    assert "default_le" in listed
+    assert "default_aop" in listed
+
+
+@pytest.mark.parametrize("name", ["default_aop", "default_le", "default_sku_lu"])
 def test_bundled_schema_parses_without_raising(name: str) -> None:
-    """Both bundled schemas parse into SchemaDefinition objects."""
+    """Each bundled schema parses into a SchemaDefinition object."""
     # Arrange / Act
     schema = _load_bundled(name)
 

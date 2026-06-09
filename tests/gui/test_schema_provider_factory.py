@@ -9,7 +9,10 @@ All schemas are fabricated; no disk or network access.
 
 from __future__ import annotations
 
-from src.gui._schema_provider_factory import build_spec_provider
+from src.gui._schema_provider_factory import (
+    DEFAULT_SOURCE_SCHEMA_NAMES,
+    build_spec_provider,
+)
 from src.schema_model import (
     ColumnSpec,
     KeySpec,
@@ -166,3 +169,41 @@ def test_real_bundled_le_ytd_ytg_is_in_optional_specs() -> None:
     required_names = tuple(c.canonical_name for c in le_spec.required_specs)
     assert "YTD/YTG" in optional_names
     assert "YTD/YTG" not in required_names
+
+
+def test_sku_lu_default_schema_name_maps_to_bundled_default() -> None:
+    """AC-5: the sku_lu source key maps to the bundled ``default_sku_lu`` schema.
+
+    Issue #60 Defect 2 flips the prior ``None`` mapping so the SKU_LU per-tab
+    Build button seeds from the bundled default and a SKU_LU sheet auto-matches.
+    """
+    # Assert: the sku_lu key now resolves to the bundled default name.
+    assert DEFAULT_SOURCE_SCHEMA_NAMES["sku_lu"] == "default_sku_lu"
+
+
+def test_le_and_aop_default_mappings_are_unchanged() -> None:
+    """AC-11: flipping sku_lu does not change the LE or AOP default mappings."""
+    # Assert: the LE and AOP defaults are untouched by the SKU_LU change.
+    assert DEFAULT_SOURCE_SCHEMA_NAMES["LE"] == "default_le"
+    assert DEFAULT_SOURCE_SCHEMA_NAMES["aop"] == "default_aop"
+
+
+def test_unmapped_key_with_none_override_resolves_to_blank_spec() -> None:
+    """A key explicitly mapped to ``None`` resolves to a blank spec (no raise).
+
+    The provider's ``schema_names`` override is a public seam; a key mapped to
+    ``None`` (a source with no bundled default) must degrade to a blank spec so
+    the per-tab open path stays blank rather than failing. Now that every default
+    source key ships a bundled schema, this override exercises the no-default path
+    directly.
+    """
+    # Arrange: override the mapping so one key has no bundled default.
+    provider = build_spec_provider(_service(), schema_names={"LE": None})
+
+    # Act
+    le_spec = provider.build_spec_for("LE")
+
+    # Assert: the unmapped key opens a blank builder rather than raising.
+    assert le_spec.required_specs == ()
+    assert le_spec.optional_specs == ()
+    assert le_spec.preview_slice is None

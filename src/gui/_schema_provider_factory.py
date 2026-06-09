@@ -36,12 +36,13 @@ __all__ = [
     "build_spec_provider",
 ]
 
-# The bundled default schema each source key seeds its builder from. ``sku_lu`` has
-# no bundled default, so it maps to an empty spec until the user authors one.
+# The bundled default schema each source key seeds its builder from. Each source
+# now ships a bundled default (issue #60 Defect 2 added ``default_sku_lu``), so
+# the registry auto-discovers all three and the per-tab Build button seeds from them.
 DEFAULT_SOURCE_SCHEMA_NAMES: dict[str, str | None] = {
     "LE": "default_le",
     "aop": "default_aop",
-    "sku_lu": None,
+    "sku_lu": "default_sku_lu",
 }
 
 # A small number of synthetic masked sample rows per preview slice. The values are
