@@ -176,3 +176,18 @@ projects:
   src/gui/widgets/schema_builder_dialog.py: T3
   src/gui/widgets/_schema_builder_tabs.py: T3
   src/gui/_schema_wiring.py: T4
+
+  # Configurable-schema GUI fixes (issue #60). Tier rationale per
+  # .claude/rules/quality-tiers.md:
+  #   T4 (Scaffolding) — composition-root wiring helpers and widget button
+  #     construction/gating glue, siblings of _schema_wiring/_wiring: pure Qt
+  #     signal wiring and control construction with no transform logic.
+  src/gui/widgets/_source_input_button_wiring.py: T4
+  src/gui/_schema_discovery_wiring.py: T4
+  src/gui/_schema_provider_factory.py: T4
+  #   T2 (Core) — activation-time schema classification and header-row detection
+  #     hold presentation/decision logic the discovery flow consumes; bugs cause
+  #     feature regressions (wrong/absent schema activation), not data loss, so
+  #     they carry the Core obligations like the other schema-decision modules.
+  src/gui/_schema_activation.py: T2
+  src/_header_detection.py: T2

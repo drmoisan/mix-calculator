@@ -1,0 +1,70 @@
+{
+  "name": "default_sku_lu",
+  "version": "2.0",
+  "description": "Bundled default schema for the SKU_LU (SKU lookup) source. SKU_LU is a flat lookup mapping each SKU to its description, category, and country; no rows are collapsed and no columns are derived or dropped. The country-code value mapping (0 -> US, 1 -> Canada) is a loader-side cell-value transform in load_skulu and is intentionally not encoded here.",
+  "source_sheet_hints": [
+    "SKU_LU"
+  ],
+  "header_row": 0,
+  "columns": [
+    {
+      "canonical_name": "SKU",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "SKU Description",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Category",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    },
+    {
+      "canonical_name": "Country",
+      "role": "dimension",
+      "required": true,
+      "in_output": true,
+      "aliases": [
+        "International"
+      ],
+      "numeric": false,
+      "expected_dtype": null,
+      "sentinel_clean": false
+    }
+  ],
+  "key": {
+    "parts": [
+      {
+        "kind": "column-ref",
+        "value": "SKU"
+      }
+    ],
+    "sku_coercion": false
+  },
+  "dedup": {
+    "mode": "none",
+    "discriminator_column": null,
+    "measure_aggregations": []
+  },
+  "derived_columns": [],
+  "fill_rules": [],
+  "drop_columns": []
+}

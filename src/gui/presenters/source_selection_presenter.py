@@ -39,12 +39,64 @@ logger = logging.getLogger(__name__)
 # Default preview row cap, matching the spec preview bound.
 _PREVIEW_MAX_ROWS = 200
 
-# Rows read to extract the header for schema discovery (the first/header row).
-_HEADER_PREVIEW_ROWS = 1
+# Rows read to extract the header for schema discovery. A multi-row preview is
+# read so discovery can locate the real header row when leading rows are
+# stray/blank: the AOP1 layout puts its real header on the third sheet row
+# (zero-based index 2), the worst observed header offset, so a window of 5 rows
+# covers it with margin while staying bounded.
+_HEADER_PREVIEW_ROWS = 5
 
 # The dropdown's "no schema selected" placeholder. Setting it on a no-match or a
 # partial match keeps Import disabled (the widget self-gates on the placeholder).
 _SCHEMA_PLACEHOLDER = "<Choose Schema>"
+
+
+def _best_header_row(
+    rows: list[list[str]], service: SchemaServiceProtocol
+) -> list[str]:
+    """Select the preview row that best matches a registry schema as the header.
+
+    Scores each preview row against the registry by running the service's
+    alias-aware best-match and keeping the row whose match selects a schema with
+    the highest coverage score. This locates the real header when leading preview
+    rows are stray/blank (the AOP1 layout puts its header on index 2): the
+    earliest row that scores highest wins, so a sheet whose header is on row 0
+    (LE/SKU_LU) still returns row 0 and the same schema activates as before.
+
+    Args:
+        rows: The multi-row preview, earliest row first. Assumed non-empty by the
+            caller (the empty-preview guard runs before this helper).
+        service: The schema service used to score each candidate header row via
+            its alias-aware registry match.
+
+    Returns:
+        The preview row (a list of header tokens) with the highest schema-match
+        score. When no row's match selects a schema, ``rows[0]`` is returned as
+        the fallback so discovery behaves exactly as the prior first-row logic.
+
+    Side effects:
+        Calls ``service.find_best_match`` once per preview row.
+    """
+    best_row: list[str] | None = None
+    best_score = float("-inf")
+    # Walk the preview rows earliest-first and keep the highest-scoring row whose
+    # match selects a schema. The strict ">" comparison makes the earliest row win
+    # ties, preserving row-0 selection for headers already on the first row.
+    for row in rows:
+        result = service.find_best_match(row)
+        # A row that matches no candidate schema cannot be the header; skip it so
+        # only rows that bind to a real schema can win the selection.
+        if result.schema is None:
+            continue
+        if result.score > best_score:
+            best_score = result.score
+            best_row = row
+    # No row matched any schema (for example a blank/stray-only preview): fall
+    # back to the first row so the downstream classify_activation behaves exactly
+    # as the prior single-row discovery did.
+    if best_row is None:
+        return rows[0]
+    return best_row
 
 
 class SourceSelectionPresenter:
@@ -250,7 +302,10 @@ class SourceSelectionPresenter:
         # An empty preview carries no header to match, so leave the placeholder.
         if not rows:
             return
-        headers = rows[0]
+        # Select the best-matching header row from the multi-row preview so a
+        # sheet whose real header is on a later row (AOP1: index 2, with stray
+        # leading rows) is matched; LE/SKU_LU headers on row 0 are unaffected.
+        headers = _best_header_row(rows, self._schema_service)
         # Import the activation classifier locally so the presenter module does
         # not depend on the activation module at import time.
         from src.gui._schema_activation import classify_activation

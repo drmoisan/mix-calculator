@@ -413,3 +413,70 @@ def test_returning_to_placeholder_disables_import_button(qtbot: QtBot) -> None:
 
     # Assert: Import is disabled again.
     assert widget.import_btn.isEnabled() is False
+
+
+# Issue #60 Defect 1: Edit Schema button tests.
+
+
+def test_edit_schema_button_is_present_with_expected_text(qtbot: QtBot) -> None:
+    """AC-1: the widget exposes an "Edit Schema" button beside the schema controls."""
+    # Arrange / Act
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    # Assert: the Edit button is present and carries the expected label.
+    assert widget.edit_schema_btn.text() == "Edit Schema"
+
+
+def test_edit_schema_button_starts_disabled_on_placeholder(qtbot: QtBot) -> None:
+    """AC-3: the Edit button is disabled when the placeholder is selected."""
+    # Arrange / Act: a fresh widget starts on the placeholder.
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+
+    # Assert: with the placeholder selected, the Edit button is disabled.
+    assert widget.current_schema() == "<Choose Schema>"
+    assert widget.edit_schema_btn.isEnabled() is False
+
+
+def test_selecting_real_schema_enables_edit_button(qtbot: QtBot) -> None:
+    """AC-3: selecting a non-placeholder schema enables the Edit button."""
+    # Arrange
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["le_v1"])
+
+    # Act
+    widget.set_selected_schema("le_v1")
+
+    # Assert
+    assert widget.edit_schema_btn.isEnabled() is True
+
+
+def test_returning_to_placeholder_disables_edit_button(qtbot: QtBot) -> None:
+    """AC-3: returning to the placeholder re-disables the Edit button."""
+    # Arrange: select a real schema so Edit is enabled.
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["le_v1"])
+    widget.set_selected_schema("le_v1")
+    assert widget.edit_schema_btn.isEnabled() is True
+
+    # Act: re-populate the list, which resets the selection to the placeholder.
+    widget.set_schema_list(["le_v1"])
+
+    # Assert: Edit is disabled again.
+    assert widget.edit_schema_btn.isEnabled() is False
+
+
+def test_clicking_edit_schema_button_emits_edit_schema_requested(qtbot: QtBot) -> None:
+    """AC-1: clicking the Edit button emits edit_schema_requested."""
+    # Arrange: enable the Edit button by selecting a real schema first.
+    widget = SourceInputWidget("LE")
+    qtbot.addWidget(widget)
+    widget.set_schema_list(["le_v1"])
+    widget.set_selected_schema("le_v1")
+
+    # Act / Assert: the button click emits the edit-request signal.
+    with qtbot.waitSignal(widget.edit_schema_requested, timeout=_SIGNAL_TIMEOUT_MS):
+        widget.edit_schema_btn.click()
