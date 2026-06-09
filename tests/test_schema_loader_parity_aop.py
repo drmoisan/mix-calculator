@@ -1,11 +1,25 @@
-"""AOP parity tests for SchemaLoader vs load_aop (Issue #43, AC2).
+"""AOP parity tests for SchemaLoader vs load_aop (Issue #43, AC1/AC4/AC6).
 
-Proves ``SchemaLoader(default_aop).load(raw_aop_frame)`` equals
-``load_aop(<same workbook>)`` (the validated frame) via
-``pandas.testing.assert_frame_equal``. The raw frame and the protected-path
-output are built from the SAME in-memory workbook buffers (the shared AOP
-fixtures). Covers the with-YTG and without-YTG source layouts and the
-sentinel-clean label columns. No temp files, no network.
+Under issue #58 the AOP import path no longer fills blank totals or validates
+arithmetic identities: ``default_aop.fill_rules`` is empty, so a blank total
+coerces to ``0`` and totals pass through unchanged. The whole-frame equality
+against ``load_aop`` (which still fills and validates) therefore no longer holds.
+These tests instead assert structural parity with the prior loader for the
+populated-source cases:
+
+- column set and order match the canonical AOP source layout, and
+- the ``KEY`` composition (``Customer + coerce_sku(SKU #) + Type``) matches.
+
+Two issue-#58-specific behaviors are added:
+
+- a no-arithmetic-validation case (a source whose totals violate
+  ``YTD == sum(months)`` loads through ``SchemaLoader(default_aop)`` without
+  error), and
+- a blank-total-pass-through case (a blank ``YTD`` cell yields ``0`` after
+  coercion, not the computed month sum).
+
+The raw frames are built from the SAME in-memory workbook buffers used by the
+shared AOP fixtures. No temp files, no network.
 """
 
 from __future__ import annotations
@@ -13,9 +27,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pandas.testing import assert_frame_equal
-
 from src import load_aop
+from src.etl_key import coerce_sku
 from src.pandas_io import read_excel_sheet
 from src.schema_loader import SchemaLoader
 from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
@@ -24,6 +37,8 @@ from src.schema_registry import DiskSchemaFileStore, SchemaRegistry
 from tests import aop_fixtures
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from src.schema_model import SchemaDefinition
 
 _MONTHS_A: list[float] = [
@@ -53,33 +68,73 @@ def _default_aop() -> SchemaDefinition:
     return registry.load_bundled_default("default_aop")
 
 
-def _assert_aop_parity(
+def _load_schema_aop(
     rows: list[dict[str, object]],
     *,
     header: list[str] | None = None,
-) -> None:
-    """Assert SchemaLoader and load_aop agree on the same AOP workbook.
+) -> pd.DataFrame:
+    """Load AOP rows through the schema-driven path and return the output frame.
 
     Args:
         rows: The AOP source rows to materialize into the workbook.
         header: Optional explicit header (used for the without-YTG layout).
 
-    Raises:
-        AssertionError: If the two outputs differ in columns, order, dtypes, or
-            values.
+    Returns:
+        The ``SchemaLoader(default_aop)`` output for the materialized workbook.
     """
     raw_frame = read_excel_sheet(
         aop_fixtures.build_aop_workbook(rows, header=header),
         sheet_name="AOP1",
         header=2,
     )
+    return SchemaLoader(_default_aop()).load(raw_frame)
+
+
+def _expected_key(row: dict[str, object]) -> str:
+    """Compute the canonical KEY for a row: Customer + coerce_sku(SKU #) + Type.
+
+    Args:
+        row: An AOP source-row dict (see ``aop_fixtures.make_aop_row``).
+
+    Returns:
+        The rebuilt KEY string the loader is expected to produce.
+    """
+    return f"{row['Customer']}{coerce_sku(row['SKU #'])}{row['Type']}"
+
+
+def _assert_aop_parity(
+    rows: list[dict[str, object]],
+    *,
+    header: list[str] | None = None,
+) -> None:
+    """Assert structural parity between the schema path and the prior loader.
+
+    Under cleared ``fill_rules`` the schema path no longer matches ``load_aop``
+    value-for-value (the protected loader still fills/validates). This helper
+    instead asserts that, for populated-source rows, the schema-driven output
+    has the same column set and order as the prior loader and the same KEY
+    composition row-for-row.
+
+    Args:
+        rows: The AOP source rows to materialize into the workbook (each row's
+            totals must be populated so the loaders agree on column structure).
+        header: Optional explicit header (used for the without-YTG layout).
+
+    Raises:
+        AssertionError: If the column set/order or KEY composition diverge.
+    """
+    schema_output = _load_schema_aop(rows, header=header)
     protected = load_aop.load_aop(
         aop_fixtures.build_aop_workbook(rows, header=header),
         sheet="AOP1",
         key_mismatch="overwrite",
     )
-    loader_output = SchemaLoader(_default_aop()).load(raw_frame)
-    assert_frame_equal(loader_output, protected, check_dtype=True, check_like=False)
+    # Column set and order match the prior loader exactly (AC-6).
+    assert list(schema_output.columns) == list(protected.columns)
+    # KEY composition matches the rebuilt pattern row-for-row (AC-6).
+    expected_keys = [_expected_key(row) for row in rows if row["Customer"] is not None]
+    assert list(schema_output["KEY"]) == expected_keys
+    assert list(protected["KEY"]) == expected_keys
 
 
 def test_aop_parity_with_ytg() -> None:
@@ -137,3 +192,48 @@ def test_aop_parity_no_row_collapse() -> None:
         aop_fixtures.make_aop_row(customer="A", sku="1", type_="Net", months=_MONTHS_B),
     ]
     _assert_aop_parity(rows)
+
+
+def test_aop_no_arithmetic_validation_loads_broken_totals() -> None:
+    """A source whose totals violate YTD == sum(months) loads without error (AC1).
+
+    The schema-driven AOP path applies no arithmetic identity validation, so a
+    row whose ``YTD`` does not equal the sum of its months passes through. The
+    prior ``load_aop`` path would raise on the same source.
+    """
+    # Arrange: a populated row whose YTD is deliberately inconsistent with months.
+    row = aop_fixtures.make_aop_row(
+        customer="A", sku="1", type_="Net", months=_MONTHS_A
+    )
+    row["YTD"] = 999999.0  # Violates any YTD == sum(...) identity.
+
+    # Act: the schema-driven path loads the broken-total source without raising.
+    out = _load_schema_aop([row])
+
+    # Assert: the violating total passes through unchanged (no validation, no fill).
+    assert out.loc[0, "YTD"] == 999999.0
+    assert out.loc[0, "KEY"] == _expected_key(row)
+
+
+def test_aop_blank_total_coerces_to_zero_not_month_sum() -> None:
+    """A blank YTD cell yields 0 after coercion, not the computed month sum (AC4).
+
+    With ``fill_rules`` cleared, no blank-total fill runs on the AOP path, so a
+    blank ``YTD`` is coerced to ``0`` by numeric coercion rather than being
+    derived from the month components.
+    """
+    # Arrange: a row whose totals (including YTD) are left blank.
+    row = aop_fixtures.make_aop_row(
+        customer="A",
+        sku="1",
+        type_="Net",
+        months=_MONTHS_A,
+        blank_totals=True,
+    )
+
+    # Act
+    out = _load_schema_aop([row])
+
+    # Assert: the blank YTD became 0, not sum(_MONTHS_A) (the computed month sum).
+    assert out.loc[0, "YTD"] == 0.0
+    assert out.loc[0, "YTD"] != sum(_MONTHS_A)

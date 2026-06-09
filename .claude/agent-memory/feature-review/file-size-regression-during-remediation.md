@@ -16,8 +16,19 @@ from 229 (main) to 506 lines. The executor's P7-T8 final-file-sizes evidence lis
 17 files and did not include this one, so the new cap violation passed the cycle's
 self-QA and became the sole blocking finding at exit.
 
-**How to apply:** Run a full git-diff line-count scan as a standing reaudit step.
-Treat any changed test file > 500 as a blocking FAIL (the cap applies to test code
-per `general-code-change.md`). Compare to the `main` baseline (`git show main:<f>`)
-to characterize whether the cycle introduced the regression. See
-[[issue2-file-size-watch]] for the related normalize-le clustering pattern.
+Recurred on issue #58 (2026-06-08, first-pass feature review, not a remediation
+cycle): the feature pushed `tests/gui/test_pipeline_service.py` 471->638 and
+`tests/test_schema_loader_core.py` 374->501. The executor's
+`evidence/qa-gates/file-size-final.md` tracked ONLY the 4 production files (it even
+documented extracting a helper to keep `pipeline_service.py` at 500) and never
+scanned the changed test files — so two test-file cap violations shipped clean
+through self-QA. This blind spot (executor file-size evidence = production-only) is
+the consistent failure mode; the audit's independent test-file scan caught both.
+
+**How to apply:** Run a full git-diff line-count scan as a standing reaudit step on
+EVERY feature/bug review, not just remediation cycles. Treat any changed test file
+> 500 as a blocking FAIL (the cap applies to test code per `general-code-change.md`).
+The executor's file-size evidence routinely omits test files; never accept it as the
+scan. Compare to the merge-base baseline (`git show <merge-base>:<f>`) to attribute
+the regression. See [[issue2-file-size-watch]] for the related normalize-le
+clustering pattern.

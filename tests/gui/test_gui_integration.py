@@ -132,12 +132,22 @@ def _build_combined_workbook() -> io.BytesIO:
 
 
 def _patch_loaders(monkeypatch: pytest.MonkeyPatch, buffer: io.BytesIO) -> None:
-    """Patch the three loader reads to read a single shared in-memory buffer."""
-    from src import load_aop, load_skulu, normalize_le
+    """Patch the source reads to read a single shared in-memory buffer.
+
+    LE and SKU_LU are patched at their loader entry points. The AOP import now
+    routes through the schema-driven path (issue #58), which reads via
+    :func:`src._header_detection.detect_header_row` and
+    :func:`src.pandas_io.read_excel_sheet`; those two read boundaries are
+    re-targeted to substitute the shared buffer for the AOP path. LE and SKU_LU
+    never reach those boundaries (intercepted at their loader entry points), so
+    re-targeting the shared read boundary affects only the AOP path here.
+    """
+    from src import _header_detection, load_skulu, normalize_le, pandas_io
 
     real_load_source = normalize_le.load_source
-    real_load_aop = load_aop.load_aop
     real_load_skulu = load_skulu.load_skulu
+    real_detect_header_row = _header_detection.detect_header_row
+    real_read_excel_sheet = pandas_io.read_excel_sheet
 
     def _fake_load_source(
         _path: str, sheet: str, *, key_mismatch: str = "prompt", **_kwargs: object
@@ -146,23 +156,40 @@ def _patch_loaders(monkeypatch: pytest.MonkeyPatch, buffer: io.BytesIO) -> None:
         buffer.seek(0)
         return real_load_source(buffer, sheet, key_mismatch=key_mismatch)
 
-    def _fake_load_aop(
-        _path: str,
+    def _fake_detect_header_row(
+        _source: object,
+        sheet_name: str,
+        expected_tokens: frozenset[str],
         *,
-        sheet: str = "AOP1",
-        key_mismatch: str = "prompt",
-        **_kwargs: object,
-    ) -> object:
-        # Absorb the WS1a is_tty/prompt seams the service now forwards (issue #48).
+        min_match: int,
+        max_rows: int = 5,
+    ) -> int:
+        # Redirect the AOP schema path's header detection to the shared buffer.
         buffer.seek(0)
-        return real_load_aop(buffer, sheet=sheet, key_mismatch=key_mismatch)
+        return real_detect_header_row(
+            buffer,
+            sheet_name,
+            expected_tokens,
+            min_match=min_match,
+            max_rows=max_rows,
+        )
+
+    def _fake_read_excel_sheet(
+        _source: object, *, sheet_name: str, header: int | None = 0
+    ) -> object:
+        # Redirect the AOP schema path's frame read to the shared buffer.
+        buffer.seek(0)
+        return real_read_excel_sheet(buffer, sheet_name=sheet_name, header=header)
 
     def _fake_load_skulu(_path: str, *, sheet: str = "SKU_LU") -> object:
         buffer.seek(0)
         return real_load_skulu(buffer, sheet=sheet)
 
     monkeypatch.setattr("src.normalize_le.load_source", _fake_load_source)
-    monkeypatch.setattr("src.load_aop.load_aop", _fake_load_aop)
+    monkeypatch.setattr(
+        "src._header_detection.detect_header_row", _fake_detect_header_row
+    )
+    monkeypatch.setattr("src.pandas_io.read_excel_sheet", _fake_read_excel_sheet)
     monkeypatch.setattr("src.load_skulu.load_skulu", _fake_load_skulu)
 
 

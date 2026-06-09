@@ -2,15 +2,19 @@
 
 This module is the single seam the GUI presenters use to import sources, run the
 pure transform pipeline, and persist/load the SQLite result database. It reuses
-the existing loaders (:mod:`src.normalize_le`, :mod:`src.load_aop`,
-:mod:`src.load_skulu`) and the pure transform chain
-(:mod:`src.mix_lookups`, :mod:`src.mix_transforms`, :mod:`src.mix_pipeline_run`)
-exactly as the CLI ``mix_pipeline.main`` does; it re-implements none of that
-logic. The CLI surface (:mod:`src.mix_pipeline`) is unchanged.
+the existing LE and SKU_LU loaders (:mod:`src.normalize_le`,
+:mod:`src.load_skulu`) and routes the AOP import through the schema-driven
+:class:`~src.schema_loader.SchemaLoader` (issue #58) rather than the legacy
+arithmetic-validating ``src.load_aop`` loader (which remains the CLI path). It
+reuses the pure transform chain (:mod:`src.mix_lookups`,
+:mod:`src.mix_transforms`, :mod:`src.mix_pipeline_run`) exactly as the CLI
+``mix_pipeline.main`` does; it re-implements none of that logic. The CLI surface
+(:mod:`src.mix_pipeline`) is unchanged.
 
 Responsibilities:
-    - ``import_le``/``import_aop``/``import_skulu`` read one source via the
-      reused loaders and return an in-memory frame (no disk write).
+    - ``import_le``/``import_aop``/``import_skulu`` read one source (LE/SKU_LU via
+      the reused loaders, AOP via the schema-driven loader) and return an
+      in-memory frame (no disk write).
     - ``import_sources`` imports all three inputs from an :class:`ImportSpec`,
       defaulting the SKU_LU workbook to the LE/AOP workbook when unspecified
       (mirrors the CLI ``--skulu-input`` default).
@@ -20,7 +24,8 @@ Responsibilities:
       :class:`~src.gui.services.db_service.DbService` (wired in a later phase).
 
 Boundaries:
-    - Excel reads route through the reused loaders (which use ``src.pandas_io``).
+    - Excel reads route through the reused LE/SKU_LU loaders and, for AOP, the
+      schema-import helper's read boundary (all built on ``src.pandas_io``).
     - SQLite reads/writes route through the injected ``DbService`` (which uses
       ``src.pandas_io``).
     - ``run_pipeline`` is pure orchestration over the existing transforms.
@@ -32,7 +37,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from src import load_aop, load_skulu, normalize_le
+from src import load_skulu, normalize_le
 from src.gui._key_mismatch_seam import (
     default_key_mismatch_resolver,
     never_tty,
@@ -266,8 +271,7 @@ class PipelineService:
         self._db_service = db_service if db_service is not None else DbService()
         # The resolver decides the KEY-mismatch policy from concrete divergence
         # examples; it is forwarded to the loaders as the divergence-only
-        # ``resolver`` (no eager call), so it fires only when the KEY diverges and
-        # never reaches the interactive prompt path.
+        # ``resolver`` (no eager call), so it fires only on a diverging KEY.
         self._key_mismatch_resolver = key_mismatch_resolver
 
     def import_le(self, path: str, sheet: str) -> pd.DataFrame:
@@ -289,9 +293,8 @@ class PipelineService:
                 KEY-resolution, or tie-out failure.
         """
         logger.info("Importing LE source from sheet %r.", sheet)
-        # Forward the resolver CALLABLE (not its result) plus the no-stdin seams
-        # so a diverging LE KEY resolves through the injected resolver (a Qt modal
-        # dispatched on the GUI thread via the composition-root bridge) only on a
+        # Forward the resolver CALLABLE (not its result) plus the no-stdin seams so
+        # a diverging LE KEY resolves through the injected resolver only on a
         # genuine divergence, never eagerly and never via stdin (issue #52).
         le_source = normalize_le.load_source(
             path,
@@ -305,31 +308,35 @@ class PipelineService:
         return le_output
 
     def import_aop(self, path: str, sheet: str) -> pd.DataFrame:
-        """Load and validate the AOP source, returning the frame.
+        """Import the AOP source through the schema-driven loader (issue #58).
+
+        Thin delegator to :func:`src.gui._aop_schema_import.import_aop_via_schema`,
+        which loads the bundled ``default_aop`` schema, resolves the header row via
+        ``detect_header_row``, reads the raw frame, and transforms it via
+        ``SchemaLoader.load`` (forwarding the injected KEY-mismatch resolver and
+        the no-stdin seams). The detect/read/transform sequence lives in that
+        helper so this module stays within the 500-line file cap. Because the
+        schema has empty ``fill_rules``, blank totals coerce to ``0`` and no
+        arithmetic identity is validated, so a source whose totals violate
+        ``YTD == sum(months)`` imports without error.
 
         Args:
-            path: Filesystem path to the AOP workbook.
+            path: Filesystem path to the AOP workbook (or, in tests, a seekable
+                in-memory buffer accepted by the helper's read boundary).
             sheet: AOP worksheet name.
 
         Returns:
-            The validated AOP DataFrame.
+            The schema-driven AOP DataFrame with canonical column names and an
+            established ``KEY`` column.
 
         Raises:
-            ValueError: Propagated from the AOP loader on a column/KEY/validation
-                failure.
+            ValueError: Propagated from header detection or the schema loader on a
+                column-resolution or KEY-resolution failure.
         """
+        from src.gui._aop_schema_import import import_aop_via_schema
+
         logger.info("Importing AOP source from sheet %r.", sheet)
-        # Forward the resolver CALLABLE (not its result) plus the no-stdin seams
-        # so a diverging AOP KEY resolves through the injected resolver (a Qt
-        # modal dispatched on the GUI thread via the composition-root bridge) only
-        # on a genuine divergence, never eagerly and never via stdin (issue #52).
-        return load_aop.load_aop(
-            path,
-            sheet=sheet,
-            is_tty=never_tty,
-            prompt=no_stdin_prompt,
-            resolver=self._key_mismatch_resolver,
-        )
+        return import_aop_via_schema(path, sheet, self._key_mismatch_resolver)
 
     def import_skulu(self, path: str, sheet: str) -> pd.DataFrame:
         """Load and clean the SKU_LU source, returning the frame.

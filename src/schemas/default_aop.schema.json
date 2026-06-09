@@ -3,7 +3,7 @@
   "version": "2.0",
   "description": "Bundled default schema encoding the current AOP loader behavior from src/_load_aop_helpers.py. AOP preserves the full source layout (no column dropped, no derived column added) and does not collapse rows.",
   "source_sheet_hints": [],
-  "header_row": 0,
+  "header_row": 2,
   "columns": [
     {
       "canonical_name": "KEY",
@@ -289,69 +289,6 @@
     "measure_aggregations": []
   },
   "derived_columns": [],
-  "fill_rules": [
-    {
-      "total": "YTD",
-      "components": [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec"
-      ]
-    },
-    {
-      "total": "Q1",
-      "components": [
-        "Jan",
-        "Feb",
-        "Mar"
-      ]
-    },
-    {
-      "total": "Q2",
-      "components": [
-        "Apr",
-        "May",
-        "Jun"
-      ]
-    },
-    {
-      "total": "Q3",
-      "components": [
-        "Jul",
-        "Aug",
-        "Sep"
-      ]
-    },
-    {
-      "total": "Q4",
-      "components": [
-        "Oct",
-        "Nov",
-        "Dec"
-      ]
-    },
-    {
-      "total": "YTG",
-      "components": [
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec"
-      ]
-    }
-  ],
+  "fill_rules": [],
   "drop_columns": []
 }

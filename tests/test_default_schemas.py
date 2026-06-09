@@ -20,6 +20,7 @@ import pytest
 
 from src.schema_model import SchemaDefinition
 from src.schema_registry import SCHEMA_SUFFIX, SchemaRegistry
+from src.schema_serialization import schema_from_json, schema_to_json
 
 # Canonical column order for AOP, mirroring SOURCE_COLUMNS in _load_aop_helpers.py
 # (KEY, identity/dimensions, the twelve months, YTD, the four quarters, YTG, and
@@ -155,16 +156,39 @@ def test_aop_sentinel_clean_labels() -> None:
 
 
 def test_aop_fill_rules_cover_ytd_quarters_and_ytg() -> None:
-    """AOP fill rules cover YTD (Jan..Dec), each quarter, and YTG (May..Dec)."""
+    """AOP declares no fill rules; blank source totals pass through (issue #58).
+
+    Decision 2 cleared the derived blank-total fill on the AOP import path so a
+    blank total cell coerces to 0 rather than being computed from its month
+    components. The schema now declares an empty fill-rule set.
+    """
     # Arrange / Act
     schema = _load_bundled("default_aop")
 
-    # Assert
-    rules = {rule.total: rule.components for rule in schema.fill_rules}
-    assert rules["YTD"] == tuple(_MONTHS)
-    assert rules["Q1"] == ("Jan", "Feb", "Mar")
-    assert rules["Q4"] == ("Oct", "Nov", "Dec")
-    assert rules["YTG"] == tuple(_MONTHS[4:])
+    # Assert: the cleared-rules state replaces the prior six per-total fill rules.
+    assert schema.fill_rules == ()
+
+
+def test_aop_fill_rules_empty_and_header_row_two_round_trips() -> None:
+    """AOP has empty fill rules and header_row 2, and round-trips losslessly.
+
+    Verifies the issue #58 schema edits (cleared ``fill_rules`` and the
+    informational ``header_row`` set to 2) and that the parsed schema serializes
+    and re-parses without error, preserving both fields.
+    """
+    # Arrange / Act
+    schema = _load_bundled("default_aop")
+
+    # Assert: the edited fields are present on the parsed schema.
+    assert schema.fill_rules == ()
+    assert schema.header_row == 2
+
+    # Act: serialize and re-parse to confirm a lossless round-trip.
+    reparsed = schema_from_json(schema_to_json(schema))
+
+    # Assert: the round-tripped schema preserves the edited fields.
+    assert reparsed.fill_rules == ()
+    assert reparsed.header_row == 2
 
 
 def test_le_columns_and_order_match_canonical() -> None:

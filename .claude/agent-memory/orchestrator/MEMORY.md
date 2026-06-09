@@ -16,8 +16,12 @@
 - [new_active_feature_folder date prefix](new-active-feature-folder-date-prefix.md) — standalone feature folders get the YYYY-MM-DD- prefix automatically; epic-child feature folders don't (git mv those)
 - [orchestrator-state validator divergence](orchestrator-state-validator-divergence.md) — MCP orchestrator-state check is stricter than the real SubagentStop hook; conform to the canonical schema's remediation_loop shape
 - [AOP partial-year 8+4 convention](aop-partial-year-8plus4-convention.md) — YTD is actuals-through-cutoff (e.g. Jan..Apr), YTG is the rest; validate_aop must keep the YTD/YTG split consistent (fixed in #48)
+- [AOP YTD convention varies by workbook](aop-ytd-convention-varies-by-workbook.md) — v3 workbook uses full-year YTD WITH YTG present; LE_NEW uses partial Jan..Apr; YTG presence does not determine the YTD month set
 - [Real pipeline workbook location](real-pipeline-workbook-location.md) — user's real .xlsx at artifacts/LE_NEW v LE_ORIG...; gitignored; orchestrator runs loaders against it for end-to-end checks
 - [Audit: verify production call site](audit-verify-production-call-site.md) — a unit-tested view/seam method can pass AC review with zero production callers; grep for the wiring call site, not just the test (caused empty schema dropdown in #48)
 - [Configurable-schema persisted matching](configurable-schema-persisted-matching.md) — schema column matching is persisted as ColumnSpec aliases (not ephemeral); partial match -> "new from template" (#50 decision)
 - [GUI activation seam guards](gui-activation-seam-guards.md) — GUI signal-wired discovery crashes on empty/placeholder selection; integration tests must drive the no-file/no-sheet path, not just the happy path (#50 post-PR crash)
 - [Schema output-membership via in_output](schema-output-membership-in-output.md) — ColumnSpec.in_output (vs required=source-presence) drives loader output by inclusion; drop_columns no longer used for output (#54)
+- [AOP import is schema-driven (#58)](aop-ytd-convention-varies-by-workbook.md) — GUI import_aop routes through SchemaLoader(default_aop), no arithmetic validation, no blank-fill; legacy load_aop CLI kept
+- [Branch base: check unmerged-PR deps](branch-base-check-unmerged-pr-deps.md) — before branching off main, verify the work doesn't depend on code only in an unmerged PR; stack or merge-first if it does
+- [Test files count against 500 cap](test-files-count-against-500-cap.md) — the 500-line cap applies to test code; plans adding tests must scan changed test files in final QA or risk a remediation cycle

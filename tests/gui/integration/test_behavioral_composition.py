@@ -98,29 +98,44 @@ def test_composed_import_path_never_reaches_stdin(
 
     Builds the production pipeline service (no injected service) so the
     composition root's injected example-aware KEY-mismatch resolver is in force,
-    then imports AOP and LE through it. The loaders are patched to record the
-    forwarded resolver CALLABLE (the divergence-only seam under issue #52) and
+    then imports AOP and LE through it. The AOP path is intercepted at
+    ``SchemaLoader.load`` (issue #58 routed AOP through the schema loader) and the
+    LE path at ``normalize_le.load_source``; both record the forwarded resolver
+    CALLABLE (the divergence-only seam under issue #52). The AOP header-detect and
+    frame-read boundaries are stubbed so no workbook I/O occurs, and
     ``builtins.input`` is patched to fail, proving no GUI import path reaches the
     stdin prompt. Invoking each recorded resolver confirms the composed modal
     (forced to "Keep existing") maps to the "trust" policy.
     """
     import pandas as pd
 
-    # Arrange: record the resolver each loader receives and fail on any stdin read.
+    # Arrange: record the resolver each path receives and fail on any stdin read.
     recorded: list[tuple[str, object]] = []
 
     def _input(_prompt: str = "") -> str:
         raise AssertionError("real stdin input() was reached in a GUI session")
 
-    def _fake_load_aop(
-        _path: str,
+    def _fake_schema_load(
+        _self: object,
+        _raw: object,
+        _schema: object = None,
         *,
-        sheet: str = "AOP1",
         resolver: object = None,
         **_kwargs: object,
     ) -> pd.DataFrame:
+        # The AOP import now builds SchemaLoader(default_aop).load(raw, resolver=...).
         recorded.append(("aop", resolver))
         return pd.DataFrame({"KEY": ["k1"]})
+
+    def _fake_detect_header_row(
+        _source: object, _sheet: str, _tokens: object, **_kwargs: object
+    ) -> int:
+        return 0
+
+    def _fake_read_excel_sheet(
+        _source: object, *, sheet_name: str = "", header: object = 0
+    ) -> pd.DataFrame:
+        return pd.DataFrame({"Customer": ["A"]})
 
     def _fake_load_source(
         _path: str, _sheet: str, *, resolver: object = None, **_kwargs: object
@@ -135,7 +150,11 @@ def test_composed_import_path_never_reaches_stdin(
         return None
 
     monkeypatch.setattr("builtins.input", _input)
-    monkeypatch.setattr("src.load_aop.load_aop", _fake_load_aop)
+    monkeypatch.setattr("src.schema_loader.SchemaLoader.load", _fake_schema_load)
+    monkeypatch.setattr(
+        "src._header_detection.detect_header_row", _fake_detect_header_row
+    )
+    monkeypatch.setattr("src.pandas_io.read_excel_sheet", _fake_read_excel_sheet)
     monkeypatch.setattr("src.normalize_le.load_source", _fake_load_source)
     monkeypatch.setattr("src.normalize_le.normalize", _passthrough_normalize)
     monkeypatch.setattr("src.normalize_le.validate_tieouts", _noop_validate)
