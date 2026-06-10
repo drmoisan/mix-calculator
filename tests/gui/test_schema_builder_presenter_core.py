@@ -249,6 +249,39 @@ def test_edit_load_modify_save_round_trips() -> None:
     assert service.saved[-1].dedup.mode == "aggregate"
 
 
+def test_edit_then_save_preserves_persisted_aliases() -> None:
+    """AC-4: an edit-then-save round-trip preserves the persisted column aliases.
+
+    Loads a schema whose ``Customer`` column carries the persisted alias
+    ``cust_col``, mirrors the rendered rows back as the view's edits (the user
+    makes no change), then saves. The saved schema's column aliases must be
+    retained through the round-trip.
+    """
+    # Arrange: load a stored schema with a persisted alias on Customer.
+    schema = stored_schema_with_structured_key_and_aggregate()
+    view = FakeSchemaBuilderView()
+    service = FakeSchemaService(schemas={"tmpl": schema})
+    presenter = SchemaBuilderPresenter(view, service)
+    presenter.load_existing("tmpl")
+    # The user makes no edits: feed the rendered rows (which carry the aliases)
+    # back as the view's controlled getters so save re-assembles from them.
+    view.identity = view.identity_set[-1]
+    view.columns = view.columns_set[-1]
+    view.key = (("Customer", "SKU #"), False)
+    view.dedup = view.dedups_set[-1]
+    view.derived = []
+
+    # Act
+    saved = presenter.save()
+
+    # Assert: the saved schema retains the persisted alias on Customer.
+    assert saved is True
+    customer = next(
+        c for c in service.saved[-1].columns if c.canonical_name == "Customer"
+    )
+    assert customer.aliases == ("cust_col",)
+
+
 def test_save_rejects_unknown_discriminator() -> None:
     """Decision 6: a discriminator that is not a declared column is rejected on save."""
     # Arrange: a valid keyable schema but an aggregate discriminator naming a
