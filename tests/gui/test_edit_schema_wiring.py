@@ -15,13 +15,22 @@ from typing import TYPE_CHECKING
 
 from src.gui._schema_discovery_wiring import wire_edit_schema_buttons
 from src.gui.main_window import MainWindow
+from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+from src.gui.presenters.source_selection_presenter import SourceSelectionPresenter
+from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
 from src.gui.widgets.schema_builder_dialog import SchemaBuilderDialog
-from tests.gui.fakes.fake_services import FakeSchemaService
+from src.schema_matching import MatchResult, MismatchReport
+from src.schema_model import ColumnSpec, KeySpec, SchemaDefinition, column_ref
+from tests.gui.fakes.fake_services import FakeSchemaService, FakeWorkbookReader
+from tests.gui.fakes.fake_views import FakeSourceSelectionView
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from PySide6.QtWidgets import QWidget
     from pytestqt.qtbot import QtBot
+
+    from src.gui.presenters._schema_builder_state import PreviewSlice
 
 
 class _RecordingPresenter:
@@ -50,6 +59,43 @@ class _RecordingPresenter:
             ``None``.
         """
         self.loaded.append(name)
+
+
+class _RecordingDialog(SchemaBuilderDialog):
+    """Schema-builder dialog that records each seeded preview slice.
+
+    Purpose:
+        Let the Edit-Schema wiring tests assert which ``preview_slice`` the open
+        path seeds into the Columns tab without monkeypatching a bound method.
+
+    Responsibilities:
+        Capture every slice passed to :meth:`set_columns_preview_slice` (in call
+        order) while still delegating to the real seeding behavior.
+
+    Attributes:
+        seeded_slices: The preview slices seeded via the open path, in order.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        """Initialize the recording dialog with an empty capture log.
+
+        Args:
+            parent: Optional Qt parent widget forwarded to the base dialog.
+        """
+        super().__init__(parent)
+        self.seeded_slices: list[PreviewSlice | None] = []
+
+    def set_columns_preview_slice(self, preview_slice: PreviewSlice | None) -> None:
+        """Record the seeded slice, then delegate to the real seeding behavior.
+
+        Args:
+            preview_slice: The preview slice the open path seeds, or ``None``.
+
+        Returns:
+            ``None``.
+        """
+        self.seeded_slices.append(preview_slice)
+        super().set_columns_preview_slice(preview_slice)
 
 
 def _dialog_factory(qtbot: QtBot) -> Callable[[], SchemaBuilderDialog]:
@@ -210,3 +256,216 @@ def test_edit_with_stub_presenter_lacking_load_existing_does_not_crash(
     # despite the absent load_existing seeding contract.
     assert len(built) == 1
     assert window.schema_builder_presenter is built[0]
+
+
+# --- Issue #62: Edit Schema seeds the source pool from real worksheet headers ---
+
+
+def _matching_schema() -> SchemaDefinition:
+    """Return a schema whose canonical names equal the synthetic worksheet headers.
+
+    Returns:
+        A :class:`SchemaDefinition` named ``aop_synth`` with Customer/SKU/Jan
+        columns matching the synthetic worksheet header tokens used in the tests.
+    """
+    return SchemaDefinition(
+        name="aop_synth",
+        version="1.0",
+        columns=(
+            ColumnSpec(canonical_name="Customer", role="dimension"),
+            ColumnSpec(canonical_name="SKU", role="dimension"),
+            ColumnSpec(canonical_name="Jan", role="measure", numeric=True),
+        ),
+        key=KeySpec(parts=tuple(column_ref(_n) for _n in ("Customer", "SKU"))),
+    )
+
+
+def _full_match(schema: SchemaDefinition) -> MatchResult:
+    """Return a full-coverage match result selecting ``schema``.
+
+    The Edit open path runs ``best_header_row`` over the preview rows, which calls
+    ``service.find_best_match`` per row; the fake returns this configured result so
+    the synthetic header row scores above the stray data row and is selected.
+
+    Args:
+        schema: The schema the match result selects as the best candidate.
+
+    Returns:
+        A :class:`MatchResult` selecting ``schema`` with full coverage and an
+        empty mismatch report.
+    """
+    return MatchResult(
+        schema=schema,
+        score=1.0,
+        report=MismatchReport(unmatched_required=(), unrecognized_actual=()),
+    )
+
+
+def _presenter_with_headers(headers: list[str]) -> SourceSelectionPresenter:
+    """Build a source-selection presenter whose reader returns synthetic headers.
+
+    Args:
+        headers: The synthetic worksheet header tokens the fake reader returns on
+            the first preview row.
+
+    Returns:
+        A :class:`SourceSelectionPresenter` carrying a
+        :class:`FakeWorkbookReader` configured to return ``headers`` as the
+        header row.
+    """
+    reader = FakeWorkbookReader(preview_rows=[list(headers), ["1", "X", "10"]])
+    return SourceSelectionPresenter(FakeSourceSelectionView(), reader)
+
+
+def test_edit_populates_preview_slice_from_real_worksheet_headers(qtbot: QtBot) -> None:
+    """AC-5: Edit reads the selected worksheet's headers into the source pool.
+
+    With a tab presenter carrying a reader that returns synthetic headers and a
+    non-blank selected file/sheet, the Edit open path builds a ``preview_slice``
+    whose header equals those synthetic headers and seeds the Columns-tab pool.
+    """
+    # Arrange: synthetic headers that also match the loaded schema's canonical
+    # names; the schema service serves that schema by name.
+    headers = ["Customer", "SKU", "Jan"]
+    schema = _matching_schema()
+    service = FakeSchemaService(
+        schema_names=[schema.name],
+        schemas={schema.name: schema},
+        match_result=_full_match(schema),
+    )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    presenter = _presenter_with_headers(headers)
+
+    dialogs: list[_RecordingDialog] = []
+
+    def _recording_dialog_factory() -> SchemaBuilderDialog:
+        """Build a dialog that records the preview slice the open path seeds."""
+        dialog = _RecordingDialog()
+        qtbot.addWidget(dialog)
+        dialogs.append(dialog)
+        return dialog
+
+    wire_edit_schema_buttons(
+        window,
+        service,
+        aop_presenter=presenter,
+        dialog_factory=_recording_dialog_factory,
+        presenter_factory=lambda dialog, svc: SchemaBuilderPresenter(dialog, svc),
+    )
+    window.aop_widget.set_schema_list([schema.name])
+    window.aop_widget.set_selected_schema(schema.name)
+    window.aop_widget.set_path("synthetic.xlsx")
+    window.aop_widget.set_current_sheet("AOP1")
+
+    # Act
+    window.aop_widget.edit_schema_requested.emit()
+
+    # Assert: a non-empty preview slice carrying the synthetic headers was seeded.
+    assert len(dialogs) == 1
+    captured = dialogs[0].seeded_slices
+    assert len(captured) == 1
+    assert captured[0] is not None
+    assert captured[0].header == ("Customer", "SKU", "Jan")
+
+
+def test_edit_renders_matching_canonical_rows_as_assigned(qtbot: QtBot) -> None:
+    """AC-6: with a populated pool, name-matching canonical rows render assigned.
+
+    Drives the real dialog + presenter: Edit seeds the Columns-tab source pool
+    from the synthetic worksheet headers, then ``load_existing`` re-renders the
+    loaded schema's columns; the drag binder rebuilds the pool from the seeded
+    slice and fuzzy-prepopulates, so each name-matching canonical row renders its
+    matched source column in the assignment label (what the user sees).
+    """
+    # Arrange: synthetic headers equal to the schema's canonical names.
+    headers = ["Customer", "SKU", "Jan"]
+    schema = _matching_schema()
+    service = FakeSchemaService(
+        schema_names=[schema.name],
+        schemas={schema.name: schema},
+        match_result=_full_match(schema),
+    )
+    window = MainWindow()
+    qtbot.addWidget(window)
+    presenter = _presenter_with_headers(headers)
+    dialogs: list[SchemaBuilderDialog] = []
+
+    def _dialog_factory_real() -> SchemaBuilderDialog:
+        dialog = SchemaBuilderDialog()
+        qtbot.addWidget(dialog)
+        dialogs.append(dialog)
+        return dialog
+
+    wire_edit_schema_buttons(
+        window,
+        service,
+        aop_presenter=presenter,
+        dialog_factory=_dialog_factory_real,
+        presenter_factory=lambda dialog, svc: SchemaBuilderPresenter(dialog, svc),
+    )
+    window.aop_widget.set_schema_list([schema.name])
+    window.aop_widget.set_selected_schema(schema.name)
+    window.aop_widget.set_path("synthetic.xlsx")
+    window.aop_widget.set_current_sheet("AOP1")
+
+    # Act
+    window.aop_widget.edit_schema_requested.emit()
+
+    # Assert: the rendered Columns tab shows each name-matching canonical row
+    # assigned to its synthetic source column (the user-facing assignment).
+    assert len(dialogs) == 1
+    columns_widget = dialogs[0].findChild(ColumnsTabWidget)
+    assert columns_widget is not None
+    assert columns_widget.row_assignment_text("Customer") == "Customer"
+    assert columns_widget.row_assignment_text("SKU") == "SKU"
+    assert columns_widget.row_assignment_text("Jan") == "Jan"
+
+
+def test_edit_no_file_no_sheet_opens_with_empty_pool_no_reader_call(
+    qtbot: QtBot,
+) -> None:
+    """AC-9: Edit with no file/sheet selected opens an empty pool, no reader call.
+
+    The reader must not be called when the path/sheet are blank, the seeded
+    ``preview_slice`` must be ``None`` (empty source pool), and the handler must
+    complete without raising — preserving the issue #50 no-file/no-sheet seam.
+    """
+    # Arrange: a reader that records calls; the widget leaves path/sheet blank.
+    reader = FakeWorkbookReader(preview_rows=[["Customer", "SKU", "Jan"]])
+    presenter = SourceSelectionPresenter(FakeSourceSelectionView(), reader)
+    schema = _matching_schema()
+    service = FakeSchemaService(
+        schema_names=[schema.name],
+        schemas={schema.name: schema},
+        match_result=_full_match(schema),
+    )
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    dialogs: list[_RecordingDialog] = []
+
+    def _recording_dialog_factory() -> SchemaBuilderDialog:
+        dialog = _RecordingDialog()
+        qtbot.addWidget(dialog)
+        dialogs.append(dialog)
+        return dialog
+
+    wire_edit_schema_buttons(
+        window,
+        service,
+        aop_presenter=presenter,
+        dialog_factory=_recording_dialog_factory,
+        presenter_factory=lambda dialog, svc: SchemaBuilderPresenter(dialog, svc),
+    )
+    window.aop_widget.set_schema_list([schema.name])
+    window.aop_widget.set_selected_schema(schema.name)
+    # Deliberately leave path/sheet unset (blank) to exercise the no-file seam.
+
+    # Act: this must complete without raising on the blank selection.
+    window.aop_widget.edit_schema_requested.emit()
+
+    # Assert: the reader was never called and the seeded slice is None (empty pool).
+    assert reader.preview_calls == []
+    assert len(dialogs) == 1
+    assert dialogs[0].seeded_slices == [None]

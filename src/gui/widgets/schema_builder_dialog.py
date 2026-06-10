@@ -36,6 +36,9 @@ from src.gui.widgets._schema_builder_tabs import (
     build_key_tab,
     build_preview_tab,
 )
+from src.gui.widgets._schema_builder_window_setup import (
+    apply_schema_builder_window_flags,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,6 +86,9 @@ class SchemaBuilderDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Schema Builder")
+        # Make the dialog a resizable top-level window with min/max/restore
+        # controls and a default size so all rows are reachable (AC-8).
+        apply_schema_builder_window_flags(self)
 
         self._identity = build_identity_tab()
         self._columns = build_columns_tab()

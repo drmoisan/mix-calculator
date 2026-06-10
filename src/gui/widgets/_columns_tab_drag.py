@@ -173,6 +173,20 @@ class ColumnDropRow(QWidget):
         """
         return self._label.text()
 
+    def assignment_text(self) -> str:
+        """Return this row's rendered assignment label text (public test seam).
+
+        Mirrors :meth:`label_text` so callers can read the source column currently
+        assigned to this canonical row without reaching into the private label.
+        The text is the assigned source-column name, or ``"(unassigned)"`` when no
+        source is bound.
+
+        Returns:
+            The assignment label text: the assigned source-column name, or
+            ``"(unassigned)"`` when the row has no source bound.
+        """
+        return self._assignment.text()
+
     def set_assignment(self, source_column: str | None) -> None:
         """Render the source column assigned to this row.
 
@@ -409,3 +423,19 @@ class ColumnsTabWidget(QWidget):
         """
         row = self._rows.get(canonical)
         return row.label_text() if row is not None else ""
+
+    def row_assignment_text(self, canonical: str) -> str:
+        """Return one row's rendered source assignment (public test seam).
+
+        Mirrors :meth:`row_label_text` so callers can read which source column is
+        currently assigned to a canonical row after prepopulation or a drop.
+
+        Args:
+            canonical: The canonical row to read.
+
+        Returns:
+            The assigned source-column name, ``"(unassigned)"`` when no source is
+            bound, or an empty string when the row is absent.
+        """
+        row = self._rows.get(canonical)
+        return row.assignment_text() if row is not None else ""

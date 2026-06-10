@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -178,13 +179,27 @@ def build_columns_tab() -> ColumnsTabControls:
     pass/fail dtype-check indicator. The dialog binds a ``ColumnsTabPresenter`` to
     this widget so a drop assigns a source column to a canonical row.
 
+    The :class:`ColumnsTabWidget` is wrapped in a resizable :class:`QScrollArea`
+    (issue #62, AC-7) so every canonical row is reachable by scrolling when the
+    rows exceed the visible height (the AOP schema has 26 columns). The returned
+    ``columns_widget`` still references the real :class:`ColumnsTabWidget` so the
+    binder wiring is unaffected.
+
     Returns:
         The columns-tab controls bundle exposing the drag-and-drop columns widget.
     """
     widget = QWidget()
     layout = QVBoxLayout(widget)
     columns_widget = ColumnsTabWidget()
-    layout.addWidget(columns_widget)
+    # Wrap the columns widget in a resizable scroll area so all canonical rows are
+    # reachable when they exceed the visible height (AC-7). setWidgetResizable lets
+    # the inner widget grow/shrink with the viewport while still scrolling when
+    # content overflows. The bundle keeps columns_widget as the real widget so the
+    # binder and existing tests bind to the same instance.
+    scroll_area = QScrollArea()
+    scroll_area.setWidgetResizable(True)
+    scroll_area.setWidget(columns_widget)
+    layout.addWidget(scroll_area)
     return ColumnsTabControls(widget=widget, columns_widget=columns_widget)
 
 

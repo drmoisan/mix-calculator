@@ -13,12 +13,33 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QMimeData
+from PySide6.QtWidgets import QScrollArea
 
 from src.gui.widgets._columns_tab_drag import ColumnDropRow, ColumnsTabWidget
 from src.gui.widgets._dtype_check_widget import DtypeCheckWidget
+from src.gui.widgets._schema_builder_tabs import build_columns_tab
 
 if TYPE_CHECKING:
     from pytestqt.qtbot import QtBot
+
+
+def test_columns_tab_wraps_widget_in_resizable_scroll_area(qtbot: QtBot) -> None:
+    """AC-7: the Columns tab hosts a resizable QScrollArea wrapping the widget.
+
+    The Columns tab is vertically scrollable so all canonical rows are reachable
+    when they exceed the visible height. The scroll area is resizable, and its
+    inner widget is the same real :class:`ColumnsTabWidget` the binder uses.
+    """
+    # Arrange / Act
+    controls = build_columns_tab()
+    qtbot.addWidget(controls.widget)
+
+    # Assert: a resizable scroll area in the container wraps the columns widget.
+    scroll_areas = controls.widget.findChildren(QScrollArea)
+    assert len(scroll_areas) == 1
+    scroll_area = scroll_areas[0]
+    assert scroll_area.widgetResizable() is True
+    assert scroll_area.widget() is controls.columns_widget
 
 
 def test_pool_renders_one_token_per_source_column(qtbot: QtBot) -> None:

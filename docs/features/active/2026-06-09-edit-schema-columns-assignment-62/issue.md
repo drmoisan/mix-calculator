@@ -80,6 +80,35 @@ These are the authoritative acceptance criteria for this minor-audit bug.
 - [x] AC-4: An edit-then-save round-trip through the builder preserves the
       persisted assignments (the saved schema's column aliases are retained).
 
+### Additional criteria (remediation cycle 1 — real production behavior)
+
+The first delivery (AC-1..AC-4) fixed alias-seeding but did not fix the
+user-observable behavior: the bundled default schemas (e.g. `default_aop`) carry
+**empty** aliases (the mapping is implicit — `canonical_name` equals the
+worksheet header), and the Edit Schema button opens the builder with **no
+`preview_slice` at all**, so the source-column pool is empty and nothing can be
+assigned or shown. The following criteria capture the real behavior the user
+requires.
+
+- [x] AC-5: When the per-tab "Edit Schema" button opens the builder for a tab
+      that has a selected workbook file and worksheet, the Columns tab's "Source
+      columns" pool is populated with that worksheet's actual header columns
+      (read via the same workbook-reader + best-header-row path the schema
+      discovery flow uses, honoring the detected header row).
+- [x] AC-6: With the source pool populated (AC-5), each canonical column of the
+      loaded schema that matches a worksheet header (by name, persisted alias, or
+      the existing fuzzy threshold) renders as assigned to that source column on
+      the Columns tab — i.e. editing `default_aop` against the AOP worksheet shows
+      Customer→Customer, SKU #→SKU #, Jan→Jan, etc., not "(unassigned)".
+- [x] AC-7: The Columns tab is vertically scrollable so all canonical column rows
+      are reachable when they exceed the visible height (the AOP schema has 26
+      columns).
+- [x] AC-8: The Schema Builder window is resizable and exposes the standard
+      minimize and maximize/restore window controls (in addition to close).
+- [x] AC-9: The Edit Schema path degrades gracefully when no file/worksheet is
+      selected (no crash; the builder opens with an empty source pool rather than
+      raising), preserving the issue #50 no-file/no-sheet seam guard.
+
 ## Constraints & Risks
 
 - Pure GUI presenter/state logic; no Qt import added, no I/O. No workbook access
