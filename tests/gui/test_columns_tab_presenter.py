@@ -207,6 +207,92 @@ def test_derived_column_appears_as_selectable_row() -> None:
     assert "Revenue" in row_names
 
 
+def test_prepopulate_seeds_assignments_from_persisted_aliases_empty_pool() -> None:
+    """AC-1: edit path with an empty pool renders persisted aliases as assigned.
+
+    Reproduces the edit-from-button path: a schema is loaded with persisted
+    aliases on its rows but no live ``source_columns`` pool (no preview slice).
+    Each aliased row must render assigned to its persisted alias, not ``None``.
+    """
+    # Arrange: two canonical rows each carrying a persisted alias, empty pool.
+    view = FakeColumnsTabView()
+    state = SchemaBuilderState(
+        columns=[
+            ("Customer", "dimension", True, True, ("cust_col",)),
+            ("Sales", "measure", True, True, ("sales_amt",)),
+        ],
+        column_dtypes={"Customer": "string", "Sales": "float"},
+        source_columns=[],
+    )
+    presenter = ColumnsTabPresenter(view, state)
+
+    # Act
+    presenter.prepopulate()
+
+    # Assert: each aliased row renders assigned to its persisted alias.
+    assert ("Customer", "cust_col") in view.assignments
+    assert ("Sales", "sales_amt") in view.assignments
+    assert state.consumed_columns == {"Customer": "cust_col", "Sales": "sales_amt"}
+
+
+def test_prepopulate_leaves_alias_free_row_unassigned_empty_pool() -> None:
+    """AC-2: an edit-path row with no persisted alias renders unassigned.
+
+    With an empty pool, an aliased row is seeded but an alias-free row stays
+    unassigned, so the view receives ``(canonical, None)`` for that row.
+    """
+    # Arrange: one aliased row and one alias-free row, empty pool.
+    view = FakeColumnsTabView()
+    state = SchemaBuilderState(
+        columns=[
+            ("Customer", "dimension", True, True, ("cust_col",)),
+            ("Sales", "measure", True, True, ()),
+        ],
+        column_dtypes={"Customer": "string", "Sales": "float"},
+        source_columns=[],
+    )
+    presenter = ColumnsTabPresenter(view, state)
+
+    # Act
+    presenter.prepopulate()
+
+    # Assert: the alias-free row renders unassigned; the aliased row is seeded.
+    assert ("Sales", None) in view.assignments
+    assert "Sales" not in state.consumed_columns
+    assert state.consumed_columns == {"Customer": "cust_col"}
+
+
+def test_live_fuzzy_match_wins_over_persisted_alias() -> None:
+    """AC-3: a live preview-slice fuzzy match wins over a persisted alias.
+
+    A row carries a persisted alias that differs from the source the live pool
+    fuzzy-matches. The live match must win, the persisted alias must not
+    override it, and no source may be duplicated across rows.
+    """
+    # Arrange: 'Customer' fuzzy-matches the live 'customer' source but also
+    # carries a different persisted alias ('legacy_cust'); 'Sales' matches live.
+    view = FakeColumnsTabView()
+    state = SchemaBuilderState(
+        columns=[
+            ("Customer", "dimension", True, True, ("legacy_cust",)),
+            ("Sales", "measure", True, True, ()),
+        ],
+        column_dtypes={"Customer": "string", "Sales": "float"},
+        source_columns=["customer", "sales", "extra_col"],
+    )
+    presenter = ColumnsTabPresenter(view, state)
+
+    # Act
+    presenter.prepopulate()
+
+    # Assert: the live fuzzy match wins; the persisted alias does not override it.
+    assert state.consumed_columns["Customer"] == "customer"
+    assert state.consumed_columns["Sales"] == "sales"
+    # One-source-per-row: each consumed source is distinct.
+    consumed_sources = list(state.consumed_columns.values())
+    assert len(consumed_sources) == len(set(consumed_sources))
+
+
 def test_dtype_indicator_reports_failing_example_for_non_coercible() -> None:
     """A matched column with a non-coercible value yields a red indicator + example."""
     # Arrange: a float column whose source values include a non-numeric token.

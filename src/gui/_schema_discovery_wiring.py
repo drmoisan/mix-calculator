@@ -33,6 +33,10 @@ from src.gui._schema_wiring import (
     wire_build_schema_buttons,
     wire_schema_builder,
 )
+from src.gui.presenters._schema_builder_state import PreviewSlice
+from src.gui.presenters.source_selection_presenter import (
+    read_worksheet_header_columns,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -96,9 +100,17 @@ def wire_schema_discovery_and_gating(
     # blank by design; only the per-tab buttons seed from the spec provider.
     wire_schema_builder(window, service)
     wire_build_schema_buttons(window, service, spec_provider=spec_provider)
-    # Issue #60 Defect 1: wire each tab's "Edit Schema" button so it opens the
-    # builder seeded from the tab's currently-selected schema via load_existing.
-    wire_edit_schema_buttons(window, service)
+    # Issue #60 Defect 1 / #62: wire each tab's "Edit Schema" button so it opens
+    # the builder seeded from the tab's currently-selected schema via load_existing
+    # and from the selected worksheet's real header columns (a live preview slice).
+    # The per-tab presenters carry the workbook reader used to read those headers.
+    wire_edit_schema_buttons(
+        window,
+        service,
+        le_presenter=le_presenter,
+        aop_presenter=aop_presenter,
+        skulu_presenter=skulu_presenter,
+    )
     # Pair each widget with its presenter so the same discovery/gating wiring
     # applies uniformly to all three source tabs.
     for widget, presenter in (
@@ -169,27 +181,44 @@ def wire_edit_schema_buttons(
     window: MainWindow,
     service: SchemaServiceProtocol,
     *,
+    le_presenter: SourceSelectionPresenter | None = None,
+    aop_presenter: SourceSelectionPresenter | None = None,
+    skulu_presenter: SourceSelectionPresenter | None = None,
     dialog_factory: Callable[[], SchemaBuilderDialog] | None = None,
     presenter_factory: (
         Callable[[SchemaBuilderDialog, SchemaServiceProtocol], object] | None
     ) = None,
 ) -> None:
-    """Wire each source tab's "Edit Schema" button to open a seeded builder (#60).
+    """Wire each source tab's "Edit Schema" button to open a seeded builder (#60/#62).
 
     For each of the three source widgets, connects ``edit_schema_requested`` to a
     closure that reads the tab's currently-selected schema name, guards against
     the placeholder/empty selection (defense in depth alongside the widget-level
-    disabled state, the #50 no-schema-seam lesson), opens the builder via the
-    shared :func:`open_schema_builder` path (without caller specs, so it opens
-    blank and retains the presenter on ``window.schema_builder_presenter``), and
-    then seeds it from the selected schema via
-    ``schema_builder_presenter.load_existing(name)`` (the established
-    ``_seed_presenter`` getattr pattern, so recording test factories that return a
-    minimal stub remain compatible).
+    disabled state, the #50 no-schema-seam lesson), builds a live ``preview_slice``
+    from the selected worksheet's real header columns (issue #62; read via the
+    tab's presenter ``reader`` and the same best-header-row path discovery uses),
+    opens the builder via the shared :func:`open_schema_builder` path (passing the
+    ``preview_slice`` so the Columns-tab source pool is populated, retaining the
+    presenter on ``window.schema_builder_presenter``), and then seeds it from the
+    selected schema via ``schema_builder_presenter.load_existing(name)`` (the
+    established ``_seed_presenter`` getattr pattern, so recording test factories
+    that return a minimal stub remain compatible).
+
+    When no per-tab presenter is supplied for a widget, or when no file/worksheet
+    is selected, the ``preview_slice`` is ``None`` and the builder opens with an
+    empty source pool — the issue #50 / AC-9 no-file/no-sheet seam, with no reader
+    call and no crash.
 
     Args:
         window: The shell whose three source widgets carry the Edit buttons.
         service: The schema service the builder presenter drives.
+        le_presenter: The LE source-selection presenter carrying the workbook
+            reader used to read the LE worksheet's header columns. ``None`` opens
+            the LE edit path with an empty pool.
+        aop_presenter: The AOP source-selection presenter. ``None`` opens the AOP
+            edit path with an empty pool.
+        skulu_presenter: The SKU_LU source-selection presenter. ``None`` opens the
+            SKU_LU edit path with an empty pool.
         dialog_factory: Optional dialog factory; defaults to the production
             factory. Tests inject a recording factory.
         presenter_factory: Optional presenter factory; defaults to the production
@@ -200,18 +229,24 @@ def wire_edit_schema_buttons(
 
     Side effects:
         Connects each source widget's ``edit_schema_requested`` signal to a
-        handler that opens the schema builder and seeds it from the selection.
+        handler that opens the schema builder and seeds it from the selection and
+        the worksheet's real header columns.
     """
 
-    def _make_edit(widget: SourceInputWidget) -> Callable[[], None]:
+    def _make_edit(
+        widget: SourceInputWidget,
+        presenter: SourceSelectionPresenter | None,
+    ) -> Callable[[], None]:
         """Build the per-widget Edit handler that seeds from the selection.
 
         Args:
             widget: The source widget whose Edit button triggers this handler.
+            presenter: The source-selection presenter carrying the workbook reader
+                for this tab, or ``None`` to open with an empty source pool.
 
         Returns:
             A zero-argument handler opening the builder seeded from ``widget``'s
-            currently-selected schema.
+            currently-selected schema and worksheet headers.
         """
 
         def _open_edit() -> None:
@@ -222,24 +257,80 @@ def wire_edit_schema_buttons(
             # never opens the builder for a non-schema or crashes (issue #50 seam).
             if not name or name == _SCHEMA_PLACEHOLDER:
                 return
-            # Open a blank builder through the shared path; it retains the presenter
-            # on the window so the subsequent load_existing seeds that presenter.
+            # Build a live preview slice from the selected worksheet's real header
+            # columns so the Columns-tab source pool is populated (issue #62). When
+            # no presenter is wired or no file/sheet is selected, the helper returns
+            # an empty header and the slice stays None (empty pool, no crash — AC-9).
+            preview_slice = _build_edit_preview_slice(widget, presenter, service)
+            # Open the builder through the shared path; it retains the presenter on
+            # the window so the subsequent load_existing seeds that presenter, and
+            # the preview slice seeds the source-token pool before that render runs.
             open_schema_builder(
                 window,
                 service,
                 dialog_factory=dialog_factory,
                 presenter_factory=presenter_factory,
+                preview_slice=preview_slice,
             )
             # Seed the retained presenter from the selected schema via getattr so a
             # recording test stub without load_existing is tolerated.
-            presenter = getattr(window, "schema_builder_presenter", None)
-            load_existing = getattr(presenter, "load_existing", None)
+            retained = getattr(window, "schema_builder_presenter", None)
+            load_existing = getattr(retained, "load_existing", None)
             if callable(load_existing):
                 load_existing(name)
 
         return _open_edit
 
-    # Wire all three per-tab Edit buttons so each tab's "Edit Schema" button opens
-    # the builder seeded from that tab's currently-selected schema.
-    for widget in (window.le_widget, window.aop_widget, window.skulu_widget):
-        widget.edit_schema_requested.connect(_make_edit(widget))
+    # Wire all three per-tab Edit buttons, pairing each widget with its presenter
+    # so each tab's "Edit Schema" button opens the builder seeded from that tab's
+    # currently-selected schema and the selected worksheet's real header columns.
+    for widget, presenter in (
+        (window.le_widget, le_presenter),
+        (window.aop_widget, aop_presenter),
+        (window.skulu_widget, skulu_presenter),
+    ):
+        widget.edit_schema_requested.connect(_make_edit(widget, presenter))
+
+
+def _build_edit_preview_slice(
+    widget: SourceInputWidget,
+    presenter: SourceSelectionPresenter | None,
+    service: SchemaServiceProtocol,
+) -> PreviewSlice | None:
+    """Build a live preview slice from the widget's selected worksheet headers.
+
+    Reads the selected worksheet's real header columns via the tab presenter's
+    workbook reader and the shared best-header-row path, so the Edit Schema open
+    path seeds the Columns-tab source pool with the worksheet's actual columns
+    (issue #62, AC-5/AC-6).
+
+    Args:
+        widget: The source widget whose current file/sheet selection is read.
+        presenter: The source-selection presenter carrying the workbook reader, or
+            ``None`` when no reader is wired for this tab.
+        service: The schema service used by the best-header-row scorer.
+
+    Returns:
+        A :class:`PreviewSlice` carrying the worksheet's real header columns, or
+        ``None`` when no presenter is wired, no file/sheet is selected, or the
+        worksheet has no header row (the empty-pool / AC-9 seam).
+
+    Side effects:
+        Calls the presenter's reader once when a presenter is wired and a
+        file/sheet is selected.
+    """
+    # No presenter means no reader is available for this tab, so open with an empty
+    # source pool rather than guessing a header (AC-9 graceful degradation).
+    if presenter is None:
+        return None
+    header = read_worksheet_header_columns(
+        presenter.reader,
+        service,
+        widget.current_path(),
+        widget.current_sheet(),
+    )
+    # An empty header (blank path/sheet or empty preview) yields no slice so the
+    # builder opens with an empty pool instead of an empty-header slice.
+    if not header:
+        return None
+    return PreviewSlice(header=header)

@@ -32,7 +32,11 @@ if TYPE_CHECKING:
 
 from src.gui.pipeline_service import ImportSpec as _ImportSpec
 
-__all__ = ["SourceSelectionPresenter"]
+__all__ = [
+    "SourceSelectionPresenter",
+    "best_header_row",
+    "read_worksheet_header_columns",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +55,7 @@ _HEADER_PREVIEW_ROWS = 5
 _SCHEMA_PLACEHOLDER = "<Choose Schema>"
 
 
-def _best_header_row(
-    rows: list[list[str]], service: SchemaServiceProtocol
-) -> list[str]:
+def best_header_row(rows: list[list[str]], service: SchemaServiceProtocol) -> list[str]:
     """Select the preview row that best matches a registry schema as the header.
 
     Scores each preview row against the registry by running the service's
@@ -97,6 +99,61 @@ def _best_header_row(
     if best_row is None:
         return rows[0]
     return best_row
+
+
+def read_worksheet_header_columns(
+    reader: WorkbookReaderProtocol,
+    service: SchemaServiceProtocol,
+    path: str,
+    sheet: str,
+    *,
+    max_rows: int = _HEADER_PREVIEW_ROWS,
+) -> tuple[str, ...]:
+    """Read a worksheet's real header columns for seeding the schema builder.
+
+    Reuses the same bounded-preview + best-header-row path the schema-discovery
+    flow uses (:func:`best_header_row`), so the Edit Schema open path seeds the
+    builder's source-column pool from the worksheet's actual header columns,
+    honoring the detected header row (the AOP1 layout puts its header on a later
+    row). LE/SKU_LU headers on row 0 are returned as-is.
+
+    The blank/whitespace guard mirrors the issue #50 no-file/no-sheet seam in
+    :meth:`SourceSelectionPresenter.on_schema_discovery`: when no file or
+    worksheet is selected, the reader is never called and an empty tuple is
+    returned so the Edit Schema path opens with an empty pool rather than
+    crashing (AC-9).
+
+    Args:
+        reader: The workbook reader used to read the bounded header preview.
+        service: The schema service used by :func:`best_header_row` to score each
+            candidate header row against the registry.
+        path: The workbook path of the selected source tab. A blank or
+            whitespace-only value yields ``()`` with no reader call.
+        sheet: The worksheet name whose header columns are read. A blank or
+            whitespace-only value yields ``()`` with no reader call.
+        max_rows: The bounded number of preview rows to read for header
+            detection. Defaults to :data:`_HEADER_PREVIEW_ROWS`.
+
+    Returns:
+        The worksheet's header columns as an ordered tuple of column-name
+        strings, or ``()`` when ``path``/``sheet`` is blank or the preview is
+        empty (no header to extract).
+
+    Side effects:
+        Calls ``reader.read_sheet_preview`` once when ``path`` and ``sheet`` are
+        both non-blank.
+    """
+    # No file or worksheet selected: return an empty header without calling the
+    # reader, preserving the issue #50 no-file/no-sheet seam (AC-9). The reader
+    # must never be invoked with a blank sheet.
+    if not path.strip() or not sheet.strip():
+        return ()
+    rows = reader.read_sheet_preview(path, sheet, max_rows=max_rows)
+    # An empty preview carries no header row to extract, so return an empty
+    # tuple rather than indexing into an empty list.
+    if not rows:
+        return ()
+    return tuple(best_header_row(rows, service))
 
 
 class SourceSelectionPresenter:
@@ -305,7 +362,7 @@ class SourceSelectionPresenter:
         # Select the best-matching header row from the multi-row preview so a
         # sheet whose real header is on a later row (AOP1: index 2, with stray
         # leading rows) is matched; LE/SKU_LU headers on row 0 are unaffected.
-        headers = _best_header_row(rows, self._schema_service)
+        headers = best_header_row(rows, self._schema_service)
         # Import the activation classifier locally so the presenter module does
         # not depend on the activation module at import time.
         from src.gui._schema_activation import classify_activation

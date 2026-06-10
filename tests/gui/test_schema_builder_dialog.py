@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
+
 from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
 from src.gui.widgets._dtype_check_widget import DtypeCheckWidget
 from src.gui.widgets._key_tab_drag import GenericTextToken, KeyTabWidget
@@ -34,6 +36,25 @@ def test_identity_round_trip(qtbot: QtBot) -> None:
 
     # Assert
     assert dialog.get_identity() == ("aop", "1.0", "AOP schema")
+
+
+def test_dialog_exposes_minimize_and_maximize_window_controls(
+    qtbot: QtBot,
+) -> None:
+    """AC-8: the dialog's window flags expose the minimize and maximize hints.
+
+    The dialog is configured as a resizable top-level window so the user can
+    minimize, maximize/restore, and resize it (and thereby reach all 26 AOP
+    canonical rows via the Columns-tab scroll area).
+    """
+    # Arrange / Act
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+
+    # Assert: both the minimize and maximize hints are present on the flags.
+    flags = dialog.windowFlags()
+    assert flags & Qt.WindowType.WindowMinimizeButtonHint
+    assert flags & Qt.WindowType.WindowMaximizeButtonHint
 
 
 def test_column_row_round_trip(qtbot: QtBot) -> None:

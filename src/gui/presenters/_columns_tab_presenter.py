@@ -102,7 +102,56 @@ class ColumnsTabPresenter:
             best = self._best_unconsumed_match(canonical)
             if best is not None:
                 self._bind(canonical, best)
+        # After the live fuzzy-match pass, fill any still-unassigned row that
+        # carries a persisted alias (the edit-from-button path has no preview
+        # slice, so the alias is the only assignment signal). Live-match-wins.
+        self._seed_from_persisted_aliases()
         self._render()
+
+    def _seed_from_persisted_aliases(self) -> None:
+        """Seed unassigned rows from their persisted alias (edit-mode path).
+
+        Purpose:
+            When a schema is loaded for editing, each column row carries its
+            persisted aliases (the saved source->canonical assignments) but the
+            source pool is empty because the edit-from-button path supplies no
+            ``preview_slice``. The live fuzzy-match pass in :meth:`prepopulate`
+            therefore leaves every row unassigned. This second pass reflects the
+            persisted assignment into ``consumed_columns`` so the Columns tab
+            renders the loaded assignment instead of ``None``.
+
+        Behavior and ordering:
+            Runs strictly after the live fuzzy-match loop, so live matches win:
+            a row already present in ``consumed_columns`` is never overridden.
+            For each remaining row that carries at least one persisted alias, the
+            row's assignment is seeded from its first alias. At most one alias is
+            seeded per row, preserving the one-source-per-row invariant.
+
+        Design decision (no source-pool reflection):
+            The seeded alias is NOT added back into ``source_columns``. In the
+            edit path the pool is intentionally empty (no preview slice), and the
+            assignment is reflected only through ``consumed_columns`` (the
+            rendered-assignment map). Adding a phantom pool entry would
+            misrepresent the available-source pool, so it is deliberately omitted.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Mutates ``self._state.consumed_columns`` for rows that were unassigned
+            after the live pass and carry a persisted alias. Does not modify
+            ``source_columns`` and does not touch column aliases (the alias is
+            already persisted on the row, so no re-append is needed).
+        """
+        # Walk every declared column row and seed only those the live pass left
+        # unassigned. A row already in consumed_columns keeps its live match.
+        for canonical, _role, _required, _in_output, aliases in self._state.columns:
+            if canonical in self._state.consumed_columns:
+                continue
+            # A row with no persisted alias stays unassigned (renders None); only
+            # seed when the loaded schema recorded at least one alias for the row.
+            if aliases:
+                self._state.consumed_columns[canonical] = aliases[0]
 
     def assign_column(self, source_column: str, target_canonical: str) -> None:
         """Handle a manual drop of ``source_column`` onto ``target_canonical``.
