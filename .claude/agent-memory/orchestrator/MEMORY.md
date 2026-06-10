@@ -25,3 +25,4 @@
 - [AOP import is schema-driven (#58)](aop-ytd-convention-varies-by-workbook.md) — GUI import_aop routes through SchemaLoader(default_aop), no arithmetic validation, no blank-fill; legacy load_aop CLI kept
 - [Branch base: check unmerged-PR deps](branch-base-check-unmerged-pr-deps.md) — before branching off main, verify the work doesn't depend on code only in an unmerged PR; stack or merge-first if it does
 - [Test files count against 500 cap](test-files-count-against-500-cap.md) — the 500-line cap applies to test code; plans adding tests must scan changed test files in final QA or risk a remediation cycle
+- [AC must reproduce real user path](ac-must-reproduce-real-user-path.md) — GUI bug ACs/tests must drive the real bundled data + exact user path; a fake-only alias AC passed audit but left #62 broken (default schemas have empty aliases)
