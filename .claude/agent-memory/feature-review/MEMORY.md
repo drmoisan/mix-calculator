@@ -18,3 +18,4 @@
 - [policy-audit section-7 row-label parser](policy-audit-section7-row-label-parser.md) — validator misreads non-standard section-7 Code-Quality row labels as coverage rows; reuse cycle-1 wording, no comma qualifiers in label cell
 - [schema_formula col-shadow defect](schema-formula-col-shadow-defect.md) — RESOLVED issue #50 cycle 4 (a45a987): bind whitelisted callables after the alias loop in _build_symtable; suite green 942
 - [PR context summary can be stale](pr-context-summary-can-be-stale.md) — artifacts/pr_context.summary.txt may describe a prior PR/branch; verify head ref, fall back to live git diff
+- [lcov artifact can be a partial run](lcov-artifact-can-be-partial-run.md) — stored artifacts/python/lcov.info may be a targeted run understating per-file coverage; re-run full suite before trusting it
