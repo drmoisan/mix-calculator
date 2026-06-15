@@ -187,3 +187,185 @@ def test_drop_row_drag_enter_accepts_text_payload(qtbot: QtBot) -> None:
 
     # Assert
     assert accepted == [True]
+
+
+def test_assigned_row_mousemove_starts_drag_carrying_source_and_origin(
+    qtbot: QtBot,
+) -> None:
+    """An assigned ColumnDropRow starts a drag with both MIME keys on mouse-move.
+
+    Covers AC-1 (re-assign via drag) and AC-4 (test coverage of new paths).
+    The drag must carry text/plain = source column name and
+    application/x-canonical-origin = canonical row name.
+    """
+    # Arrange
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from src.gui.widgets import _columns_tab_drag as mod
+    from src.gui.widgets._columns_tab_drag import (
+        CANONICAL_ORIGIN_MIME,
+        ColumnDropRow,
+    )
+
+    row = ColumnDropRow("Revenue", "", None, lambda _s, _c: None)
+    qtbot.addWidget(row)
+    row.set_assignment("col_revenue")
+
+    captured_mime: list[object] = []
+
+    class _StubDrag:
+        def __init__(self, _parent: object) -> None:
+            pass
+
+        def setMimeData(self, mime: object) -> None:
+            captured_mime.append(mime)
+
+        def exec(self, _action: object) -> None:
+            pass
+
+    # Patch QDrag so no real drag loop runs headless.
+    original = mod.QDrag
+    mod.QDrag = _StubDrag  # type: ignore[misc, assignment]
+    try:
+        event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(QPoint(1, 1)),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        row.mouseMoveEvent(event)
+    finally:
+        mod.QDrag = original  # type: ignore[misc]
+
+    # Assert: drag was initiated and MIME carries both keys.
+    assert len(captured_mime) == 1
+    from PySide6.QtCore import QMimeData
+
+    mime = captured_mime[0]
+    assert isinstance(mime, QMimeData)
+    assert mime.text() == "col_revenue"
+    assert mime.data(CANONICAL_ORIGIN_MIME).toStdString() == "Revenue"
+
+
+def test_unassigned_row_mousemove_does_not_start_drag(qtbot: QtBot) -> None:
+    """An unassigned ColumnDropRow does not start a drag on mouse-move.
+
+    Covers the guard-clause branch in ColumnDropRow.mouseMoveEvent.
+    """
+    # Arrange
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from src.gui.widgets import _columns_tab_drag as mod
+    from src.gui.widgets._columns_tab_drag import ColumnDropRow
+
+    row = ColumnDropRow("Revenue", "", None, lambda _s, _c: None)
+    qtbot.addWidget(row)
+    # Do NOT call set_assignment — row remains unassigned.
+
+    started: list[bool] = []
+
+    class _StubDrag:
+        def __init__(self, _parent: object) -> None:
+            pass
+
+        def setMimeData(self, _mime: object) -> None:
+            pass
+
+        def exec(self, _action: object) -> None:
+            started.append(True)
+
+    original = mod.QDrag
+    mod.QDrag = _StubDrag  # type: ignore[misc, assignment]
+    try:
+        event = QMouseEvent(
+            QMouseEvent.Type.MouseMove,
+            QPointF(QPoint(1, 1)),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        row.mouseMoveEvent(event)
+    finally:
+        mod.QDrag = original  # type: ignore[misc]
+
+    # Assert: no drag was started because the row has no assigned source.
+    assert started == []
+
+
+def test_pool_dropEvent_with_canonical_origin_calls_clear_row(qtbot: QtBot) -> None:
+    """ColumnsTabWidget.dropEvent calls clear_row with the decoded canonical name.
+
+    Covers AC-2 (unassign via pool drop) and AC-4 (test coverage of new paths).
+    """
+    # Arrange
+    from PySide6.QtCore import QByteArray, QMimeData
+
+    from src.gui.widgets._columns_tab_drag import (
+        CANONICAL_ORIGIN_MIME,
+        ColumnsTabWidget,
+    )
+
+    widget = ColumnsTabWidget()
+    qtbot.addWidget(widget)
+
+    cleared: list[str] = []
+    widget.clear_row = lambda c: cleared.append(c)  # type: ignore[method-assign]
+
+    # Build a fake drop event carrying both MIME keys.
+    mime = QMimeData()
+    mime.setText("col_revenue")
+    mime.setData(CANONICAL_ORIGIN_MIME, QByteArray(b"Revenue"))
+
+    class _Event:
+        def mimeData(self) -> QMimeData:
+            return mime
+
+        def acceptProposedAction(self) -> None:
+            pass
+
+    # Act: invoke dropEvent directly.
+    widget.dropEvent(_Event())  # type: ignore[arg-type]
+
+    # Assert: clear_row was called with the decoded canonical name.
+    assert cleared == ["Revenue"]
+
+
+def test_pool_dragEnterEvent_rejects_missing_canonical_origin(qtbot: QtBot) -> None:
+    """ColumnsTabWidget.dragEnterEvent does not accept plain pool-token drags.
+
+    A drag carrying only text/plain (no canonical-origin key) must not be
+    accepted by the pool widget, ensuring only row-origin drags reach dropEvent.
+    """
+    # Arrange
+    from PySide6.QtCore import QMimeData
+
+    from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
+
+    widget = ColumnsTabWidget()
+    qtbot.addWidget(widget)
+
+    # Build a MIME payload with only text/plain — no canonical-origin key.
+    mime = QMimeData()
+    mime.setText("col_a")
+
+    accepted: list[bool] = []
+
+    class _Event:
+        def mimeData(self) -> QMimeData:
+            return mime
+
+        def acceptProposedAction(self) -> None:
+            accepted.append(True)
+
+        def isAccepted(self) -> bool:
+            return bool(accepted)
+
+    # Act
+    event = _Event()
+    widget.dragEnterEvent(event)  # type: ignore[arg-type]
+
+    # Assert: the event was NOT accepted (pool-token drags have no origin key).
+    assert accepted == []
