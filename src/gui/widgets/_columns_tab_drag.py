@@ -27,20 +27,26 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QMimeData, Qt
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from src.gui.widgets._column_assignment_slot import (
+    CANONICAL_ORIGIN_MIME,
+    ColumnAssignmentSlot,
+)
 from src.gui.widgets._dtype_check_widget import DtypeCheckWidget
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtGui import QDropEvent, QMouseEvent
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
 
 __all__ = [
+    "CANONICAL_ORIGIN_MIME",
     "ColumnDropRow",
     "ColumnsTabWidget",
     "SourceColumnToken",
@@ -74,6 +80,10 @@ class SourceColumnToken(QPushButton):
         """
         super().__init__(column_name, parent)
         self.column_name = column_name
+        self.setStyleSheet(
+            "background: #5c88d4; color: white; border-radius: 3px; padding: 4px 8px;"
+            " font-weight: bold;"
+        )
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         """Start a drag carrying the column name when the mouse moves.
@@ -99,20 +109,25 @@ class SourceColumnToken(QPushButton):
 
 
 class ColumnDropRow(QWidget):
-    """A canonical row that accepts a dropped source token (Decision 4).
+    """A canonical row composing a label, an assignment slot, and a dtype indicator.
 
     Purpose:
-        Display one canonical column (name, description, expected dtype) and accept
-        a dropped :class:`SourceColumnToken`, reporting the assignment to a
-        callback and showing the dtype-check indicator.
+        Display one canonical column as a horizontal row: a descriptive label on
+        the left, a :class:`ColumnAssignmentSlot` in the middle that owns all
+        drag-and-drop event handling, and a dtype indicator on the right.
 
     Responsibilities:
-        Accept drops and call the injected ``on_drop`` with the dropped source name
-        and this row's canonical name; render the assigned source and the dtype
-        indicator. It performs no matching or dtype logic.
+        Build and lay out child widgets; delegate assignment state and
+        assignment-text queries to ``_slot``; forward dtype-check state to
+        ``_indicator``. No matching, dtype, or drag/drop logic lives here — all
+        drag-and-drop handling has moved to :class:`ColumnAssignmentSlot`.
 
     Attributes:
         canonical: The canonical column name this row targets.
+        _current_source: The currently assigned source column name, or ``None``
+            when unassigned. Updated by :meth:`set_assignment`.
+        slot: The embedded :class:`ColumnAssignmentSlot` that owns drop acceptance
+            and drag initiation for this row (public property, test seam).
     """
 
     def __init__(
@@ -135,16 +150,19 @@ class ColumnDropRow(QWidget):
         super().__init__(parent)
         self.canonical = canonical
         self._on_drop = on_drop
-        self.setAcceptDrops(True)
-        # Render name, description, expected dtype, the assignment label, and the
-        # passive dtype indicator in a single vertical row block.
+        # None when unassigned; updated by set_assignment.
+        self._current_source: str | None = None
         self._label = QLabel(self._row_text(canonical, description, expected_dtype))
-        self._assignment = QLabel("(unassigned)")
+        # The slot owns drop acceptance and drag initiation for this row.
+        self._slot = ColumnAssignmentSlot(canonical, on_drop)
         self._indicator = DtypeCheckWidget()
-        layout = QVBoxLayout(self)
-        layout.addWidget(self._label)
-        layout.addWidget(self._assignment)
-        layout.addWidget(self._indicator)
+        # Horizontal layout: label (stretches) | slot | indicator (fixed).
+        row = QHBoxLayout(self)
+        row.setContentsMargins(4, 2, 4, 2)
+        row.setSpacing(8)
+        row.addWidget(self._label, 2)
+        row.addWidget(self._slot, 1)
+        row.addWidget(self._indicator, 0)
 
     @staticmethod
     def _row_text(canonical: str, description: str, expected_dtype: str | None) -> str:
@@ -173,35 +191,37 @@ class ColumnDropRow(QWidget):
         """
         return self._label.text()
 
-    def assignment_text(self) -> str:
-        """Return this row's rendered assignment label text (public test seam).
+    @property
+    def slot(self) -> ColumnAssignmentSlot:
+        """Return the embedded assignment slot (public test seam).
 
-        Mirrors :meth:`label_text` so callers can read the source column currently
-        assigned to this canonical row without reaching into the private label.
-        The text is the assigned source-column name, or ``"(unassigned)"`` when no
-        source is bound.
+        Exposes ``_slot`` under a public name so test code can deliver drag
+        events directly to the slot without triggering Pyright
+        ``reportPrivateUsage``.
 
         Returns:
-            The assignment label text: the assigned source-column name, or
-            ``"(unassigned)"`` when the row has no source bound.
+            The :class:`ColumnAssignmentSlot` embedded in this row.
         """
-        return self._assignment.text()
+        return self._slot
+
+    def assignment_text(self) -> str:
+        """Return the assignment slot's displayed text (public test seam).
+
+        Delegates to :meth:`ColumnAssignmentSlot.assignment_text`.
+
+        Returns:
+            The assigned source-column name, or ``"(drop here)"`` when unbound.
+        """
+        return self._slot.assignment_text()
 
     def set_assignment(self, source_column: str | None) -> None:
-        """Render the source column assigned to this row.
+        """Update ``_current_source`` and delegate visual state to the slot.
 
         Args:
             source_column: The assigned source name, or ``None`` when cleared.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Updates the assignment label.
         """
-        self._assignment.setText(
-            source_column if source_column is not None else "(unassigned)"
-        )
+        self._current_source = source_column
+        self._slot.set_assignment(source_column)
 
     def set_indicator(self, coercible: bool, failing_example: str | None) -> None:
         """Render the dtype-check result on this row's indicator.
@@ -218,40 +238,6 @@ class ColumnDropRow(QWidget):
         """
         self._indicator.set_state(coercible, failing_example)
 
-    def dragEnterEvent(self, e: QDropEvent) -> None:
-        """Accept a drag carrying source text so a drop can land.
-
-        Args:
-            e: The Qt drag-enter event.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Accepts the proposed action when the payload carries text.
-        """
-        if e.mimeData().hasText():
-            e.acceptProposedAction()
-
-    def dropEvent(self, e: QDropEvent) -> None:
-        """Report the dropped source column to the assignment callback.
-
-        Args:
-            e: The Qt drop event whose MIME text is the source column name.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Calls ``on_drop(source_name, canonical)`` exactly once and accepts the
-            action.
-        """
-        source = e.mimeData().text()
-        # The single assignment seam: translate the drop gesture into one callback
-        # call so the presenter (and its tests) never simulate drag events.
-        self._on_drop(source, self.canonical)
-        e.acceptProposedAction()
-
 
 class ColumnsTabWidget(QWidget):
     """Composes the source-token pool and the canonical drop rows.
@@ -264,12 +250,20 @@ class ColumnsTabWidget(QWidget):
 
     Responsibilities:
         Build and rebuild the token pool and rows from pushed state; forward each
-        drop to ``assign_column``; reflect assignments and dtype indicators. It
-        holds no matching or dtype logic.
+        drop to ``assign_column``; reflect assignments and dtype indicators; accept
+        pool-area drops (outside any :class:`ColumnDropRow`) and route them to
+        ``clear_row`` to unassign the dragged row. It holds no matching or dtype
+        logic. Qt delivers drops to the deepest accepting widget, so
+        :class:`ColumnDropRow` captures row-targeted drops; this widget captures
+        the remainder (pool area).
 
     Attributes:
         assign_column: The seam callback drops are routed to; set by the composition
             root to the presenter's ``assign_column``.
+        _on_release: The seam callback invoked with the canonical name when a drag
+            from an assigned row is dropped on the pool area; set by the composition
+            root via :meth:`clear_row` monkey-patch to the presenter's
+            ``clear_row``.
     """
 
     def __init__(
@@ -287,8 +281,15 @@ class ColumnsTabWidget(QWidget):
         """
         super().__init__(parent)
         self._on_assign: Callable[[str, str], None] = on_assign or (lambda _s, _c: None)
+        # Pool-area drops reach this widget; row-targeted drops reach ColumnDropRow.
+        self.setAcceptDrops(True)
+        # Monkey-patched by DragTabBinder to the presenter's clear_row.
+        self._on_release: Callable[[str], None] = lambda _c: None
         self._pool_box = QVBoxLayout()
+        self._pool_box.setSpacing(4)
         self._rows_box = QVBoxLayout()
+        self._rows_box.setSpacing(2)
+        self._rows_box.setContentsMargins(0, 0, 0, 0)
         self._rows: dict[str, ColumnDropRow] = {}
         self._tokens: list[SourceColumnToken] = []
         outer = QVBoxLayout(self)
@@ -298,19 +299,47 @@ class ColumnsTabWidget(QWidget):
         outer.addLayout(self._rows_box)
 
     def assign_column(self, source_column: str, target_canonical: str) -> None:
-        """Route an assignment to the seam callback.
+        """Route an assignment to the injected seam callback.
 
         Args:
             source_column: The dropped source column name.
             target_canonical: The canonical row dropped onto.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Invokes the injected assignment callback.
         """
         self._on_assign(source_column, target_canonical)
+
+    def clear_row(self, target_canonical: str) -> None:
+        """Invoke ``_on_release(target_canonical)`` to unassign the given row.
+
+        Monkey-patched by :class:`DragTabBinder` to the presenter's ``clear_row``.
+
+        Args:
+            target_canonical: The canonical row name to unassign.
+        """
+        self._on_release(target_canonical)
+
+    def dragEnterEvent(self, e: QDragEnterEvent) -> None:
+        """Accept only when both ``text/plain`` and ``CANONICAL_ORIGIN_MIME`` present.
+
+        Plain pool-token drags (no canonical-origin key) are not accepted here.
+
+        Args:
+            e: The Qt drag-enter event.
+        """
+        if e.mimeData().hasText() and e.mimeData().hasFormat(CANONICAL_ORIGIN_MIME):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e: QDropEvent) -> None:
+        """Unassign the row identified by ``CANONICAL_ORIGIN_MIME``.
+
+        Reads the canonical name from the secondary MIME key and calls
+        :meth:`clear_row` to route the unassign gesture to the presenter.
+
+        Args:
+            e: The Qt drop event carrying both MIME keys.
+        """
+        canonical_origin = e.mimeData().data(CANONICAL_ORIGIN_MIME).toStdString()
+        self.clear_row(canonical_origin)
+        e.acceptProposedAction()
 
     def set_source_pool(self, columns: list[str]) -> None:
         """Rebuild the draggable token pool from ``columns``.
@@ -427,15 +456,12 @@ class ColumnsTabWidget(QWidget):
     def row_assignment_text(self, canonical: str) -> str:
         """Return one row's rendered source assignment (public test seam).
 
-        Mirrors :meth:`row_label_text` so callers can read which source column is
-        currently assigned to a canonical row after prepopulation or a drop.
-
         Args:
             canonical: The canonical row to read.
 
         Returns:
-            The assigned source-column name, ``"(unassigned)"`` when no source is
-            bound, or an empty string when the row is absent.
+            The assigned source-column name, ``"(unassigned)"`` when unbound, or
+            ``""`` when the row is absent.
         """
         row = self._rows.get(canonical)
         return row.assignment_text() if row is not None else ""
