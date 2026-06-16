@@ -26,15 +26,15 @@ configurable width threshold. Keep `_columns_tab_drag.py` under 500 lines.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: Canonical rows are wrapped in a `QScrollArea`; rows beyond the visible height
+- [x] AC-1: Canonical rows are wrapped in a `QScrollArea`; rows beyond the visible height
   are reachable by scrolling.
-- [ ] AC-2: Derived column rows (added via Decision 7) are visible when the user scrolls
+- [x] AC-2: Derived column rows (added via Decision 7) are visible when the user scrolls
   to the end of the canonical rows list (i.e., they appear after the regular column rows).
-- [ ] AC-3: Wide layout (>= threshold): left panel shows canonical assignments (scrollable),
+- [x] AC-3: Wide layout (>= threshold): left panel shows canonical assignments (scrollable),
   right panel shows source pool.
-- [ ] AC-4: Narrow layout (< threshold): top panel shows source pool, bottom panel shows
+- [x] AC-4: Narrow layout (< threshold): top panel shows source pool, bottom panel shows
   scrollable canonical assignments.
-- [ ] AC-5: All existing drag-and-drop behaviors (assign, re-assign, unassign from row,
+- [x] AC-5: All existing drag-and-drop behaviors (assign, re-assign, unassign from row,
   unassign to pool) continue to function after the layout refactor.
 
 ## Dependencies / Risks
@@ -56,6 +56,6 @@ configurable width threshold. Keep `_columns_tab_drag.py` under 500 lines.
 
 ## Evidence Checklist
 
-- [ ] baseline
-- [ ] targeted verification
-- [ ] end-state
+- [x] baseline
+- [x] targeted verification
+- [x] end-state

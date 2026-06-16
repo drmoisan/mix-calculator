@@ -24,22 +24,26 @@ if TYPE_CHECKING:
 
 
 def test_columns_tab_wraps_widget_in_resizable_scroll_area(qtbot: QtBot) -> None:
-    """AC-7: the Columns tab hosts a resizable QScrollArea wrapping the widget.
+    """AC-7: the Columns tab container hosts a resizable QScrollArea for the widget.
 
     The Columns tab is vertically scrollable so all canonical rows are reachable
     when they exceed the visible height. The scroll area is resizable, and its
     inner widget is the same real :class:`ColumnsTabWidget` the binder uses.
+    Since ColumnsTabWidget now contains its own inner QScrollArea for canonical
+    rows, there may be more than one QScrollArea in the tree; we verify the
+    outer one (that wraps columns_widget directly) is present and resizable.
     """
     # Arrange / Act
     controls = build_columns_tab()
     qtbot.addWidget(controls.widget)
 
-    # Assert: a resizable scroll area in the container wraps the columns widget.
+    # Assert: at least one resizable QScrollArea directly wraps the columns widget.
     scroll_areas = controls.widget.findChildren(QScrollArea)
-    assert len(scroll_areas) == 1
-    scroll_area = scroll_areas[0]
-    assert scroll_area.widgetResizable() is True
-    assert scroll_area.widget() is controls.columns_widget
+    outer = next(
+        (sa for sa in scroll_areas if sa.widget() is controls.columns_widget), None
+    )
+    assert outer is not None, "No QScrollArea directly wraps the ColumnsTabWidget"
+    assert outer.widgetResizable() is True
 
 
 def test_pool_renders_one_token_per_source_column(qtbot: QtBot) -> None:

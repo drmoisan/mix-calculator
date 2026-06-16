@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -38,12 +39,16 @@ from src.gui.widgets._column_assignment_slot import (
     CANONICAL_ORIGIN_MIME,
     ColumnAssignmentSlot,
 )
+from src.gui.widgets._columns_tab_layout import (
+    apply_splitter_orientation,
+    build_columns_panels,
+)
 from src.gui.widgets._dtype_check_widget import DtypeCheckWidget
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent, QResizeEvent
 
 __all__ = [
     "CANONICAL_ORIGIN_MIME",
@@ -270,6 +275,7 @@ class ColumnsTabWidget(QWidget):
         self,
         on_assign: Callable[[str, str], None] | None = None,
         parent: QWidget | None = None,
+        width_threshold: int = 700,
     ) -> None:
         """Build the empty pool and rows containers.
 
@@ -278,8 +284,13 @@ class ColumnsTabWidget(QWidget):
                 ``(source, canonical)`` on a drop; defaults to a no-op until the
                 composition root wires the presenter.
             parent: Optional Qt parent widget.
+            width_threshold: Pixel width at which the layout switches between
+                wide (horizontal splitter) and narrow (vertical splitter) modes.
+                Defaults to 700.
         """
         super().__init__(parent)
+        # Pixel width boundary: >= threshold is wide mode, < threshold is narrow mode.
+        self._width_threshold = width_threshold
         self._on_assign: Callable[[str, str], None] = on_assign or (lambda _s, _c: None)
         # Pool-area drops reach this widget; row-targeted drops reach ColumnDropRow.
         self.setAcceptDrops(True)
@@ -292,11 +303,46 @@ class ColumnsTabWidget(QWidget):
         self._rows_box.setContentsMargins(0, 0, 0, 0)
         self._rows: dict[str, ColumnDropRow] = {}
         self._tokens: list[SourceColumnToken] = []
+
+        # Construct the two splitter panels via the layout helper so this file
+        # stays under the 500-line limit while keeping logic in a documented module.
+        self.pool_panel, self.rows_scroll = build_columns_panels(
+            self._pool_box, self._rows_box
+        )
+
+        # Wide mode (initial): left = canonical rows (scrollable), right = pool.
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.addWidget(self.rows_scroll)
+        self.splitter.addWidget(self.pool_panel)
+
+        # Single top-level layout holds only the splitter.
         outer = QVBoxLayout(self)
-        outer.addWidget(QLabel("Source columns"))
-        outer.addLayout(self._pool_box)
-        outer.addWidget(QLabel("Canonical columns"))
-        outer.addLayout(self._rows_box)
+        outer.addWidget(self.splitter)
+
+    def resizeEvent(self, e: QResizeEvent) -> None:  # type: ignore[override]
+        """Switch the splitter orientation when the widget crosses the width threshold.
+
+        Wide (>= threshold): horizontal splitter, rows left, pool right.
+        Narrow (< threshold): vertical splitter, pool top, rows bottom.
+        No-ops when the mode is already correct to avoid redundant reordering.
+
+        Args:
+            e: The Qt resize event carrying the new widget size.
+        """
+        wide = e.size().width() >= self._width_threshold
+        current_is_horizontal = self.splitter.orientation() == Qt.Orientation.Horizontal
+
+        # Only reorder panels when the mode actually changes to avoid redundant work.
+        if wide == current_is_horizontal:
+            super().resizeEvent(e)
+            return
+
+        # Delegate panel detach and re-insert to the extracted layout helper.
+        apply_splitter_orientation(
+            self.splitter, self.pool_panel, self.rows_scroll, wide
+        )
+
+        super().resizeEvent(e)
 
     def assign_column(self, source_column: str, target_canonical: str) -> None:
         """Route an assignment to the injected seam callback.
@@ -344,14 +390,10 @@ class ColumnsTabWidget(QWidget):
     def set_source_pool(self, columns: list[str]) -> None:
         """Rebuild the draggable token pool from ``columns``.
 
+        Clears existing tokens and recreates one per entry in ``columns``.
+
         Args:
             columns: The unconsumed source column names, in source order.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Clears and recreates the pool tokens.
         """
         # Clear existing tokens before rebuilding so a re-render reflects the
         # current pool exactly (consumed tokens disappear).
@@ -367,15 +409,11 @@ class ColumnsTabWidget(QWidget):
     def set_rows(self, rows: list[tuple[str, str, str | None]]) -> None:
         """Rebuild the canonical drop rows from ``rows``.
 
+        Clears existing rows and recreates one per entry, wired to ``assign_column``.
+
         Args:
             rows: One ``(canonical_name, description, expected_dtype)`` tuple per
                 row, in display order.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Clears and recreates the drop rows, each wired to ``assign_column``.
         """
         # Clear existing rows before rebuilding so the row set matches the state.
         for row in self._rows.values():
@@ -391,15 +429,11 @@ class ColumnsTabWidget(QWidget):
     def set_assignment(self, target_canonical: str, source_column: str | None) -> None:
         """Reflect the source assigned to one row.
 
+        Updates the matching row's assignment label when the row exists.
+
         Args:
             target_canonical: The canonical row whose assignment changed.
             source_column: The assigned source, or ``None`` when cleared.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Updates the matching row's assignment label when the row exists.
         """
         row = self._rows.get(target_canonical)
         if row is not None:
@@ -410,16 +444,12 @@ class ColumnsTabWidget(QWidget):
     ) -> None:
         """Reflect the dtype-check result for one row.
 
+        Updates the matching row's dtype indicator when the row exists.
+
         Args:
             target_canonical: The canonical row whose dtype state changed.
             coercible: Whether the matched values coerce to the expected dtype.
             failing_example: A masked failing example when not coercible.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Updates the matching row's indicator when the row exists.
         """
         row = self._rows.get(target_canonical)
         if row is not None:
