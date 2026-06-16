@@ -76,6 +76,30 @@ class ColumnsTabPresenter:
         """
         self._view = view
         self._state = state
+        # The chosen preview-row index whose assigned values replace the dtype
+        # glyph (AC-6); ``None`` keeps the default dtype-glyph rendering.
+        self._preview_row_index: int | None = None
+
+    def set_preview_row(self, row_index: int | None) -> None:
+        """Choose the preview row whose assigned values are shown (AC-6).
+
+        When a row index is set, each matched row renders the chosen source row's
+        already-masked value instead of the dtype glyph; ``None`` restores the
+        dtype-glyph rendering. Re-renders assignments and indicators immediately.
+
+        Args:
+            row_index: The chosen preview-row index, or ``None`` to show dtype
+                glyphs.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the stored chosen row index and re-pushes assignment/indicator
+            state to the view.
+        """
+        self._preview_row_index = row_index
+        self._render_assignments_and_dtypes()
 
     def prepopulate(self) -> None:
         """Fuzzy-match each row to the closest source column and render the tab.
@@ -381,21 +405,31 @@ class ColumnsTabPresenter:
         self._render_assignments_and_dtypes()
 
     def _render_assignments_and_dtypes(self) -> None:
-        """Push per-row assignment and dtype-check state to the view.
+        """Push per-row assignment and dtype/value state to the view.
+
+        When a preview row is chosen (:meth:`set_preview_row`), each matched row
+        shows that row's already-masked source value instead of the dtype glyph
+        (AC-6); otherwise the dtype-check indicator is pushed. The assignment is
+        always pushed first.
 
         Returns:
             ``None``.
 
         Side effects:
-            Calls ``view.set_assignment`` for every row and
-            ``view.set_dtype_indicator`` for matched rows with an expected dtype.
+            Calls ``view.set_assignment`` for every row, and either
+            ``view.set_value_display`` (when a preview row is chosen) or
+            ``view.set_dtype_indicator`` for matched rows.
         """
         slice_ = self._state.preview_slice
-        # Push each row's current assignment, then its dtype indicator when both a
-        # source is bound and an expected dtype is declared.
+        # Push each row's current assignment, then either the chosen row's masked
+        # value (value-display mode) or the dtype indicator (default mode).
         for canonical, _role, _required, _in_output, _aliases in self._state.columns:
             source = self._state.consumed_columns.get(canonical)
             self._view.set_assignment(canonical, source)
+            # Value-display mode wins when a row is chosen and the row has a source.
+            if self._preview_row_index is not None and source is not None:
+                self._push_value_display(canonical, source)
+                continue
             expected = self._state.column_dtypes.get(canonical)
             # The dtype check runs only when a source is matched, a slice exists,
             # and the column declares an expected type to validate against.
@@ -404,3 +438,38 @@ class ColumnsTabPresenter:
                 self._view.set_dtype_indicator(
                     canonical, result.coercible, result.failing_example
                 )
+
+    def _push_value_display(self, canonical: str, source: str) -> None:
+        """Push the chosen preview row's masked value for one matched row (AC-6).
+
+        Reads the chosen source row's cell value from the already-masked
+        ``preview_slice.rows`` and pushes it to the view. Out-of-range indices or a
+        missing slice/header position yield an empty value display rather than
+        raising, so a stale index never crashes the render.
+
+        Args:
+            canonical: The canonical row whose value display is updated.
+            source: The source column assigned to ``canonical``.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Calls ``view.set_value_display`` with the masked cell value (or empty).
+        """
+        slice_ = self._state.preview_slice
+        index = self._preview_row_index
+        value = ""
+        # Resolve the chosen row's value only when the slice, the row index, and the
+        # source's header position are all valid; otherwise show an empty value.
+        if (
+            slice_ is not None
+            and index is not None
+            and 0 <= index < len(slice_.rows)
+            and source in slice_.header
+        ):
+            row = slice_.rows[index]
+            position = slice_.header.index(source)
+            if position < len(row):
+                value = str(row[position])
+        self._view.set_value_display(canonical, value)

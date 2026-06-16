@@ -31,9 +31,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "install_new_derived_handler",
+    "install_preview_refresh_handler",
     "open_new_from_template_builder",
     "seed_dialog_preview_slice",
 ]
+
+# Message shown on the Preview tab when no source data is available to preview
+# (the blank menu path leaves the presenter without a preview slice).
+_NO_PREVIEW_MESSAGE = "No source data available to preview"
 
 
 def seed_dialog_preview_slice(
@@ -105,6 +110,52 @@ def install_new_derived_handler(dialog: SchemaBuilderDialog, presenter: object) 
             )
 
     install(_open_derived_dialog)
+
+
+def install_preview_refresh_handler(
+    dialog: SchemaBuilderDialog, presenter: object
+) -> None:
+    """Install the Preview-tab refresh handler that renders the preview (AC-9).
+
+    Connects (via ``dialog.set_preview_refresh_handler``) a handler that, when the
+    user navigates to the Preview tab, drives ``presenter.update_preview`` with the
+    masked preview slice's rows so the result table renders against the in-progress
+    schema. When the presenter has no preview slice (blank menu path) a specific
+    "no source data" message is shown rather than rendering nothing (AC-10).
+
+    Args:
+        dialog: The schema-builder dialog to install the handler on.
+        presenter: The schema-builder presenter driving the dialog.
+
+    Returns:
+        ``None``.
+
+    Side effects:
+        Calls ``dialog.set_preview_refresh_handler`` when both the dialog and a
+        concrete presenter expose the required seams; otherwise it is a no-op so
+        minimal test stubs remain compatible.
+    """
+    from src.gui.presenters._schema_builder_state import preview_rows_from_slice
+    from src.gui.presenters.schema_builder_presenter import SchemaBuilderPresenter
+
+    install = getattr(dialog, "set_preview_refresh_handler", None)
+    # Require the production dialog seam and a concrete presenter; a minimal stub
+    # that lacks either skips installation rather than failing the open path.
+    if not callable(install) or not isinstance(presenter, SchemaBuilderPresenter):
+        return
+    concrete_presenter = presenter
+
+    def _refresh_preview() -> None:
+        """Render the preview from the masked slice when the Preview tab opens."""
+        preview_slice = concrete_presenter.state.preview_slice
+        # The blank menu path has no slice to preview; show a specific message
+        # rather than an empty table (AC-10).
+        if preview_slice is None:
+            dialog.show_error(_NO_PREVIEW_MESSAGE)
+            return
+        concrete_presenter.update_preview(preview_rows_from_slice(preview_slice))
+
+    install(_refresh_preview)
 
 
 def open_new_from_template_builder(

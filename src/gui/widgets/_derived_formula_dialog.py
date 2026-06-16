@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -123,6 +124,9 @@ class DerivedFormulaDialog(QDialog):
         # Validate live as the user edits the expression so the error surface
         # tracks the current text without an explicit button.
         self._expression_input.textChanged.connect(self._on_expression_changed)
+        # Double-clicking an available column inserts its bracketed name at the
+        # cursor so the user can compose an expression without typing names (AC-5).
+        self._names_list.itemDoubleClicked.connect(self._on_column_double_clicked)
 
     def available_names(self) -> list[str]:
         """Return the available column names offered to the formula.
@@ -131,6 +135,37 @@ class DerivedFormulaDialog(QDialog):
             The available names in display order (test/inspection seam).
         """
         return list(self._available)
+
+    def expression_text(self) -> str:
+        """Return the raw expression-input text including any inserted brackets.
+
+        Unlike :meth:`derived_expression` this does not strip surrounding
+        whitespace, so callers can observe the exact inserted text and cursor
+        result (test/inspection seam for the double-click insert, AC-5).
+
+        Returns:
+            The current expression-input text verbatim.
+        """
+        return self._expression_input.text()
+
+    def emit_column_double_click(self, row: int) -> None:
+        """Emit the real ``itemDoubleClicked`` signal for one available column.
+
+        Drives the production signal-to-slot wiring (not the slot directly) so a
+        test exercises the same path a user's double-click triggers (AC-5).
+
+        Args:
+            row: The zero-based index of the available column to double-click.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Emits ``itemDoubleClicked`` for the list item at ``row``, which inserts
+            its bracketed name into the expression input.
+        """
+        item = self._names_list.item(row)
+        self._names_list.itemDoubleClicked.emit(item)
 
     def derived_name(self) -> str:
         """Return the authored derived-column name.
@@ -215,6 +250,28 @@ class DerivedFormulaDialog(QDialog):
             return False
         self._error_label.setText("")
         return True
+
+    def _on_column_double_clicked(self, item: QListWidgetItem) -> None:
+        """Insert the double-clicked column's bracketed name at the cursor (AC-5).
+
+        The bracketed ``[Name]`` form is the display convention; it is stripped to
+        ``col("Name")`` on store/validate (D-1). ``QLineEdit.insert`` places the
+        text at the current cursor position, pushing any existing text to the right.
+
+        Args:
+            item: The list item that was double-clicked; its text is the column
+                name to insert.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Inserts the bracketed name into the expression input and returns focus
+            to it so the user can continue typing.
+        """
+        bracketed = f"[{item.text()}]"
+        self._expression_input.insert(bracketed)
+        self._expression_input.setFocus()
 
     def _on_expression_changed(self, _text: str) -> None:
         """Re-validate live when the expression text changes.

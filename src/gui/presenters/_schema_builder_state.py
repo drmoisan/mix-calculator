@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from src.schema_model import (
     ColumnSpec,
@@ -34,13 +35,26 @@ from src.schema_model import (
     literal_text,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 __all__ = [
+    "DEFAULT_KEY_SEPARATOR",
     "PreviewSlice",
     "SchemaBuilderState",
     "assemble_schema",
+    "key_parts_from_columns",
     "known_column_names",
     "parse_key_pattern",
+    "preview_rows_from_slice",
 ]
+
+# The default literal-text separator interleaved between selected key columns
+# when the Key tab composes the key from a multi-select (D-2, Option C). The
+# loader keys on the ordered column-ref names; the separator is a display/
+# composition artifact that does not change ``KeySpec.column_names`` or the
+# loader's key resolution.
+DEFAULT_KEY_SEPARATOR = "-"
 
 
 @dataclass(frozen=True)
@@ -158,6 +172,36 @@ class SchemaBuilderState:
     preview_slice: PreviewSlice | None = None
 
 
+def preview_rows_from_slice(
+    preview_slice: PreviewSlice | None,
+) -> list[Mapping[str, object]]:
+    """Convert a masked preview slice into header-keyed row mappings (AC-9).
+
+    Each masked sample row in ``preview_slice.rows`` becomes a mapping from the
+    slice's header column name to that row's cell value, so the preview can be
+    rendered (and re-applied through the schema) without the builder performing any
+    I/O. Values come only from the already-masked slice. A ``None`` or empty slice
+    yields an empty list, signaling "no source data to preview".
+
+    Args:
+        preview_slice: The masked preview slice to convert, or ``None``.
+
+    Returns:
+        One ``{header_name: cell_value}`` mapping per masked sample row, in row
+        order. Empty when the slice is ``None`` or carries no rows. Cells beyond a
+        ragged row's length are omitted from that row's mapping.
+    """
+    if preview_slice is None or not preview_slice.rows:
+        return []
+    header = preview_slice.header
+    rows: list[Mapping[str, object]] = []
+    # Build one header-keyed mapping per masked row; zip stops at the shorter of
+    # the header and the row so a ragged row contributes only its present cells.
+    for row in preview_slice.rows:
+        rows.append({name: value for name, value in zip(header, row, strict=False)})
+    return rows
+
+
 def known_column_names(state: SchemaBuilderState) -> list[str]:
     """Return the canonical names a derived formula may reference.
 
@@ -222,6 +266,38 @@ def parse_key_pattern(pattern: str) -> list[KeyPart]:
     # Trailing text after the last token is a final literal-text segment.
     if cursor < len(pattern):
         parts.append(literal_text(pattern[cursor:]))
+    return parts
+
+
+def key_parts_from_columns(
+    columns: tuple[str, ...] | list[str],
+    separator: str = DEFAULT_KEY_SEPARATOR,
+) -> list[KeyPart]:
+    """Compose ordered ``column-ref`` key parts from selected columns (D-2).
+
+    The Key tab's multi-select yields the ordered key columns; this builds one
+    ``column-ref`` :class:`KeyPart` per column, interleaving a default
+    ``literal-text`` separator between them so the rendered key composition shows
+    the join. The loader keys on the ordered column-ref names only, so the
+    separator does not change ``KeySpec.column_names`` or key resolution (D-2:
+    model/loader unchanged).
+
+    Args:
+        columns: The ordered selected key column names.
+        separator: The literal-text separator placed between adjacent column-refs;
+            omitted when empty. Defaults to :data:`DEFAULT_KEY_SEPARATOR`.
+
+    Returns:
+        The ordered :class:`KeyPart` list: column-refs interleaved with literal-text
+        separators. Empty when ``columns`` is empty.
+    """
+    parts: list[KeyPart] = []
+    # Interleave a literal-text separator between adjacent column-refs so the
+    # composed key reads ``A - B - C``; the first column has no leading separator.
+    for index, name in enumerate(columns):
+        if index > 0 and separator:
+            parts.append(literal_text(separator))
+        parts.append(column_ref(name))
     return parts
 
 

@@ -24,31 +24,28 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QMimeData, Qt
-from PySide6.QtGui import QDrag
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QPushButton,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from src.gui.widgets._column_assignment_slot import (
-    CANONICAL_ORIGIN_MIME,
-    ColumnAssignmentSlot,
-)
+from src.gui.widgets._column_assignment_slot import CANONICAL_ORIGIN_MIME
+from src.gui.widgets._columns_tab_drop_row import ColumnDropRow
 from src.gui.widgets._columns_tab_layout import (
     apply_splitter_orientation,
     build_columns_panels,
 )
-from src.gui.widgets._dtype_check_widget import DtypeCheckWidget
+from src.gui.widgets._columns_tab_source_token import SourceColumnToken
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent, QResizeEvent
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent, QResizeEvent
 
 __all__ = [
     "CANONICAL_ORIGIN_MIME",
@@ -56,192 +53,6 @@ __all__ = [
     "ColumnsTabWidget",
     "SourceColumnToken",
 ]
-
-# MIME type carrying the dragged source column name as plain text.
-_SOURCE_MIME = "text/plain"
-
-
-class SourceColumnToken(QPushButton):
-    """A draggable button representing one source column in the pool.
-
-    Purpose:
-        Render one source column as a draggable token; starting a drag carries the
-        column's name as MIME text so a drop target can read it.
-
-    Responsibilities:
-        Initiate a :class:`QDrag` on mouse-move carrying its column name. It holds
-        no logic beyond the drag payload.
-
-    Attributes:
-        column_name: The source column name this token represents and carries.
-    """
-
-    def __init__(self, column_name: str, parent: QWidget | None = None) -> None:
-        """Build a token labeled with and carrying ``column_name``.
-
-        Args:
-            column_name: The source column name to display and drag.
-            parent: Optional Qt parent widget.
-        """
-        super().__init__(column_name, parent)
-        self.column_name = column_name
-        self.setStyleSheet(
-            "background: #5c88d4; color: white; border-radius: 3px; padding: 4px 8px;"
-            " font-weight: bold;"
-        )
-
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:
-        """Start a drag carrying the column name when the mouse moves.
-
-        Args:
-            e: The Qt mouse-move event.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Constructs and executes a :class:`QDrag` whose MIME text is the
-            token's column name.
-        """
-        # Only the left button initiates a drag, matching standard drag affordance.
-        if not (e.buttons() & Qt.MouseButton.LeftButton):
-            return
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setText(self.column_name)
-        drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
-
-
-class ColumnDropRow(QWidget):
-    """A canonical row composing a label, an assignment slot, and a dtype indicator.
-
-    Purpose:
-        Display one canonical column as a horizontal row: a descriptive label on
-        the left, a :class:`ColumnAssignmentSlot` in the middle that owns all
-        drag-and-drop event handling, and a dtype indicator on the right.
-
-    Responsibilities:
-        Build and lay out child widgets; delegate assignment state and
-        assignment-text queries to ``_slot``; forward dtype-check state to
-        ``_indicator``. No matching, dtype, or drag/drop logic lives here — all
-        drag-and-drop handling has moved to :class:`ColumnAssignmentSlot`.
-
-    Attributes:
-        canonical: The canonical column name this row targets.
-        _current_source: The currently assigned source column name, or ``None``
-            when unassigned. Updated by :meth:`set_assignment`.
-        slot: The embedded :class:`ColumnAssignmentSlot` that owns drop acceptance
-            and drag initiation for this row (public property, test seam).
-    """
-
-    def __init__(
-        self,
-        canonical: str,
-        description: str,
-        expected_dtype: str | None,
-        on_drop: Callable[[str, str], None],
-        parent: QWidget | None = None,
-    ) -> None:
-        """Build the row controls and accept drops.
-
-        Args:
-            canonical: The canonical column name this row targets.
-            description: The column description text (may be empty).
-            expected_dtype: The expected dtype label, or ``None``.
-            on_drop: Callback invoked with ``(source_name, canonical)`` on a drop.
-            parent: Optional Qt parent widget.
-        """
-        super().__init__(parent)
-        self.canonical = canonical
-        self._on_drop = on_drop
-        # None when unassigned; updated by set_assignment.
-        self._current_source: str | None = None
-        self._label = QLabel(self._row_text(canonical, description, expected_dtype))
-        # The slot owns drop acceptance and drag initiation for this row.
-        self._slot = ColumnAssignmentSlot(canonical, on_drop)
-        self._indicator = DtypeCheckWidget()
-        # Horizontal layout: label (stretches) | slot | indicator (fixed).
-        row = QHBoxLayout(self)
-        row.setContentsMargins(4, 2, 4, 2)
-        row.setSpacing(8)
-        row.addWidget(self._label, 2)
-        row.addWidget(self._slot, 1)
-        row.addWidget(self._indicator, 0)
-
-    @staticmethod
-    def _row_text(canonical: str, description: str, expected_dtype: str | None) -> str:
-        """Compose the row's display text from its parts.
-
-        Args:
-            canonical: The canonical column name.
-            description: The description (may be empty).
-            expected_dtype: The expected dtype label, or ``None``.
-
-        Returns:
-            A single display string combining the parts.
-        """
-        dtype_text = expected_dtype if expected_dtype is not None else "any"
-        # Include the description only when present so empty descriptions do not
-        # leave a dangling separator.
-        if description:
-            return f"{canonical} — {description} [{dtype_text}]"
-        return f"{canonical} [{dtype_text}]"
-
-    def label_text(self) -> str:
-        """Return this row's display label text (public test seam).
-
-        Returns:
-            The row label text (name, description, expected dtype).
-        """
-        return self._label.text()
-
-    @property
-    def slot(self) -> ColumnAssignmentSlot:
-        """Return the embedded assignment slot (public test seam).
-
-        Exposes ``_slot`` under a public name so test code can deliver drag
-        events directly to the slot without triggering Pyright
-        ``reportPrivateUsage``.
-
-        Returns:
-            The :class:`ColumnAssignmentSlot` embedded in this row.
-        """
-        return self._slot
-
-    def assignment_text(self) -> str:
-        """Return the assignment slot's displayed text (public test seam).
-
-        Delegates to :meth:`ColumnAssignmentSlot.assignment_text`.
-
-        Returns:
-            The assigned source-column name, or ``"(drop here)"`` when unbound.
-        """
-        return self._slot.assignment_text()
-
-    def set_assignment(self, source_column: str | None) -> None:
-        """Update ``_current_source`` and delegate visual state to the slot.
-
-        Args:
-            source_column: The assigned source name, or ``None`` when cleared.
-        """
-        self._current_source = source_column
-        self._slot.set_assignment(source_column)
-
-    def set_indicator(self, coercible: bool, failing_example: str | None) -> None:
-        """Render the dtype-check result on this row's indicator.
-
-        Args:
-            coercible: Whether the matched values coerce to the expected dtype.
-            failing_example: A masked failing example when not coercible.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Updates the embedded dtype indicator widget.
-        """
-        self._indicator.set_state(coercible, failing_example)
 
 
 class ColumnsTabWidget(QWidget):
@@ -296,6 +107,9 @@ class ColumnsTabWidget(QWidget):
         self.setAcceptDrops(True)
         # Monkey-patched by DragTabBinder to the presenter's clear_row.
         self._on_release: Callable[[str], None] = lambda _c: None
+        # Seam invoked with the chosen preview-row index when the row chooser
+        # changes; wired by the binder to the presenter's set_preview_row (AC-6).
+        self._on_row_chosen: Callable[[int], None] = lambda _i: None
         self._pool_box = QVBoxLayout()
         self._pool_box.setSpacing(4)
         self._rows_box = QVBoxLayout()
@@ -315,8 +129,21 @@ class ColumnsTabWidget(QWidget):
         self.splitter.addWidget(self.rows_scroll)
         self.splitter.addWidget(self.pool_panel)
 
-        # Single top-level layout holds only the splitter.
+        # One tab-level row chooser (AC-6): picks a source row index whose assigned
+        # values replace the dtype glyph on each row. Bounds are seeded by
+        # set_row_chooser_bounds once the preview slice row count is known.
+        self._row_chooser = QSpinBox()
+        self._row_chooser.setMinimum(0)
+        self._row_chooser.setMaximum(0)
+        self._row_chooser.valueChanged.connect(self._handle_row_chosen)
+        chooser_row = QHBoxLayout()
+        chooser_row.addWidget(QLabel("Preview row"))
+        chooser_row.addWidget(self._row_chooser)
+        chooser_row.addStretch()
+
+        # Top-level layout: the row chooser above the responsive splitter.
         outer = QVBoxLayout(self)
+        outer.addLayout(chooser_row)
         outer.addWidget(self.splitter)
 
     def resizeEvent(self, e: QResizeEvent) -> None:  # type: ignore[override]
@@ -362,6 +189,95 @@ class ColumnsTabWidget(QWidget):
             target_canonical: The canonical row name to unassign.
         """
         self._on_release(target_canonical)
+
+    def set_on_row_chosen(self, callback: Callable[[int], None]) -> None:
+        """Install the seam invoked when the preview-row chooser changes (AC-6).
+
+        Args:
+            callback: A callable invoked with the newly chosen row index.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Replaces the stored row-chosen seam callback.
+        """
+        self._on_row_chosen = callback
+
+    def set_row_chooser_bounds(self, row_count: int) -> None:
+        """Bound the row chooser to ``0..row_count-1`` (AC-6).
+
+        Args:
+            row_count: The number of available preview rows; a non-positive count
+                disables selection by pinning the maximum to 0.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the chooser's maximum without emitting a spurious change.
+        """
+        # Clamp the maximum to the last valid row index; an empty slice leaves the
+        # single index 0 selectable but inert (no values to show).
+        maximum = max(row_count - 1, 0)
+        # Block signals so seeding bounds does not fire the row-chosen seam.
+        blocked = self._row_chooser.blockSignals(True)
+        self._row_chooser.setMaximum(maximum)
+        self._row_chooser.blockSignals(blocked)
+
+    def _handle_row_chosen(self, index: int) -> None:
+        """Route a chooser change to the installed row-chosen seam (AC-6).
+
+        Args:
+            index: The newly selected preview-row index.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Invokes the row-chosen seam callback with ``index``.
+        """
+        self._on_row_chosen(index)
+
+    def set_value_display(self, target_canonical: str, value: str) -> None:
+        """Show a chosen source value on one row instead of the dtype glyph (AC-6).
+
+        Args:
+            target_canonical: The canonical row whose indicator shows the value.
+            value: The already-masked source cell value to display.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the matching row's indicator to value-display mode when the row
+            exists.
+        """
+        row = self._rows.get(target_canonical)
+        if row is not None:
+            row.set_value_display(value)
+
+    def row_chooser_value(self) -> int:
+        """Return the current chooser row index (public test seam).
+
+        Returns:
+            The chooser's current value.
+        """
+        return self._row_chooser.value()
+
+    def set_row_chooser_value(self, index: int) -> None:
+        """Set the chooser row index, firing the row-chosen seam (public seam).
+
+        Args:
+            index: The preview-row index to select.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the chooser value, which emits the row-chosen seam when changed.
+        """
+        self._row_chooser.setValue(index)
 
     def dragEnterEvent(self, e: QDragEnterEvent) -> None:
         """Accept only when both ``text/plain`` and ``CANONICAL_ORIGIN_MIME`` present.
@@ -495,3 +411,16 @@ class ColumnsTabWidget(QWidget):
         """
         row = self._rows.get(canonical)
         return row.assignment_text() if row is not None else ""
+
+    def row_indicator_text(self, canonical: str) -> str:
+        """Return one row's indicator text (public test seam).
+
+        Args:
+            canonical: The canonical row to read.
+
+        Returns:
+            The row's indicator text (dtype glyph, failing example, or chosen-row
+            value), or ``""`` when the row is absent.
+        """
+        row = self._rows.get(canonical)
+        return row.indicator_text() if row is not None else ""

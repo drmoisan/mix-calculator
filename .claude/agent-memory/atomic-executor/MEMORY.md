@@ -9,3 +9,4 @@
 - [openpyxl append typing](openpyxl-append-typing.md) — strict Pyright: widen fixture row param to Sequence[Sequence[object]] AND list(row) at worksheet.append; both fixes needed, no suppression
 - [Rerouting a loader breaks stale monkeypatches](rerouting-loader-breaks-stale-monkeypatches.md) — moving import_aop off load_aop voided 5 GUI test patch sites; re-target at read_excel_sheet/detect_header_row or SchemaLoader.load
 - [Cross-module private test helpers need __all__](cross-module-private-test-helpers-need-all-export.md) — splitting a test file that shares an `_`-prefixed helper trips strict Pyright reportPrivateUsage; relocate into an `_`-module with `__all__`
+- [schema_builder_dialog.py rides the 500-line cap](schema-builder-dialog-at-cap.md) — adding any view method forces extracting an accessor pair to a helper module; namespace imports are the biggest line-saver

@@ -22,6 +22,7 @@ class FakeColumnsTabView:
         assignments: Each ``set_assignment`` call as ``(canonical, source)``.
         dtype_indicators: Each ``set_dtype_indicator`` call as
             ``(canonical, coercible, failing_example)``.
+        value_displays: Each ``set_value_display`` call as ``(canonical, value)``.
     """
 
     def __init__(self) -> None:
@@ -30,6 +31,7 @@ class FakeColumnsTabView:
         self.rows: list[list[tuple[str, str, str | None]]] = []
         self.assignments: list[tuple[str, str | None]] = []
         self.dtype_indicators: list[tuple[str, bool, str | None]] = []
+        self.value_displays: list[tuple[str, str]] = []
 
     def assign_column(self, source_column: str, target_canonical: str) -> None:
         """No-op assignment seam (the widget calls this; the presenter routes it)."""
@@ -52,6 +54,10 @@ class FakeColumnsTabView:
     ) -> None:
         """Record a dtype-indicator render call."""
         self.dtype_indicators.append((target_canonical, coercible, failing_example))
+
+    def set_value_display(self, target_canonical: str, value: str) -> None:
+        """Record a value-display render call (AC-6)."""
+        self.value_displays.append((target_canonical, value))
 
 
 def _state_with_pool() -> SchemaBuilderState:
@@ -310,3 +316,103 @@ def test_dtype_indicator_reports_failing_example_for_non_coercible() -> None:
 
     # Assert: the indicator is non-coercible and names the masked failing example.
     assert ("Sales", False, "bad") in view.dtype_indicators
+
+
+def _state_with_masked_slice() -> SchemaBuilderState:
+    """Return a state whose matched rows have a 3-row masked preview slice.
+
+    Returns:
+        A :class:`SchemaBuilderState` with two canonical columns, near-name source
+        matches, and a masked preview slice of three synthetic rows.
+    """
+    return SchemaBuilderState(
+        columns=[
+            ("Customer", "dimension", True, True, ()),
+            ("Sales", "measure", True, True, ()),
+        ],
+        column_dtypes={"Customer": "string", "Sales": "float"},
+        source_columns=["customer", "sales"],
+        preview_slice=PreviewSlice(
+            header=("customer", "sales"),
+            rows=(("CUST_AAA", "10.0"), ("CUST_BBB", "20.0"), ("CUST_CCC", "30.0")),
+        ),
+    )
+
+
+def test_set_preview_row_shows_chosen_row_zero_masked_value() -> None:
+    """AC-6: choosing row 0 shows each matched row's masked value for that row."""
+    # Arrange
+    view = FakeColumnsTabView()
+    state = _state_with_masked_slice()
+    presenter = ColumnsTabPresenter(view, state)
+    presenter.prepopulate()
+
+    # Act: choose preview row 0.
+    presenter.set_preview_row(0)
+
+    # Assert: each matched row shows row 0's masked value, not the dtype glyph.
+    assert ("Customer", "CUST_AAA") in view.value_displays
+    assert ("Sales", "10.0") in view.value_displays
+
+
+def test_set_preview_row_shows_non_zero_row_masked_value() -> None:
+    """AC-6: choosing a non-zero row shows that row's masked value per column."""
+    # Arrange
+    view = FakeColumnsTabView()
+    state = _state_with_masked_slice()
+    presenter = ColumnsTabPresenter(view, state)
+    presenter.prepopulate()
+
+    # Act: choose preview row 2 (the third row).
+    presenter.set_preview_row(2)
+
+    # Assert: each matched row shows row 2's masked value.
+    assert ("Customer", "CUST_CCC") in view.value_displays
+    assert ("Sales", "30.0") in view.value_displays
+
+
+def test_set_preview_row_none_restores_dtype_glyph_path() -> None:
+    """AC-6: clearing the chosen row (None) restores the dtype-indicator path."""
+    # Arrange
+    view = FakeColumnsTabView()
+    state = _state_with_masked_slice()
+    presenter = ColumnsTabPresenter(view, state)
+    presenter.prepopulate()
+    presenter.set_preview_row(1)
+    view.value_displays.clear()
+    view.dtype_indicators.clear()
+
+    # Act: clear the chosen row.
+    presenter.set_preview_row(None)
+
+    # Assert: no value displays are pushed; the dtype indicators render instead.
+    assert view.value_displays == []
+    assert any(canonical == "Sales" for canonical, _c, _e in view.dtype_indicators)
+
+
+def test_set_preview_row_skips_value_display_for_unassigned_row() -> None:
+    """AC-6: an unassigned canonical row shows no value for the chosen row."""
+    # Arrange: "Sales" has no matching source, so it stays unassigned.
+    view = FakeColumnsTabView()
+    state = SchemaBuilderState(
+        columns=[
+            ("Customer", "dimension", True, True, ()),
+            ("Sales", "measure", True, True, ()),
+        ],
+        source_columns=["customer"],
+        preview_slice=PreviewSlice(
+            header=("customer",), rows=(("CUST_AAA",), ("CUST_BBB",))
+        ),
+    )
+    presenter = ColumnsTabPresenter(view, state)
+    presenter.prepopulate()
+
+    # Act: choose row 1.
+    presenter.set_preview_row(1)
+
+    # Assert: only the assigned "Customer" row shows a value; "Sales" shows none.
+    shown = {canonical for canonical, _v in view.value_displays}
+    assert "Customer" in shown
+    assert "Sales" not in shown
+    # Assert: the value shown is the chosen row's masked value (no real data).
+    assert ("Customer", "CUST_BBB") in view.value_displays

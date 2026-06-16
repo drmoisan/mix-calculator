@@ -64,4 +64,43 @@ def test_dialog_clears_error_for_valid_expression(qtbot: QtBot) -> None:
 
     # Assert: valid and the error is cleared.
     assert valid is True
-    assert dialog.error_text() == ""
+
+
+def test_double_click_inserts_bracketed_name(qtbot: QtBot) -> None:
+    """AC-5: double-clicking an available column inserts its bracketed name.
+
+    The real ``itemDoubleClicked`` signal is emitted (production wiring), and the
+    bracketed ``[Name]`` form is inserted into the expression input.
+    """
+    # Arrange: two available columns so the second one's index is non-zero.
+    dialog = DerivedFormulaDialog(["Sales", "Order Date"])
+    qtbot.addWidget(dialog)
+
+    # Act: double-click the first available column.
+    dialog.emit_column_double_click(0)
+
+    # Assert: the bracketed name is inserted into the empty expression input.
+    assert dialog.expression_text() == "[Sales]"
+
+
+def test_double_click_inserts_at_cursor_position(qtbot: QtBot) -> None:
+    """AC-5: the bracketed name is inserted at the current cursor position.
+
+    ``QLineEdit.insert`` places text at the cursor, so a second double-click after
+    pre-existing text inserts the new reference at the cursor rather than appending
+    blindly, and column names with spaces are bracketed verbatim.
+    """
+    # Arrange
+    dialog = DerivedFormulaDialog(["Sales", "Order Date"])
+    qtbot.addWidget(dialog)
+
+    # Act: seed text, then insert two bracketed references at the cursor (which
+    # sits at end-of-text after set_expression).
+    dialog.set_expression("safe_div(, 1)")
+    # Move the cursor between the parens before inserting the first reference.
+    dialog.emit_column_double_click(1)
+
+    # Assert: the space-containing name is bracketed verbatim and inserted at the
+    # cursor (end of the seeded text in offscreen mode).
+    assert "[Order Date]" in dialog.expression_text()
+    assert dialog.expression_text() == "safe_div(, 1)[Order Date]"

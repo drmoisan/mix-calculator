@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from src.etl_columns import DEFAULT_THRESHOLD
 from src.gui._schema_open_helpers import (
     install_new_derived_handler,
+    install_preview_refresh_handler,
     seed_dialog_preview_slice,
 )
 
@@ -151,6 +152,9 @@ def open_schema_builder(
     # Install the "New derived column" handler so the Derived tab can open the
     # PowerQuery-style formula dialog seeded from the live presenter state.
     install_new_derived_handler(dialog, presenter)
+    # Install the Preview-tab refresh handler so navigating to Preview renders the
+    # result table against the masked slice (AC-9), or a specific message (AC-10).
+    install_preview_refresh_handler(dialog, presenter)
     # Seed from caller specs only when the per-tab path supplies them; the blank
     # menu path leaves the presenter empty. seed_from_caller is a no-op for empty
     # inputs, so guarding on "any input present" keeps the menu path blank.

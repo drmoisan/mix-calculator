@@ -32,7 +32,7 @@ COLUMN_ROLES: frozenset[str] = frozenset(
     {"dimension", "measure", "discriminator", "drop"}
 )
 MEASURE_MODES: frozenset[str] = frozenset({"additive", "select_from"})
-DEDUP_MODES: frozenset[str] = frozenset({"none", "collapse", "aggregate"})
+DEDUP_MODES: frozenset[str] = frozenset({"none", "collapse", "aggregate", "auto"})
 
 # The expected-data-type vocabulary for ColumnSpec.expected_dtype. A column may
 # declare exactly one of these, or None when no explicit type is asserted.
@@ -244,16 +244,19 @@ class DedupPolicy:
     Attributes:
         mode: One of :data:`DEDUP_MODES`. ``none`` keeps every row; ``collapse``
             and ``aggregate`` both merge rows sharing the business key into one
-            output row using the per-measure aggregations.
+            output row using the per-measure aggregations; ``auto`` (D-3) groups by
+            all ``dimension``-role columns and sums all ``measure``-role columns
+            with no explicit discriminator.
         discriminator_column: For ``collapse``/``aggregate`` mode, the column
             that distinguishes the duplicate halves (for example the LE
             ``YTD/YTG`` column, or the schema Key). ``None`` when
-            ``mode == "none"``.
+            ``mode == "none"`` or ``mode == "auto"``.
         measure_aggregations: Per-measure aggregation rules applied on collapse.
 
     Raises:
         SchemaValidationError: If ``mode`` is unrecognized, or a collapsing mode
-            is declared without a ``discriminator_column``.
+            (``collapse``/``aggregate``) is declared without a
+            ``discriminator_column``. The ``auto`` mode requires no discriminator.
     """
 
     mode: str = "none"
@@ -272,9 +275,10 @@ class DedupPolicy:
                 f"DedupPolicy has invalid mode '{self.mode}'; "
                 f"expected one of {sorted(DEDUP_MODES)}"
             )
-        # Both collapse and aggregate require a discriminator to identify which
+        # Only collapse and aggregate require a discriminator to identify which
         # rows to merge; the cross-reference against declared columns is enforced
-        # by SchemaDefinition.
+        # by SchemaDefinition. The auto mode (D-3) derives the groupby from the
+        # dimension roles and so requires no discriminator; none keeps all rows.
         if self.mode in {"collapse", "aggregate"} and not self.discriminator_column:
             raise SchemaValidationError(
                 f"DedupPolicy mode '{self.mode}' requires a discriminator_column"

@@ -136,8 +136,8 @@ def test_source_token_starts_drag_on_left_button_move(qtbot: QtBot) -> None:
     from PySide6.QtCore import QPoint, QPointF, Qt
     from PySide6.QtGui import QMouseEvent
 
-    from src.gui.widgets import _columns_tab_drag as mod
-    from src.gui.widgets._columns_tab_drag import SourceColumnToken
+    from src.gui.widgets import _columns_tab_source_token as mod
+    from src.gui.widgets._columns_tab_source_token import SourceColumnToken
 
     token = SourceColumnToken("col_a")
     qtbot.addWidget(token)
@@ -441,3 +441,42 @@ def test_source_token_has_visible_styling(qtbot: QtBot) -> None:
 
     # Assert: the stylesheet is non-empty (explicit styling is applied).
     assert token.styleSheet() != ""
+
+
+def test_row_chooser_bounds_and_seam(qtbot: QtBot) -> None:
+    """AC-6: the row chooser is bounded and notifies its seam on change.
+
+    The single tab-level chooser maxes out at ``row_count - 1``, and changing its
+    value invokes the installed row-chosen seam with the chosen index.
+    """
+    # Arrange
+    from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
+
+    widget = ColumnsTabWidget()
+    qtbot.addWidget(widget)
+    chosen: list[int] = []
+    widget.set_on_row_chosen(chosen.append)
+
+    # Act: bound the chooser to three rows, then pick a non-zero index.
+    widget.set_row_chooser_bounds(3)
+    widget.set_row_chooser_value(2)
+
+    # Assert: the seam received the chosen index and the value is retained.
+    assert chosen == [2]
+    assert widget.row_chooser_value() == 2
+
+
+def test_set_value_display_routes_masked_value_to_row(qtbot: QtBot) -> None:
+    """AC-6: set_value_display shows the masked value on the matching row."""
+    # Arrange
+    from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
+
+    widget = ColumnsTabWidget()
+    qtbot.addWidget(widget)
+    widget.set_rows([("Customer", "", "string")])
+
+    # Act: push a masked value to the row's indicator.
+    widget.set_value_display("Customer", "CUST_AAA")
+
+    # Assert: the row's indicator shows the masked value verbatim.
+    assert widget.row_indicator_text("Customer") == "CUST_AAA"
