@@ -85,6 +85,29 @@ class DtypeCheckWidget(QWidget):
         self._label.setText(f"{_BAD_GLYPH} {example}".strip())
         self._label.setStyleSheet("color: red;")
 
+    def set_value_display(self, value: str) -> None:
+        """Render a chosen source value in place of the dtype glyph (AC-6).
+
+        Switches the indicator from dtype-glyph mode to value-display mode: the
+        already-masked source cell value for the chosen preview row is shown to the
+        right of the blue assignment object instead of the green check / red X. The
+        value arrives pre-masked from ``PreviewSlice.rows``; the widget displays it
+        verbatim.
+
+        Args:
+            value: The already-masked source cell value to display.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the indicator label's text and resets its color to neutral so
+            the value reads as data rather than a pass/fail signal.
+        """
+        self._label.setText(value)
+        # Neutral color: the value is data, not a coercion pass/fail signal.
+        self._label.setStyleSheet("")
+
     def text(self) -> str:
         """Return the indicator's current text (test/inspection seam).
 

@@ -1,31 +1,29 @@
-"""Drag-tab binding and view-setter routing for the schema-builder dialog.
+"""Columns-tab binding and view-setter routing for the schema-builder dialog.
 
 This helper owns the integration between the schema-builder dialog's passive
-view-protocol setters and the drag-and-drop Columns and Key tabs (Decision 2/4).
-It is extracted from :mod:`src.gui.widgets.schema_builder_dialog` so that file
-stays under the repository's 500-line cap once the drag tabs are wired.
+view-protocol setters and the drag-and-drop Columns tab (Decision 4). It is
+extracted from :mod:`src.gui.widgets.schema_builder_dialog` so that file stays
+under the repository's 500-line cap once the drag tab is wired.
 
 The dialog constructs one :class:`DragTabBinder` over its
-:class:`~src.gui.widgets._columns_tab_drag.ColumnsTabWidget` and
-:class:`~src.gui.widgets._key_tab_drag.KeyTabWidget` and routes the
-``SchemaBuilderViewProtocol`` setters/getters that concern columns and the key
-through it. The binder maintains a private
+:class:`~src.gui.widgets._columns_tab_drag.ColumnsTabWidget` and routes the
+``SchemaBuilderViewProtocol`` setters/getters that concern columns through it.
+The binder maintains a private
 :class:`~src.gui.presenters._schema_builder_state.SchemaBuilderState` mirroring
 the pushed state and drives a
-:class:`~src.gui.presenters._columns_tab_presenter.ColumnsTabPresenter` and a
-:class:`~src.gui.presenters._key_tab_presenter.KeyTabPresenter` over it, so a
-drop on either tab updates the shared state and re-renders the widget.
+:class:`~src.gui.presenters._columns_tab_presenter.ColumnsTabPresenter` over it,
+so a drop on the Columns tab updates the shared state and re-renders the widget.
+The Key tab is a multi-select (D-2) the dialog reads/writes directly, not here.
 
 Responsibilities:
     - Translate ``set_columns``/``set_column_dtypes`` into the columns presenter's
       rendered rows, source-token pool, and per-row dtype indicators.
-    - Translate ``set_key``/``set_key_parts`` into the key presenter's ordered
-      parts and the key tab's draggable column-token pool.
-    - Report the live column rows and key composition back through getters.
+    - Mirror the masked preview slice for the source pool and the row chooser.
+    - Report the live column rows back through ``get_columns``.
 
 Scope boundaries:
     - Qt-widget routing plus presenter binding only. It performs no I/O and holds
-      no schema-assembly logic; the tab presenters own state mutation.
+      no schema-assembly logic; the columns presenter owns state mutation.
 """
 
 from __future__ import annotations
@@ -33,65 +31,56 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.gui.presenters._columns_tab_presenter import ColumnsTabPresenter
-from src.gui.presenters._key_tab_presenter import KeyTabPresenter
 from src.gui.presenters._schema_builder_state import PreviewSlice, SchemaBuilderState
 
 if TYPE_CHECKING:
     from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
-    from src.gui.widgets._key_tab_drag import KeyTabWidget
 
 __all__ = ["DragTabBinder"]
 
 
 class DragTabBinder:
-    """Bind the drag Columns/Key tabs to a shared in-progress builder state.
+    """Bind the drag Columns tab to a shared in-progress builder state.
 
     Purpose:
-        Route the schema-builder dialog's column- and key-related view-protocol
-        setters/getters to the drag-and-drop Columns and Key tab widgets, driving
-        them through a :class:`ColumnsTabPresenter` and :class:`KeyTabPresenter`
-        over one shared :class:`SchemaBuilderState`.
+        Route the schema-builder dialog's column-related view-protocol
+        setters/getters to the drag-and-drop Columns tab widget, driving it
+        through a :class:`ColumnsTabPresenter` over a shared
+        :class:`SchemaBuilderState`.
 
     Responsibilities:
         Maintain the mirrored builder state the master presenter pushes; render
-        the columns rows, source-token pool, and dtype indicators; render the key
-        parts and the key tab's column-token pool; report the live columns and key
-        back to the dialog's getters. It performs no I/O.
+        the columns rows, source-token pool, and dtype indicators; report the live
+        columns back to the dialog's getter. It performs no I/O.
 
     Usage:
-        The dialog constructs one binder over its two drag widgets, then routes the
-        relevant setters/getters to it. A drop on either widget mutates the shared
-        state through the bound tab presenter, which re-renders the widget.
+        The dialog constructs one binder over its Columns tab widget, then routes
+        the relevant setters/getters to it. A drop mutates the shared state through
+        the bound columns presenter, which re-renders the widget.
 
     Attributes:
         _columns_widget: The drag Columns tab widget driven by the columns
             presenter.
-        _key_widget: The drag Key tab widget driven by the key presenter.
-        _state: The mirrored in-progress builder state shared by both tab
-            presenters.
+        _state: The mirrored in-progress builder state.
         _columns_presenter: Drives the Columns tab over the shared state.
-        _key_presenter: Drives the Key tab over the shared state.
     """
 
-    def __init__(
-        self, columns_widget: ColumnsTabWidget, key_widget: KeyTabWidget
-    ) -> None:
-        """Bind the tab presenters to the two drag widgets over a fresh state.
+    def __init__(self, columns_widget: ColumnsTabWidget) -> None:
+        """Bind the columns presenter to the Columns tab widget over a fresh state.
 
         Args:
             columns_widget: The drag Columns tab widget to drive.
-            key_widget: The drag Key tab widget to drive.
         """
         self._columns_widget = columns_widget
-        self._key_widget = key_widget
         self._state = SchemaBuilderState()
         self._columns_presenter = ColumnsTabPresenter(columns_widget, self._state)
-        self._key_presenter = KeyTabPresenter(key_widget, self._state)
-        # Route each widget's drop seam to its presenter so a drop mutates the
-        # shared state and re-renders, instead of the widgets' default no-op.
+        # Route the widget's drop seam to its presenter so a drop mutates the
+        # shared state and re-renders, instead of the widget's default no-op.
         columns_widget.assign_column = self._columns_presenter.assign_column
         columns_widget.clear_row = self._columns_presenter.clear_row
-        key_widget.add_key_part = self._key_presenter.add_part
+        # Route the Columns-tab row chooser to the presenter so picking a preview
+        # row swaps the dtype glyph for that row's masked source value (AC-6).
+        columns_widget.set_on_row_chosen(self._columns_presenter.set_preview_row)
 
     def set_columns(
         self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
@@ -99,9 +88,8 @@ class DragTabBinder:
         """Mirror the pushed column rows and render the Columns tab.
 
         Replaces the shared state's column rows, repopulates the source-token pool
-        from any held preview slice, runs fuzzy pre-population so seeded rows reflect
-        the source columns, and refreshes the Key tab's column-token pool so key
-        parts are composed from the current canonical columns.
+        from any held preview slice, and runs fuzzy pre-population so seeded rows
+        reflect the source columns.
 
         Args:
             rows: One ``(canonical_name, role, required, in_output, aliases)``
@@ -112,8 +100,8 @@ class DragTabBinder:
             ``None``.
 
         Side effects:
-            Rewrites the shared state's columns and source pool and re-renders both
-            drag tabs.
+            Rewrites the shared state's columns and source pool and re-renders the
+            Columns tab.
         """
         self._state.columns = list(rows)
         # Reset the consumed map and rebuild the source pool from the slice header
@@ -122,7 +110,6 @@ class DragTabBinder:
         self._refresh_source_pool()
         # Pre-populate fuzzy matches and render rows/pool/indicators in one pass.
         self._columns_presenter.prepopulate()
-        self._refresh_key_column_tokens()
 
     def set_column_dtypes(self, dtypes: list[tuple[str, str | None]]) -> None:
         """Mirror per-column expected dtypes and refresh the dtype indicators.
@@ -186,90 +173,11 @@ class DragTabBinder:
         """
         self._state.preview_slice = preview_slice
         self._refresh_source_pool()
+        # Bound the Columns-tab row chooser to the new slice's row count so the user
+        # can only pick a valid preview-row index (AC-6).
+        row_count = len(preview_slice.rows) if preview_slice is not None else 0
+        self._columns_widget.set_row_chooser_bounds(row_count)
         self._columns_presenter.prepopulate()
-
-    def set_key(self, columns: tuple[str, ...], sku_coercion: bool) -> None:
-        """Mirror the flat key columns when no structured parts were pushed.
-
-        Args:
-            columns: The ordered key column names.
-            sku_coercion: Whether SKU coercion is enabled.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Records the SKU-coercion flag and, when no structured parts exist,
-            renders the column-ref parts derived from ``columns``.
-        """
-        self._state.key_columns = columns
-        self._state.sku_coercion = sku_coercion
-        # Only derive parts from the flat columns when structured parts were not
-        # already pushed, so set_key_parts (the richer signal) is not overwritten.
-        if not self._state.key_parts:
-            self._key_widget.set_parts([("column-ref", name) for name in columns])
-
-    def set_key_parts(self, parts: list[tuple[str, str]]) -> None:
-        """Mirror the structured key parts and render them on the Key tab.
-
-        Args:
-            parts: One ``(kind, value)`` tuple per key part, in order.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Replaces the shared state's key parts and re-renders the Key tab,
-            preserving interleaved literal-text segments.
-        """
-        from src.schema_model import column_ref, literal_text
-
-        # Rebuild structured KeyPart objects so the shared state carries the full
-        # composition (column-ref and literal-text) the model round-trips.
-        rebuilt = [
-            column_ref(value) if kind == "column-ref" else literal_text(value)
-            for kind, value in parts
-        ]
-        self._state.key_parts = rebuilt
-        self._key_widget.set_parts(parts)
-
-    def get_key(self) -> tuple[tuple[str, ...], bool]:
-        """Return the live key composition from the shared state.
-
-        Returns:
-            A ``(columns, sku_coercion)`` tuple. ``columns`` is the ordered
-            column-ref values of the structured parts when present, else the flat
-            key columns.
-        """
-        # Prefer the structured parts' column-ref values so a drag-composed key
-        # reports its referenced columns; fall back to the flat key columns.
-        if self._state.key_parts:
-            columns = tuple(p.value for p in self._state.key_parts if p.is_column_ref)
-        else:
-            columns = self._state.key_columns
-        return (columns, self._state.sku_coercion)
-
-    def set_sku_coercion(self, sku_coercion: bool) -> None:
-        """Record the SKU-coercion flag read from the dialog's checkbox.
-
-        Args:
-            sku_coercion: Whether SKU coercion is enabled.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Updates the shared state's SKU-coercion flag.
-        """
-        self._state.sku_coercion = sku_coercion
-
-    def column_canonicals(self) -> list[str]:
-        """Return the canonical column names for the discriminator dropdown.
-
-        Returns:
-            The declared canonical column names, in order.
-        """
-        return [canonical for canonical, _r, _req, _io, _a in self._state.columns]
 
     def _refresh_source_pool(self) -> None:
         """Rebuild the source-token pool from the held preview slice header.
@@ -282,27 +190,3 @@ class DragTabBinder:
         """
         slice_ = self._state.preview_slice
         self._state.source_columns = list(slice_.header) if slice_ is not None else []
-
-    def _refresh_key_column_tokens(self) -> None:
-        """Refresh the Key tab's draggable column-token pool.
-
-        The Key tab offers the same draggable column-name buttons as the Columns
-        tab (spec section 5): the masked preview-slice header columns when a slice
-        was seeded, so key parts are composed from the real source columns. Without
-        a slice (the blank menu path) it falls back to the declared canonical names.
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Rebuilds the Key tab's column tokens from the preview-slice header (or
-            the canonical names when no slice is present).
-        """
-        slice_ = self._state.preview_slice
-        # Prefer the seeded source-header columns so the Key tab mirrors the Columns
-        # tab's draggable buttons; fall back to canonical names for the blank path.
-        if slice_ is not None and slice_.header:
-            tokens = list(slice_.header)
-        else:
-            tokens = self.column_canonicals()
-        self._key_widget.set_column_tokens(tokens)

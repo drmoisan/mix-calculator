@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 
+from src._schema_loader_auto_dedup import apply_auto_dedup
 from src.etl_columns import normalize_name, resolve_columns
 
 if TYPE_CHECKING:
@@ -260,6 +261,12 @@ def collapse_by_key(frame: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFra
     # mode "none" preserves every row and its original index (AOP).
     if policy.mode == "none":
         return frame
+
+    # mode "auto" (D-3) derives the groupby from column roles: group by all
+    # dimension-role columns and sum all measure-role columns, with no explicit
+    # discriminator. The collapse/aggregate/select_from path below is untouched.
+    if policy.mode == "auto":
+        return apply_auto_dedup(frame, schema)
 
     # First row per KEY supplies all non-aggregated columns (dimensions, the
     # discriminator, and any copy_from source); sort is not needed because

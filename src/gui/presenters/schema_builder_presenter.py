@@ -32,6 +32,7 @@ import pandas as pd
 from src.gui.presenters._schema_builder_state import (
     SchemaBuilderState,
     assemble_schema,
+    key_parts_from_columns,
     known_column_names,
     parse_key_pattern,
 )
@@ -366,6 +367,11 @@ class SchemaBuilderPresenter:
         key_columns, sku_coercion = self._view.get_key()
         self._state.key_columns = key_columns
         self._state.sku_coercion = sku_coercion
+        # The Key tab is now a multi-select (D-2): rebuild the structured key parts
+        # from the current ordered selection so the assembled key reflects the
+        # user's selection rather than any stale open-time pattern. The loader keys
+        # on the ordered column-ref names; the default separator is composition only.
+        self._state.key_parts = key_parts_from_columns(key_columns)
         dedup_mode, discriminator = self._view.get_dedup()
         self._state.dedup_mode = dedup_mode
         self._state.discriminator = discriminator

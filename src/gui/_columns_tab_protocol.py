@@ -127,3 +127,21 @@ class ColumnsTabViewProtocol(Protocol):
             Updates the view's per-row dtype indicator.
         """
         ...
+
+    def set_value_display(self, target_canonical: str, value: str) -> None:
+        """Show a chosen preview row's masked value on one row (AC-6).
+
+        When the user picks a preview row, each matched row shows that row's
+        already-masked source value instead of the dtype glyph.
+
+        Args:
+            target_canonical: The canonical row whose indicator shows the value.
+            value: The already-masked source cell value to display.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Updates the view's per-row indicator to value-display mode.
+        """
+        ...

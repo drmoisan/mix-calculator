@@ -27,15 +27,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.gui.widgets import _key_multiselect_widget as keys
+from src.gui.widgets import _schema_builder_derived_format as derived_fmt
+from src.gui.widgets import _schema_builder_tabs as tabs_mod
+from src.gui.widgets import _schema_dedup_discriminator as dedup
+from src.gui.widgets import _schema_dialog_surfaces as surfaces
+from src.gui.widgets import _schema_preview_table as preview
 from src.gui.widgets._schema_builder_drag_tabs import DragTabBinder
-from src.gui.widgets._schema_builder_tabs import (
-    build_columns_tab,
-    build_dedup_tab,
-    build_derived_tab,
-    build_identity_tab,
-    build_key_tab,
-    build_preview_tab,
-)
 from src.gui.widgets._schema_builder_window_setup import (
     apply_schema_builder_window_flags,
 )
@@ -90,18 +88,19 @@ class SchemaBuilderDialog(QDialog):
         # controls and a default size so all rows are reachable (AC-8).
         apply_schema_builder_window_flags(self)
 
-        self._identity = build_identity_tab()
-        self._columns = build_columns_tab()
-        self._key = build_key_tab()
-        self._dedup = build_dedup_tab()
-        self._derived = build_derived_tab()
-        self._preview = build_preview_tab()
+        self._identity = tabs_mod.build_identity_tab()
+        self._columns = tabs_mod.build_columns_tab()
+        self._key = tabs_mod.build_key_tab()
+        self._dedup = tabs_mod.build_dedup_tab()
+        self._derived = tabs_mod.build_derived_tab()
+        self._preview = tabs_mod.build_preview_tab()
 
-        # Bind the drag Columns/Key tabs to a shared in-progress state so the
-        # column rows, source-token pool, dtype indicators, and ordered key parts
-        # are driven by the tab presenters (Decision 2/4). The dialog's columns/key
-        # view setters and getters route through this binder.
-        self._drag = DragTabBinder(self._columns.columns_widget, self._key.key_widget)
+        # Bind the drag Columns tab to a shared in-progress state so the column
+        # rows, source-token pool, and dtype indicators are driven by the columns
+        # presenter (Decision 4). The dialog's columns view setters/getters route
+        # through this binder. The Key tab is a multi-select (D-2) the dialog reads
+        # and writes directly, not through the binder.
+        self._drag = DragTabBinder(self._columns.columns_widget)
 
         # The Derived-tab "New derived column" button opens the formula dialog; the
         # composition root installs the handler via set_new_derived_handler so the
@@ -146,9 +145,7 @@ class SchemaBuilderDialog(QDialog):
         Side effects:
             Updates the Identity-tab inputs.
         """
-        self._identity.name.setText(name)
-        self._identity.version.setText(version)
-        self._identity.description.setText(description)
+        tabs_mod.set_identity_controls(self._identity, name, version, description)
 
     def get_identity(self) -> tuple[str, str, str]:
         """Return the user-entered identity fields.
@@ -156,11 +153,7 @@ class SchemaBuilderDialog(QDialog):
         Returns:
             A ``(name, version, description)`` tuple.
         """
-        return (
-            self._identity.name.text(),
-            self._identity.version.text(),
-            self._identity.description.text(),
-        )
+        return tabs_mod.read_identity_controls(self._identity)
 
     def set_columns(
         self, rows: list[tuple[str, str, bool, bool, tuple[str, ...]]]
@@ -177,9 +170,15 @@ class SchemaBuilderDialog(QDialog):
 
         Side effects:
             Drives the drag Columns-tab widget (source pool, canonical rows, dtype
-            indicators) and refreshes the Key tab's column-token pool via the binder.
+            indicators) and repopulates the Key multi-select with the declared
+            canonical columns (D-2), preserving the current key selection.
         """
         self._drag.set_columns(rows)
+        # The Key tab selects from the declared canonical columns, so repopulate
+        # its multi-select whenever the columns change (D-2, Option C).
+        self._key.key_widget.set_available_columns(
+            [canonical for canonical, _r, _req, _io, _a in rows]
+        )
 
     def get_columns(self) -> list[tuple[str, str, bool, bool, tuple[str, ...]]]:
         """Return the live column rows from the drag Columns tab.
@@ -209,45 +208,35 @@ class SchemaBuilderDialog(QDialog):
         self._drag.set_preview_slice(preview_slice)
 
     def set_key(self, columns: tuple[str, ...], sku_coercion: bool) -> None:
-        """Render the key composition on the drag Key tab.
+        """Render the key as a multi-select of declared columns (D-2, Option C).
 
         Args:
-            columns: The ordered key column names.
+            columns: The ordered key column names to mark as selected.
             sku_coercion: Whether SKU coercion is enabled.
 
         Returns:
             ``None``.
 
         Side effects:
-            Renders the key column-ref parts (when no structured parts were pushed)
-            and updates the retained SKU-coercion checkbox via the binder.
+            Checks the selected columns in the Key multi-select and updates the
+            retained SKU-coercion checkbox.
         """
-        self._drag.set_key(columns, sku_coercion)
-        self._key.sku_coercion.setChecked(sku_coercion)
+        keys.set_key_controls(self._key, columns, sku_coercion)
 
     def get_key(self) -> tuple[tuple[str, ...], bool]:
-        """Return the live key composition from the drag Key tab.
+        """Return the live key selection from the Key multi-select (D-2).
 
         Returns:
-            A ``(columns, sku_coercion)`` tuple; ``columns`` are the structured
-            parts' column-ref values (or the flat key columns when none were
-            composed), and the SKU-coercion flag is read from the checkbox.
+            A ``(columns, sku_coercion)`` tuple; ``columns`` are the checked
+            canonical columns in selection order, and the SKU-coercion flag is read
+            from the checkbox.
         """
-        # Read the SKU-coercion flag from the live checkbox into the binder so the
-        # reported composition reflects the user's current checkbox state.
-        self._drag.set_sku_coercion(self._key.sku_coercion.isChecked())
-        return self._drag.get_key()
-
-    # Sentinel discriminator value meaning "use the schema Key" (Decision 6). The
-    # dedup dropdown offers this plus the existing column/derived names.
-    _KEY_DISCRIMINATOR = "Key"
+        return keys.read_key_controls(self._key)
 
     def set_key_parts(self, parts: list[tuple[str, str]]) -> None:
-        """Render the full structured key parts on the drag Key tab.
+        """Select the ordered column-ref parts on the Key multi-select (D-2).
 
-        The drag Key tab renders the complete ordered composition, including
-        interleaved literal-text ("Generic Text") segments, not just the column-ref
-        names :meth:`set_key` carries.
+        Interleaved literal-text separators are ignored (re-derived at assembly).
 
         Args:
             parts: One ``(kind, value)`` tuple per key part, in order.
@@ -256,9 +245,9 @@ class SchemaBuilderDialog(QDialog):
             ``None``.
 
         Side effects:
-            Replaces the binder's key parts and re-renders the drag Key tab.
+            Selects the ordered column-ref columns in the Key multi-select.
         """
-        self._drag.set_key_parts(parts)
+        keys.set_key_parts_controls(self._key, parts)
 
     def set_column_dtypes(self, dtypes: list[tuple[str, str | None]]) -> None:
         """Render the per-column expected dtype on the drag Columns tab.
@@ -287,9 +276,9 @@ class SchemaBuilderDialog(QDialog):
         the dropdown is ignored (the selection stays at the current valid value).
 
         Args:
-            mode: The dedup mode (``"none"``, ``"collapse"``, or ``"aggregate"``).
-            discriminator: The discriminator column for collapse/aggregate, or
-                ``None``.
+            mode: The dedup mode (auto/aggregate/collapse/none).
+            discriminator: The discriminator column for collapse/aggregate, else
+                ``None`` (auto/none require none).
 
         Returns:
             ``None``.
@@ -297,59 +286,29 @@ class SchemaBuilderDialog(QDialog):
         Side effects:
             Repopulates the discriminator dropdown and updates the dedup controls.
         """
-        self._populate_discriminator_options()
-        self._dedup.mode.setCurrentText(mode)
-        # Only select a discriminator that exists in the dropdown so the invariant
-        # "discriminator references an existing column (or the Key)" always holds.
-        if discriminator is not None:
-            index = self._dedup.discriminator.findText(discriminator)
-            if index >= 0:
-                self._dedup.discriminator.setCurrentIndex(index)
+        canonical = [name for name, _r, _req, _io, _a in self.get_columns()]
+        derived = [name for name, _expr in self.get_derived()]
+        dedup.select_dedup_discriminator(
+            self._dedup, mode, discriminator, canonical, derived
+        )
 
     def get_dedup(self) -> tuple[str, str | None]:
         """Return the user-entered dedup mode and discriminator.
 
         Returns:
             A ``(mode, discriminator)`` tuple; the discriminator is ``None`` when
-            the dropdown is empty (no selectable column).
+            the mode is ``auto`` (D-3) or the dropdown has no selectable column.
         """
-        mode = self._dedup.mode.currentText()
-        text = self._dedup.discriminator.currentText().strip()
-        return (mode, text or None)
-
-    def _populate_discriminator_options(self) -> None:
-        """Populate the discriminator dropdown from existing columns + the Key.
-
-        Builds the option list from the current Columns-tab canonical names and
-        Derived-tab names plus the ``Key`` sentinel, so the dropdown only ever
-        offers existing columns (or the Key) as discriminator (Decision 6).
-
-        Returns:
-            ``None``.
-
-        Side effects:
-            Rebuilds the discriminator dropdown items, preserving the current
-            selection when it is still valid.
-        """
-        current = self._dedup.discriminator.currentText()
-        # The Key sentinel is always offered as the default discriminator; the
-        # existing canonical and derived names follow so only real targets appear.
-        options = [self._KEY_DISCRIMINATOR]
-        options.extend(canonical for canonical, _r, _req, _io, _a in self.get_columns())
-        options.extend(name for name, _expr in self.get_derived())
-        self._dedup.discriminator.clear()
-        self._dedup.discriminator.addItems(options)
-        # Restore the prior selection when it is still a valid option so a
-        # repopulate does not silently drop the user's choice.
-        index = self._dedup.discriminator.findText(current)
-        if index >= 0:
-            self._dedup.discriminator.setCurrentIndex(index)
+        return dedup.read_dedup_controls(self._dedup)
 
     def set_derived(self, rows: list[tuple[str, str]]) -> None:
-        """Render the derived/formula rows as one ``name|expression`` line each.
+        """Render derived rows as ``name = expression`` lines for display.
+
+        Known ``col("Name")`` references render in the bracketed ``[Name]`` display
+        form (AC-4); the stored form is unchanged (D-1).
 
         Args:
-            rows: One ``(name, expression)`` tuple per derived column.
+            rows: One ``(name, stored_expression)`` tuple per derived column.
 
         Returns:
             ``None``.
@@ -358,44 +317,47 @@ class SchemaBuilderDialog(QDialog):
             Replaces the Derived-tab editor text and mirrors the derived columns to
             the drag Columns tab so they appear as selectable rows (Decision 7).
         """
-        lines = [f"{name}|{expression}" for name, expression in rows]
-        self._derived.editor.setPlainText("\n".join(lines))
+        # Re-bracket known references for display; known names are the declared
+        # canonical columns. Storage stays as bare ``col("Name")`` (D-1).
+        known = [canonical for canonical, _r, _req, _io, _a in self.get_columns()]
+        derived_fmt.render_derived_editor(self._derived.editor, rows, known)
         # Mirror the derived columns onto the drag Columns tab so an accepted
         # derived column surfaces as a selectable canonical row.
         self._drag.set_derived(rows)
 
     def get_derived(self) -> list[tuple[str, str]]:
-        """Return the user-entered derived/formula rows.
+        """Return the user-entered derived rows in stored ``col("Name")`` form.
+
+        Display ``[Name]`` references are stripped to the stored form (AC-4, D-1)
+        so nothing bracketed reaches the formula engine.
 
         Returns:
-            One ``(name, expression)`` tuple per non-empty editor line.
+            One ``(name, stored_expression)`` tuple per non-empty editor line.
         """
-        rows: list[tuple[str, str]] = []
-        # Parse each non-blank line into a (name, expression) pair; the expression
-        # may itself contain pipes, so split only on the first separator.
-        for line in self._derived.editor.toPlainText().splitlines():
-            if not line.strip():
-                continue
-            name, _, expression = line.partition("|")
-            rows.append((name.strip(), expression.strip()))
-        return rows
+        return derived_fmt.read_derived_editor(self._derived.editor)
 
     def show_preview(self, rows: list[list[str]]) -> None:
-        """Render preview rows produced by applying the in-progress schema.
+        """Render the applied-schema result rows in the Preview table (AC-9/AC-10).
+
+        Thin wrapper: delegates table population and the empty-result message to
+        :func:`~src.gui.widgets._schema_preview_table.render_preview`.
 
         Args:
-            rows: The preview rows, each a list of string cell values.
+            rows: The preview result rows, each a list of string cell values.
 
         Returns:
             ``None``.
 
         Side effects:
-            Updates the Preview-tab label.
+            Replaces the Preview-tab table contents and message label.
         """
-        self._preview.rows_label.setText("\n".join(" | ".join(row) for row in rows))
+        preview.render_preview(self._preview, rows)
 
     def show_error(self, message: str) -> None:
-        """Display a general (non-formula) error in the formula-error surface.
+        """Render a general (non-formula) error on the error surfaces (AC-10).
+
+        Thin wrapper over
+        :func:`~src.gui.widgets._schema_dialog_surfaces.show_general_error`.
 
         Args:
             message: The error text to display.
@@ -404,12 +366,12 @@ class SchemaBuilderDialog(QDialog):
             ``None``.
 
         Side effects:
-            Updates the Derived-tab error label.
+            Updates the Derived-tab error label and the Preview-tab message label.
         """
-        self._derived.error_label.setText(message)
+        surfaces.show_general_error(self._derived, self._preview, message)
 
     def show_formula_error(self, message: str) -> None:
-        """Display an inline formula-validation error.
+        """Display an inline formula-validation error (thin wrapper).
 
         Args:
             message: The descriptive formula error text.
@@ -420,10 +382,10 @@ class SchemaBuilderDialog(QDialog):
         Side effects:
             Updates the Derived-tab error label.
         """
-        self._derived.error_label.setText(message)
+        surfaces.set_formula_error(self._derived, message)
 
     def clear_formula_error(self) -> None:
-        """Clear the inline formula-validation error surface.
+        """Clear the inline formula-validation error surface (thin wrapper).
 
         Returns:
             ``None``.
@@ -431,7 +393,7 @@ class SchemaBuilderDialog(QDialog):
         Side effects:
             Resets the Derived-tab error label.
         """
-        self._derived.error_label.setText("")
+        surfaces.clear_formula_error(self._derived)
 
     def formula_error_text(self) -> str:
         """Return the inline formula/general error text (public test seam).
@@ -439,15 +401,24 @@ class SchemaBuilderDialog(QDialog):
         Returns:
             The Derived-tab error label text.
         """
-        return self._derived.error_label.text()
+        return surfaces.formula_error_text(self._derived)
 
     def preview_text(self) -> str:
-        """Return the rendered preview text (public test seam).
+        """Return the rendered preview table cell values joined (public test seam).
 
         Returns:
-            The Preview-tab rows label text.
+            The Preview-tab table cell texts joined with spaces (empty when the
+            table has no rows).
         """
-        return self._preview.rows_label.text()
+        return preview.read_table_text(self._preview.table)
+
+    def preview_message(self) -> str:
+        """Return the Preview-tab message text (public test seam, AC-10).
+
+        Returns:
+            The Preview-tab message label text.
+        """
+        return surfaces.preview_message_text(self._preview)
 
     def set_new_derived_handler(self, handler: Callable[[], None]) -> None:
         """Install the handler the "New derived column" button invokes (Decision 7).
@@ -480,6 +451,30 @@ class SchemaBuilderDialog(QDialog):
         # without one a click does nothing rather than raising.
         if self._on_new_derived is not None:
             self._on_new_derived()
+
+    def set_preview_refresh_handler(self, handler: Callable[[], None]) -> None:
+        """Run ``handler`` whenever the user navigates to the Preview tab (AC-9).
+
+        Connects the tab widget's ``currentChanged`` so ``handler`` runs when the
+        Preview tab becomes current; the composition root installs a handler that
+        drives ``presenter.update_preview`` so the preview renders on navigation.
+
+        Args:
+            handler: A zero-argument callable invoked on switching to Preview.
+
+        Returns:
+            ``None``.
+
+        Side effects:
+            Connects a ``currentChanged`` slot that calls ``handler`` for Preview.
+        """
+        preview_index = self._tabs.indexOf(self._preview.widget)
+
+        def _on_changed(index: int) -> None:
+            if index == preview_index:
+                handler()
+
+        self._tabs.currentChanged.connect(_on_changed)
 
     def tab_labels(self) -> list[str]:
         """Return the tab labels in display order (public test seam).

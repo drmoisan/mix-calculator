@@ -29,12 +29,14 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
-from src.gui.widgets._key_tab_drag import KeyTabWidget
+from src.gui.widgets._key_multiselect_widget import KeyMultiSelectWidget
 
 __all__ = [
     "ColumnsTabControls",
@@ -49,6 +51,8 @@ __all__ = [
     "build_identity_tab",
     "build_key_tab",
     "build_preview_tab",
+    "read_identity_controls",
+    "set_identity_controls",
 ]
 
 
@@ -66,7 +70,7 @@ class IdentityTabControls:
     widget: QWidget
     name: QLineEdit
     version: QLineEdit
-    description: QLineEdit
+    description: QPlainTextEdit
 
 
 @dataclass
@@ -87,18 +91,18 @@ class ColumnsTabControls:
 
 @dataclass
 class KeyTabControls:
-    """Key-tab container and its drag-and-drop key widget plus SKU coercion.
+    """Key-tab container and its multi-select key widget plus SKU coercion.
 
     Attributes:
         widget: The tab container widget.
-        key_widget: The drag-and-drop :class:`KeyTabWidget` rendering the column
-            token pool, the repeatable Generic Text token, and the ordered key
-            parts (Decision 2). It replaces the prior comma-separated key editor.
+        key_widget: The :class:`KeyMultiSelectWidget` multi-select of declared
+            canonical columns that compose the key (D-2, Option C). It replaces the
+            prior drag-and-drop column/Generic-Text key UI.
         sku_coercion: The SKU-coercion checkbox (retained).
     """
 
     widget: QWidget
-    key_widget: KeyTabWidget
+    key_widget: KeyMultiSelectWidget
     sku_coercion: QCheckBox
 
 
@@ -125,7 +129,7 @@ class DerivedTabControls:
     Attributes:
         widget: The tab container widget.
         editor: The plain-text editor holding one derived column per line as
-            ``name|expression``.
+            ``name = expression``.
         error_label: The inline formula-error surface.
         new_button: The "New derived column" button that opens the PowerQuery-style
             :class:`~src.gui.widgets._derived_formula_dialog.DerivedFormulaDialog`
@@ -140,15 +144,19 @@ class DerivedTabControls:
 
 @dataclass
 class PreviewTabControls:
-    """Preview-tab container and its rendered-rows label.
+    """Preview-tab container, result table, and message area (AC-9/AC-10).
 
     Attributes:
         widget: The tab container widget.
-        rows_label: The label rendering the preview rows.
+        table: The :class:`QTableWidget` rendering the applied-schema result rows
+            with column headers.
+        message_label: The label surfacing a missing-input / assembly-failure
+            message when the preview cannot render (AC-10).
     """
 
     widget: QWidget
-    rows_label: QLabel
+    table: QTableWidget
+    message_label: QLabel
 
 
 def build_identity_tab() -> IdentityTabControls:
@@ -158,15 +166,68 @@ def build_identity_tab() -> IdentityTabControls:
         The identity-tab controls bundle.
     """
     widget = QWidget()
-    layout = QFormLayout(widget)
+    layout = QVBoxLayout(widget)
+    # Name and version stay in a fixed-height form layout; the multi-line
+    # description is added below in the outer VBox so it can expand vertically
+    # with the window (AC-2).
+    form = QFormLayout()
     name = QLineEdit()
     version = QLineEdit()
-    description = QLineEdit()
-    layout.addRow("Name", name)
-    layout.addRow("Version", version)
-    layout.addRow("Description", description)
+    form.addRow("Name", name)
+    form.addRow("Version", version)
+    layout.addLayout(form)
+    # The description is a wrapping multi-line editor with an Expanding vertical
+    # size policy so it grows and shrinks with the window (AC-2). A stretch factor
+    # in addWidget lets it claim the available vertical space below the form.
+    layout.addWidget(QLabel("Description"))
+    description = QPlainTextEdit()
+    description.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+    description.setSizePolicy(
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+    )
+    layout.addWidget(description, stretch=1)
     return IdentityTabControls(
         widget=widget, name=name, version=version, description=description
+    )
+
+
+def set_identity_controls(
+    controls: IdentityTabControls, name: str, version: str, description: str
+) -> None:
+    """Render the identity fields onto the Identity-tab controls (AC-2).
+
+    Args:
+        controls: The Identity-tab controls bundle.
+        name: The schema name.
+        version: The schema version.
+        description: The multi-line schema description.
+
+    Returns:
+        ``None``.
+
+    Side effects:
+        Updates the Identity-tab name/version line edits and the multi-line
+        description editor.
+    """
+    controls.name.setText(name)
+    controls.version.setText(version)
+    controls.description.setPlainText(description)
+
+
+def read_identity_controls(controls: IdentityTabControls) -> tuple[str, str, str]:
+    """Return the entered identity fields from the Identity-tab controls.
+
+    Args:
+        controls: The Identity-tab controls bundle.
+
+    Returns:
+        A ``(name, version, description)`` tuple read from the controls, with the
+        description read via the multi-line plain-text API.
+    """
+    return (
+        controls.name.text(),
+        controls.version.text(),
+        controls.description.toPlainText(),
     )
 
 
@@ -204,21 +265,22 @@ def build_columns_tab() -> ColumnsTabControls:
 
 
 def build_key_tab() -> KeyTabControls:
-    """Build the Key tab around the drag-and-drop key widget (Decision 2).
+    """Build the Key tab around a multi-select of declared columns (D-2, Option C).
 
-    The comma-separated key editor is replaced by :class:`KeyTabWidget`: a pool of
-    draggable column tokens and one repeatable Generic Text token above an ordered
-    drop area for the composed key parts. The SKU-coercion checkbox is retained
-    below the key widget. The dialog binds a ``KeyTabPresenter`` to this widget so a
-    drop appends an ordered key part.
+    The drag-and-drop column/Generic-Text key UI is replaced by
+    :class:`KeyMultiSelectWidget`: a checkable list of the declared canonical
+    columns the user selects, in order, to compose the key. The SKU-coercion
+    checkbox is retained below the multi-select. The dialog maps the ordered
+    selection to ``column-ref`` ``KeySpec`` parts joined by a default separator;
+    the ``KeySpec`` model and the loader are unchanged.
 
     Returns:
-        The key-tab controls bundle exposing the drag-and-drop key widget and the
+        The key-tab controls bundle exposing the multi-select key widget and the
         retained SKU-coercion checkbox.
     """
     widget = QWidget()
     layout = QVBoxLayout(widget)
-    key_widget = KeyTabWidget()
+    key_widget = KeyMultiSelectWidget()
     sku_coercion = QCheckBox("Coerce SKU")
     layout.addWidget(key_widget)
     layout.addWidget(sku_coercion)
@@ -230,11 +292,12 @@ def build_key_tab() -> KeyTabControls:
 def build_dedup_tab() -> DedupTabControls:
     """Build the Dedup tab.
 
-    Decision 1/6: the mode combo offers ``aggregate`` (the default), and the
+    Decision 1/6 and D-3: the mode combo offers ``auto`` (the new default, no
+    discriminator required), ``aggregate``, ``collapse``, and ``none``. The
     discriminator is a dropdown (no free-text entry) so a non-existent column
-    cannot be chosen as discriminator. The default mode is ``aggregate`` and the
-    discriminator dropdown is populated by the dialog from the existing canonical
-    and derived column names plus the schema ``Key`` sentinel.
+    cannot be chosen; it is not required when ``auto`` is selected. The dropdown is
+    populated by the dialog from the existing canonical and derived column names
+    plus the schema ``Key`` sentinel.
 
     Returns:
         The dedup-tab controls bundle.
@@ -242,8 +305,9 @@ def build_dedup_tab() -> DedupTabControls:
     widget = QWidget()
     layout = QFormLayout(widget)
     mode = QComboBox()
-    # Aggregate is listed first so it is the default selection (Decision 1).
-    mode.addItems(["aggregate", "collapse", "none"])
+    # Auto is listed first so it is the default selection (D-3): it groups by
+    # dimension roles and sums measure roles with no discriminator required.
+    mode.addItems(["auto", "aggregate", "collapse", "none"])
     discriminator = QComboBox()
     layout.addRow("Mode", mode)
     layout.addRow("Discriminator column", discriminator)
@@ -253,7 +317,7 @@ def build_dedup_tab() -> DedupTabControls:
 def build_derived_tab() -> DerivedTabControls:
     """Build the Derived/Formula tab with the PowerQuery-style add button.
 
-    The tab retains the plain-text ``name|expression`` editor (which renders the
+    The tab retains the plain-text ``name = expression`` editor (which renders the
     accumulated derived rows) and adds a "New derived column" button that opens the
     :class:`~src.gui.widgets._derived_formula_dialog.DerivedFormulaDialog`
     (Decision 7). The dialog wires the button's click handler.
@@ -266,7 +330,7 @@ def build_derived_tab() -> DerivedTabControls:
     layout = QVBoxLayout(widget)
     new_button = QPushButton("New derived column")
     layout.addWidget(new_button)
-    layout.addWidget(QLabel("One derived column per line: name|expression"))
+    layout.addWidget(QLabel("One derived column per line: name = expression"))
     editor = QPlainTextEdit()
     error_label = QLabel("")
     layout.addWidget(editor)
@@ -277,14 +341,21 @@ def build_derived_tab() -> DerivedTabControls:
 
 
 def build_preview_tab() -> PreviewTabControls:
-    """Build the Preview tab.
+    """Build the Preview tab with a result table and a message area (AC-9/AC-10).
+
+    The plain rows label is replaced by a :class:`QTableWidget` that renders the
+    applied-schema result with column headers (AC-9); a separate message label
+    surfaces a specific missing-input / assembly-failure message when the preview
+    cannot render (AC-10).
 
     Returns:
-        The preview-tab controls bundle.
+        The preview-tab controls bundle exposing the result table and message area.
     """
     widget = QWidget()
     layout = QVBoxLayout(widget)
-    rows_label = QLabel("")
     layout.addWidget(QLabel("Preview:"))
-    layout.addWidget(rows_label)
-    return PreviewTabControls(widget=widget, rows_label=rows_label)
+    table = QTableWidget()
+    message_label = QLabel("")
+    layout.addWidget(table)
+    layout.addWidget(message_label)
+    return PreviewTabControls(widget=widget, table=table, message_label=message_label)

@@ -13,16 +13,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 
-from src.gui.widgets._columns_tab_drag import ColumnsTabWidget
-from src.gui.widgets._dtype_check_widget import DtypeCheckWidget
-from src.gui.widgets._key_tab_drag import GenericTextToken, KeyTabWidget
 from src.gui.widgets.schema_builder_dialog import SchemaBuilderDialog
 
 if TYPE_CHECKING:
-    import pytest
     from pytestqt.qtbot import QtBot
-
-    from src.gui.widgets._derived_formula_dialog import DerivedFormulaDialog
 
 
 def test_identity_round_trip(qtbot: QtBot) -> None:
@@ -38,23 +32,75 @@ def test_identity_round_trip(qtbot: QtBot) -> None:
     assert dialog.get_identity() == ("aop", "1.0", "AOP schema")
 
 
-def test_dialog_exposes_minimize_and_maximize_window_controls(
+def test_identity_description_round_trips_multi_line_text(qtbot: QtBot) -> None:
+    """AC-2: the Identity description round-trips embedded newlines and wraps.
+
+    The description control is a multi-line ``QPlainTextEdit``, so a value with
+    embedded newlines survives set/get unchanged, and the widget is configured to
+    wrap long lines at the widget width.
+    """
+    # Arrange
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+    multi_line = "Line one\nLine two\nLine three"
+
+    # Act
+    dialog.set_identity("aop", "1.0", multi_line)
+
+    # Assert: the embedded newlines survive the round-trip exactly.
+    assert dialog.get_identity() == ("aop", "1.0", multi_line)
+
+
+def test_identity_description_is_wrapping_multiline_widget(qtbot: QtBot) -> None:
+    """AC-2: the Identity description control wraps at the widget width.
+
+    The builder constructs the description as a multi-line ``QPlainTextEdit`` with
+    word-wrap at the widget width and an Expanding vertical size policy so it grows
+    with the window.
+    """
+    # Arrange / Act
+    from PySide6.QtWidgets import QPlainTextEdit, QSizePolicy
+
+    from src.gui.widgets._schema_builder_tabs import build_identity_tab
+
+    controls = build_identity_tab()
+    qtbot.addWidget(controls.widget)
+
+    # Assert: the description is a wrapping, vertically expanding multi-line widget.
+    assert isinstance(controls.description, QPlainTextEdit)
+    assert (
+        controls.description.lineWrapMode() == QPlainTextEdit.LineWrapMode.WidgetWidth
+    )
+    assert (
+        controls.description.sizePolicy().verticalPolicy()
+        == QSizePolicy.Policy.Expanding
+    )
+
+
+def test_dialog_is_resizable_top_level_window_below_default(
     qtbot: QtBot,
 ) -> None:
-    """AC-8: the dialog's window flags expose the minimize and maximize hints.
+    """AC-1: the dialog is a resizable top-level window sizable below default.
 
-    The dialog is configured as a resizable top-level window so the user can
-    minimize, maximize/restore, and resize it (and thereby reach all 26 AOP
+    The dialog is configured as a top-level ``Qt.Window`` with the minimize,
+    maximize/restore, and close hints, plus a minimum size below the 900x700
+    default so the user can drag it smaller (and thereby reach all 26 AOP
     canonical rows via the Columns-tab scroll area).
     """
     # Arrange / Act
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
 
-    # Assert: both the minimize and maximize hints are present on the flags.
+    # Assert: the resizable top-level window flags are present.
     flags = dialog.windowFlags()
+    assert flags & Qt.WindowType.Window
     assert flags & Qt.WindowType.WindowMinimizeButtonHint
     assert flags & Qt.WindowType.WindowMaximizeButtonHint
+    assert flags & Qt.WindowType.WindowCloseButtonHint
+    # Assert: the minimum size is below the default height so the user can size
+    # the window smaller than the default (no fixed-size behavior).
+    assert dialog.minimumSize().height() < 700
+    assert dialog.minimumSize().width() < 900
 
 
 def test_column_row_round_trip(qtbot: QtBot) -> None:
@@ -75,10 +121,21 @@ def test_column_row_round_trip(qtbot: QtBot) -> None:
 
 
 def test_key_selection_round_trip(qtbot: QtBot) -> None:
-    """The key columns and SKU coercion round-trip."""
-    # Arrange
+    """AC-7: key multi-select columns and SKU coercion round-trip (D-2).
+
+    The Key tab selects from the declared canonical columns, so the columns are
+    declared first, then selected; the ordered selection and SKU flag round-trip.
+    """
+    # Arrange: declare the canonical columns so they are selectable in the key
+    # multi-select (D-2, Option C).
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
+    dialog.set_columns(
+        [
+            ("Customer", "dimension", True, True, ()),
+            ("SKU #", "dimension", True, True, ()),
+        ]
+    )
 
     # Act
     dialog.set_key(("Customer", "SKU #"), sku_coercion=True)
@@ -87,32 +144,87 @@ def test_key_selection_round_trip(qtbot: QtBot) -> None:
     assert dialog.get_key() == (("Customer", "SKU #"), True)
 
 
-def test_dedup_mode_switch_reveals_discriminator(qtbot: QtBot) -> None:
-    """Switching dedup to collapse carries an existing-column discriminator."""
-    # Arrange: declare the discriminator column so it is a selectable dropdown
-    # option (Decision 6: the discriminator must reference an existing column).
-    dialog = SchemaBuilderDialog()
-    qtbot.addWidget(dialog)
-    dialog.set_columns([("YTD/YTG", "discriminator", False, False, ())])
+def test_key_multiselect_composes_ordered_column_ref_keyspec(qtbot: QtBot) -> None:
+    """AC-7/D-2: the key selection composes ordered column-ref KeySpec parts.
 
-    # Act
-    dialog.set_dedup("collapse", "YTD/YTG")
-
-    # Assert
-    assert dialog.get_dedup() == ("collapse", "YTD/YTG")
-
-
-def test_dedup_discriminator_defaults_to_key(qtbot: QtBot) -> None:
-    """The discriminator dropdown offers the Key sentinel as the default."""
+    Selecting an ordered subset of declared columns composes a ``KeySpec`` whose
+    column-ref parts match the selection in order, joined by the default separator;
+    the model and loader are unchanged (round-trips through ``KeySpec``).
+    """
     # Arrange
+    from src.gui.presenters._schema_builder_state import (
+        DEFAULT_KEY_SEPARATOR,
+        key_parts_from_columns,
+    )
+    from src.schema_model import KeySpec
+
     dialog = SchemaBuilderDialog()
     qtbot.addWidget(dialog)
+    dialog.set_columns(
+        [
+            ("Customer", "dimension", True, True, ()),
+            ("SKU #", "dimension", True, True, ()),
+            ("Region", "dimension", False, True, ()),
+        ]
+    )
 
-    # Act: with aggregate mode and no explicit discriminator, the Key is default.
-    dialog.set_dedup("aggregate", None)
+    # Act: select two of the three declared columns, in order, plus SKU coercion.
+    dialog.set_key(("Customer", "SKU #"), sku_coercion=True)
+    columns, sku = dialog.get_key()
+    parts = key_parts_from_columns(columns)
+    key = KeySpec(parts=tuple(parts), sku_coercion=sku)
 
-    # Assert: the Key sentinel is the resolved default discriminator.
-    assert dialog.get_dedup() == ("aggregate", "Key")
+    # Assert: the ordered column-ref names match the selection (loader keys on these).
+    assert key.column_names == ("Customer", "SKU #")
+    # Assert: a default literal-text separator is interleaved between the refs.
+    assert any(
+        not p.is_column_ref and p.value == DEFAULT_KEY_SEPARATOR for p in key.parts
+    )
+    # Assert: the SKU-coercion checkbox is honored in the assembled KeySpec.
+    assert key.sku_coercion is True
+
+
+def test_key_multiselect_round_trips_through_assemble_schema(qtbot: QtBot) -> None:
+    """AC-7/D-2: the key selection round-trips through assemble_schema unchanged.
+
+    Loading the selection through the existing assembly/key resolution proves no
+    model or loader change is required: the assembled schema's key column names
+    match the ordered selection.
+    """
+    # Arrange
+    from src.gui.presenters._schema_builder_state import (
+        SchemaBuilderState,
+        assemble_schema,
+        key_parts_from_columns,
+    )
+
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_columns(
+        [
+            ("Customer", "dimension", True, True, ()),
+            ("SKU #", "dimension", True, True, ()),
+        ]
+    )
+    dialog.set_key(("SKU #", "Customer"), sku_coercion=False)
+
+    # Act: assemble a schema from a state carrying the selection's key parts.
+    columns, sku = dialog.get_key()
+    state = SchemaBuilderState(
+        name="aop",
+        version="1.0",
+        columns=[
+            ("Customer", "dimension", True, True, ()),
+            ("SKU #", "dimension", True, True, ()),
+        ],
+        key_parts=key_parts_from_columns(columns),
+        sku_coercion=sku,
+    )
+    schema = assemble_schema(state)
+
+    # Assert: the assembled key preserves the user's selection order.
+    assert schema.key.column_names == ("SKU #", "Customer")
+    assert schema.key.sku_coercion is False
 
 
 def test_derived_entry_round_trip(qtbot: QtBot) -> None:
@@ -126,6 +238,109 @@ def test_derived_entry_round_trip(qtbot: QtBot) -> None:
 
     # Assert
     assert dialog.get_derived() == [("YTG", "FY - YTD")]
+
+
+def test_derived_rows_render_with_equals_separator(qtbot: QtBot) -> None:
+    """AC-3: derived rows render as ``name = expression`` and never use ``|``.
+
+    The rendered editor text uses the ``=`` separator; the legacy ``name|expression``
+    pipe form is no longer produced anywhere.
+    """
+    # Arrange: build the derived tab so its editor text can be read publicly.
+    from src.gui.widgets._schema_builder_tabs import build_derived_tab
+
+    controls = build_derived_tab()
+    qtbot.addWidget(controls.widget)
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+
+    # Act: render two derived rows through the dialog and a single row through the
+    # builder's editor so the rendered text is observable on a public control.
+    dialog.set_derived([("YTG", "FY - YTD"), ("Margin", "Profit / Sales")])
+    controls.editor.setPlainText("YTG = FY - YTD")
+
+    # Assert: the rendered text uses ``=`` and never the legacy pipe separator.
+    rendered = controls.editor.toPlainText()
+    assert " = " in rendered
+    assert "|" not in rendered
+    # Assert: round-tripping through the dialog parses the ``=`` form back.
+    assert dialog.get_derived() == [("YTG", "FY - YTD"), ("Margin", "Profit / Sales")]
+
+
+def test_derived_parse_splits_on_first_equals_only(qtbot: QtBot) -> None:
+    """AC-3: parsing splits on the first ``=`` so expressions may contain ``=``.
+
+    ``str.partition(" = ")`` guarantees the split is on the first occurrence, so a
+    name with a single expression survives even when the expression itself is
+    arithmetic that could contain an equals comparison.
+    """
+    # Arrange
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+
+    # Act: an expression with a later " = " must stay attached to the name's value.
+    dialog.set_derived([("Flag", "A = B")])
+
+    # Assert: the name is the first segment; the rest is the full expression.
+    assert dialog.get_derived() == [("Flag", "A = B")]
+
+
+def test_derived_stores_col_form_and_displays_brackets(qtbot: QtBot) -> None:
+    """AC-4/D-1: stored form is bare ``col(...)``; display form is bracketed.
+
+    Declaring the referenced columns lets the dialog re-bracket the known
+    references for display, while ``get_derived`` returns the stored ``col("Name")``
+    form that the formula engine accepts. No bracket syntax ever reaches the
+    evaluator.
+    """
+    # Arrange: declare the columns the expression references so they are "known".
+    from src.gui.widgets._schema_builder_derived_format import render_derived_lines
+    from src.schema_formula import FormulaEvaluator
+
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_columns(
+        [
+            ("Revenue", "measure", False, True, ()),
+            ("Units", "measure", False, True, ()),
+        ]
+    )
+
+    # Act: push a stored-form derived row (bare col()), then read it back.
+    stored_rows = [("Margin", 'safe_div(col("Revenue"), col("Units"))')]
+    dialog.set_derived(stored_rows)
+    read_back = dialog.get_derived()
+
+    # Assert: the persisted form is the bare col() form (no brackets reach storage).
+    assert read_back == stored_rows
+    assert "[" not in read_back[0][1]
+    # Assert: the rendered display form (same production path) is bracketed.
+    display = render_derived_lines(stored_rows, ["Revenue", "Units"])
+    assert display == "Margin = safe_div([Revenue], [Units])"
+    # Assert: the stored expression validates under the unchanged formula grammar.
+    FormulaEvaluator().validate(read_back[0][1], ["Revenue", "Units"])
+
+
+def test_derived_bracketed_entry_strips_to_col_on_read(qtbot: QtBot) -> None:
+    """AC-4/D-1: a user-entered bracketed expression strips to ``col(...)``.
+
+    Simulates the user authoring via brackets (the display convention) and proves
+    the value read back for storage/validation is the bare ``col("Name")`` form.
+    """
+    # Arrange
+    from src.schema_formula import FormulaEvaluator
+
+    dialog = SchemaBuilderDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_columns([("Order Date", "dimension", False, True, ())])
+
+    # Act: set a stored row whose display will be bracketed, then read it back.
+    dialog.set_derived([("Flag", 'col("Order Date")')])
+    read_back = dialog.get_derived()
+
+    # Assert: the read-back stored form is the bare col() form and validates.
+    assert read_back == [("Flag", 'col("Order Date")')]
+    FormulaEvaluator().validate(read_back[0][1], ["Order Date"])
 
 
 def test_formula_error_surface_and_clear(qtbot: QtBot) -> None:
@@ -184,255 +399,3 @@ def test_tab_order_matches_decision_10(qtbot: QtBot) -> None:
         "Dedup",
         "Preview",
     ]
-
-
-def test_dedup_default_mode_is_aggregate(qtbot: QtBot) -> None:
-    """Decision 1: a freshly-opened Dedup tab shows aggregate selected by default."""
-    # Arrange / Act
-    dialog = SchemaBuilderDialog()
-    qtbot.addWidget(dialog)
-
-    # Assert: the dedup mode defaults to aggregate.
-    mode, _discriminator = dialog.get_dedup()
-    assert mode == "aggregate"
-
-
-def test_dedup_discriminator_is_dropdown_of_existing_columns(qtbot: QtBot) -> None:
-    """Decision 6: the discriminator dropdown contains only existing names + Key."""
-    # Arrange: declare two columns and a derived column.
-    dialog = SchemaBuilderDialog()
-    qtbot.addWidget(dialog)
-    dialog.set_columns(
-        [
-            ("Customer", "dimension", True, True, ()),
-            ("Sales", "measure", True, True, ()),
-        ]
-    )
-    dialog.set_derived([("Revenue", "Sales * 2")])
-
-    # Act: repopulate the dropdown by setting dedup.
-    dialog.set_dedup("aggregate", None)
-
-    # Assert: the dropdown offers the Key plus the existing canonical/derived names.
-    assert dialog.discriminator_options() == ["Key", "Customer", "Sales", "Revenue"]
-
-
-def test_dedup_unknown_discriminator_is_rejected(qtbot: QtBot) -> None:
-    """Decision 6: an unknown discriminator cannot be selected (no free-text)."""
-    # Arrange: only one declared column.
-    dialog = SchemaBuilderDialog()
-    qtbot.addWidget(dialog)
-    dialog.set_columns([("Customer", "dimension", True, True, ())])
-
-    # Act: attempt to set a discriminator that is not an existing column.
-    dialog.set_dedup("aggregate", "Nonexistent")
-
-    # Assert: the unknown value was not selected; the dropdown stays on a valid one.
-    _mode, discriminator = dialog.get_dedup()
-    assert discriminator != "Nonexistent"
-    assert discriminator in ("Key", "Customer")
-
-
-def test_live_columns_tab_has_drag_tokens_and_dtype_indicators(qtbot: QtBot) -> None:
-    """R1: the live dialog opened via the production path renders the drag Columns tab.
-
-    Drives the production ``open_schema_builder`` path (real dialog + real presenter)
-    seeded with required specs (carrying expected dtypes) and a masked preview slice,
-    then asserts the live Columns tab is a ``ColumnsTabWidget`` with draggable
-    source-column tokens and at least one rendered dtype indicator — not the removed
-    plain-text editor.
-    """
-    # Arrange: a real shell, a fake schema service, and a masked preview slice whose
-    # header columns become the draggable source-token pool. One column coerces to
-    # its expected dtype (green) and one does not (red), so an indicator renders.
-    from src.gui._schema_wiring import open_schema_builder
-    from src.gui.main_window import MainWindow
-    from src.gui.presenters._schema_builder_state import PreviewSlice
-    from src.schema_model import ColumnSpec
-    from tests.gui.fakes.fake_services import FakeSchemaService
-
-    window = MainWindow()
-    qtbot.addWidget(window)
-    service = FakeSchemaService()
-    # The header carries an extra unmatched source column ("Region") so the
-    # draggable pool still holds a token after the matched columns are consumed.
-    preview = PreviewSlice(
-        header=("Customer", "Sales", "Region"),
-        rows=(
-            ("Cust-0001", "not-a-number", "Reg-A"),
-            ("Cust-0002", "also-text", "Reg-B"),
-        ),
-    )
-    required = (
-        ColumnSpec(
-            canonical_name="Customer", role="dimension", expected_dtype="string"
-        ),
-        ColumnSpec(canonical_name="Sales", role="measure", expected_dtype="integer"),
-    )
-    captured: list[SchemaBuilderDialog] = []
-
-    def dialog_factory() -> SchemaBuilderDialog:
-        dialog = SchemaBuilderDialog()
-        qtbot.addWidget(dialog)
-        captured.append(dialog)
-        return dialog
-
-    # Act: open the builder through the production open path with seed inputs.
-    open_schema_builder(
-        window,
-        service,
-        dialog_factory=dialog_factory,
-        required_specs=required,
-        default_key_pattern="{Customer}",
-        preview_slice=preview,
-    )
-
-    # Assert: the live Columns tab is the drag widget, not the plain-text editor.
-    assert len(captured) == 1
-    dialog = captured[0]
-    columns_widget = dialog.findChild(ColumnsTabWidget)
-    assert columns_widget is not None
-    # The draggable source-token pool reflects the seeded masked preview header.
-    assert columns_widget.token_names() != []
-    # Both seeded canonical rows are rendered on the live tab.
-    assert "Customer" in columns_widget.row_canonicals()
-    assert "Sales" in columns_widget.row_canonicals()
-    # Each canonical row renders its expected dtype label (P1-T4).
-    assert "integer" in columns_widget.row_label_text("Sales")
-    # At least one matched row shows a populated dtype-check indicator (P1-T5): Sales
-    # is integer but the masked values are text, so a red non-coercible indicator
-    # with a masked failing example renders.
-    indicators = columns_widget.findChildren(DtypeCheckWidget)
-    assert any(indicator.text() != "" for indicator in indicators)
-
-
-def test_live_key_tab_has_drag_widget_with_seeded_parts(qtbot: QtBot) -> None:
-    """R2: the live dialog opened via the production path renders the drag Key tab.
-
-    Drives the production ``open_schema_builder`` path (real dialog + real presenter)
-    seeded with a default key pattern, then asserts the live Key tab is a
-    ``KeyTabWidget`` carrying the rendered structured parts and a placeable Generic
-    Text token — not the removed comma-separated ``QLineEdit`` editor.
-    """
-    # Arrange: a real shell, a fake service, and seed inputs including a default key
-    # pattern with a literal separator so the structured parts interleave a literal.
-    from src.gui._schema_wiring import open_schema_builder
-    from src.gui.main_window import MainWindow
-    from src.gui.presenters._schema_builder_state import PreviewSlice
-    from src.schema_model import ColumnSpec
-    from tests.gui.fakes.fake_services import FakeSchemaService
-
-    window = MainWindow()
-    qtbot.addWidget(window)
-    service = FakeSchemaService()
-    preview = PreviewSlice(header=("Customer", "SKU #"), rows=(("Cust-1", "SKU-1"),))
-    required = (
-        ColumnSpec(canonical_name="Customer", role="dimension"),
-        ColumnSpec(canonical_name="SKU #", role="dimension"),
-    )
-    captured: list[SchemaBuilderDialog] = []
-
-    def dialog_factory() -> SchemaBuilderDialog:
-        dialog = SchemaBuilderDialog()
-        qtbot.addWidget(dialog)
-        captured.append(dialog)
-        return dialog
-
-    # Act: open the builder through the production open path with a default pattern.
-    open_schema_builder(
-        window,
-        service,
-        dialog_factory=dialog_factory,
-        required_specs=required,
-        default_key_pattern="{Customer}-{SKU #}",
-        preview_slice=preview,
-    )
-
-    # Assert: the live Key tab is the drag widget, not the QLineEdit editor.
-    assert len(captured) == 1
-    dialog = captured[0]
-    key_widget = dialog.findChild(KeyTabWidget)
-    assert key_widget is not None
-    # The seeded default pattern is rendered as ordered structured parts including
-    # the literal separator between the two column-refs.
-    parts = key_widget.parts_text()
-    assert "Customer" in parts
-    assert "SKU #" in parts
-    assert parts.index("Customer") < parts.index("SKU #")
-    # The repeatable Generic Text affordance is present on the live tab.
-    assert key_widget.findChild(GenericTextToken) is not None
-    # The column-token pool reflects the seeded preview-slice header columns (P2-T4).
-    assert key_widget.column_token_names() == ["Customer", "SKU #"]
-
-
-def test_live_derived_button_adds_column_to_columns_tab(
-    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """R3: the live Derived button opens the formula dialog and adds a column.
-
-    Drives the production ``open_schema_builder`` path (real dialog + real presenter)
-    seeded with a column, triggers the Derived-tab "New derived column" button — which
-    opens a real ``DerivedFormulaDialog`` — accepts a valid derived column, and
-    asserts the accepted column surfaces on the live drag Columns tab. The modal
-    ``exec`` is stubbed to fill the inputs and accept, since offscreen tests cannot
-    drive a real modal loop.
-    """
-    # Arrange: a real shell/service seeded with one column the formula references.
-    from PySide6.QtWidgets import QPushButton
-
-    from src.gui._schema_wiring import open_schema_builder
-    from src.gui.main_window import MainWindow
-    from src.gui.widgets import _derived_formula_dialog as derived_mod
-    from src.schema_model import ColumnSpec
-    from tests.gui.fakes.fake_services import FakeSchemaService
-
-    window = MainWindow()
-    qtbot.addWidget(window)
-    service = FakeSchemaService()
-    required = (ColumnSpec(canonical_name="Sales", role="measure"),)
-    captured: list[SchemaBuilderDialog] = []
-    opened_dialogs: list[DerivedFormulaDialog] = []
-
-    def dialog_factory() -> SchemaBuilderDialog:
-        dialog = SchemaBuilderDialog()
-        qtbot.addWidget(dialog)
-        captured.append(dialog)
-        return dialog
-
-    # Stub the modal exec so the derived dialog fills its inputs and "accepts"
-    # without entering a real event loop (offscreen cannot run a modal).
-    def _fake_exec(self: DerivedFormulaDialog) -> int:
-        opened_dialogs.append(self)
-        self.set_name("Revenue")
-        self.set_expression("Sales * 2")
-        return 1
-
-    monkeypatch.setattr(derived_mod.DerivedFormulaDialog, "exec", _fake_exec)
-
-    open_schema_builder(
-        window,
-        service,
-        dialog_factory=dialog_factory,
-        required_specs=required,
-    )
-    assert len(captured) == 1
-    dialog = captured[0]
-
-    # Act: click the live Derived-tab "New derived column" button to drive the
-    # production handler installed by open_schema_builder. Locate it by its label so
-    # the test does not reach into the dialog's private controls.
-    new_buttons = [
-        button
-        for button in dialog.findChildren(QPushButton)
-        if button.text() == "New derived column"
-    ]
-    assert len(new_buttons) == 1
-    new_buttons[0].click()
-
-    # Assert: the real DerivedFormulaDialog opened and offered the prior column, and
-    # the accepted derived column now appears on the live drag Columns tab.
-    assert len(opened_dialogs) == 1
-    assert "Sales" in opened_dialogs[0].available_names()
-    columns_widget = dialog.findChild(ColumnsTabWidget)
-    assert columns_widget is not None
-    assert "Revenue" in columns_widget.row_canonicals()

@@ -389,9 +389,9 @@ def test_all_literal_key_raises() -> None:
 
 
 def test_aggregate_mode_is_a_dedup_mode() -> None:
-    """The aggregate mode is registered in DEDUP_MODES alongside the originals."""
-    # Assert
-    assert DEDUP_MODES == {"none", "collapse", "aggregate"}
+    """The dedup modes include the originals plus the auto mode (D-3)."""
+    # Assert: the auto mode (D-3) is registered alongside the original modes.
+    assert DEDUP_MODES == {"none", "collapse", "aggregate", "auto"}
 
 
 def test_aggregate_dedup_policy_constructs_with_discriminator() -> None:
