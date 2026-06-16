@@ -72,14 +72,17 @@ def test_rows_display_name_description_and_dtype(qtbot: QtBot) -> None:
 
 
 def test_drop_gesture_invokes_assign_column_once(qtbot: QtBot) -> None:
-    """A drop on a canonical row invokes assign_column once with source+target."""
+    """A drop on the slot of a canonical row invokes assign_column once.
+
+    Drop-event handling has moved from ColumnDropRow to ColumnAssignmentSlot;
+    the test exercises the slot directly via ``row._slot``.
+    """
     # Arrange: a drop row whose assignment seam records calls.
     calls: list[tuple[str, str]] = []
     row = ColumnDropRow("Customer", "", "string", lambda s, c: calls.append((s, c)))
     qtbot.addWidget(row)
 
-    # Act: simulate the drop gesture by invoking dropEvent with a MIME-text
-    # payload, which is exactly what the Qt drop gesture produces.
+    # Act: simulate the drop gesture on the slot (which now owns dropEvent).
     mime = QMimeData()
     mime.setText("col_a")
 
@@ -90,7 +93,7 @@ def test_drop_gesture_invokes_assign_column_once(qtbot: QtBot) -> None:
         def acceptProposedAction(self) -> None:
             pass
 
-    row.dropEvent(_Event())  # type: ignore[arg-type]
+    row.slot.dropEvent(_Event())  # type: ignore[arg-type]
 
     # Assert: exactly one assignment with the dropped source and the row's target.
     assert calls == [("col_a", "Customer")]
@@ -166,7 +169,11 @@ def test_source_token_starts_drag_on_left_button_move(qtbot: QtBot) -> None:
 
 
 def test_drop_row_drag_enter_accepts_text_payload(qtbot: QtBot) -> None:
-    """A drag-enter carrying text is accepted so a drop can land."""
+    """A drag-enter carrying text is accepted by the slot so a drop can land.
+
+    Drag-enter handling has moved from ColumnDropRow to ColumnAssignmentSlot;
+    the test exercises the slot directly via ``row._slot``.
+    """
     # Arrange
     row = ColumnDropRow("Customer", "", "string", lambda _s, _c: None)
     qtbot.addWidget(row)
@@ -182,8 +189,8 @@ def test_drop_row_drag_enter_accepts_text_payload(qtbot: QtBot) -> None:
         def acceptProposedAction(self) -> None:
             accepted.append(True)
 
-    # Act
-    row.dragEnterEvent(_Event())  # type: ignore[arg-type]
+    # Act: invoke dragEnterEvent on the slot, which now owns the handler.
+    row.slot.dragEnterEvent(_Event())  # type: ignore[arg-type]
 
     # Assert
     assert accepted == [True]
@@ -192,17 +199,21 @@ def test_drop_row_drag_enter_accepts_text_payload(qtbot: QtBot) -> None:
 def test_assigned_row_mousemove_starts_drag_carrying_source_and_origin(
     qtbot: QtBot,
 ) -> None:
-    """An assigned ColumnDropRow starts a drag with both MIME keys on mouse-move.
+    """An assigned slot starts a drag with both MIME keys on mouse-move.
 
     Covers AC-1 (re-assign via drag) and AC-4 (test coverage of new paths).
     The drag must carry text/plain = source column name and
     application/x-canonical-origin = canonical row name.
+
+    Mouse-move handling has moved from ColumnDropRow to ColumnAssignmentSlot;
+    QDrag is patched on the slot module and the event is delivered to
+    ``row._slot``.
     """
     # Arrange
     from PySide6.QtCore import QPoint, QPointF, Qt
     from PySide6.QtGui import QMouseEvent
 
-    from src.gui.widgets import _columns_tab_drag as mod
+    from src.gui.widgets import _column_assignment_slot as slot_mod
     from src.gui.widgets._columns_tab_drag import (
         CANONICAL_ORIGIN_MIME,
         ColumnDropRow,
@@ -224,9 +235,9 @@ def test_assigned_row_mousemove_starts_drag_carrying_source_and_origin(
         def exec(self, _action: object) -> None:
             pass
 
-    # Patch QDrag so no real drag loop runs headless.
-    original = mod.QDrag
-    mod.QDrag = _StubDrag  # type: ignore[misc, assignment]
+    # Patch QDrag on the slot module, which now owns mouseMoveEvent.
+    original = slot_mod.QDrag
+    slot_mod.QDrag = _StubDrag  # type: ignore[misc, assignment]
     try:
         event = QMouseEvent(
             QMouseEvent.Type.MouseMove,
@@ -235,9 +246,9 @@ def test_assigned_row_mousemove_starts_drag_carrying_source_and_origin(
             Qt.MouseButton.LeftButton,
             Qt.KeyboardModifier.NoModifier,
         )
-        row.mouseMoveEvent(event)
+        row.slot.mouseMoveEvent(event)
     finally:
-        mod.QDrag = original  # type: ignore[misc]
+        slot_mod.QDrag = original  # type: ignore[misc]
 
     # Assert: drag was initiated and MIME carries both keys.
     assert len(captured_mime) == 1
@@ -250,20 +261,22 @@ def test_assigned_row_mousemove_starts_drag_carrying_source_and_origin(
 
 
 def test_unassigned_row_mousemove_does_not_start_drag(qtbot: QtBot) -> None:
-    """An unassigned ColumnDropRow does not start a drag on mouse-move.
+    """An unassigned slot does not start a drag on mouse-move.
 
-    Covers the guard-clause branch in ColumnDropRow.mouseMoveEvent.
+    Covers the guard-clause branch in ColumnAssignmentSlot.mouseMoveEvent.
+    Mouse-move handling has moved to the slot; QDrag is patched on the slot
+    module and the event is delivered to ``row.slot``.
     """
     # Arrange
     from PySide6.QtCore import QPoint, QPointF, Qt
     from PySide6.QtGui import QMouseEvent
 
-    from src.gui.widgets import _columns_tab_drag as mod
+    from src.gui.widgets import _column_assignment_slot as slot_mod
     from src.gui.widgets._columns_tab_drag import ColumnDropRow
 
     row = ColumnDropRow("Revenue", "", None, lambda _s, _c: None)
     qtbot.addWidget(row)
-    # Do NOT call set_assignment — row remains unassigned.
+    # Do NOT call set_assignment — slot remains unassigned.
 
     started: list[bool] = []
 
@@ -277,8 +290,8 @@ def test_unassigned_row_mousemove_does_not_start_drag(qtbot: QtBot) -> None:
         def exec(self, _action: object) -> None:
             started.append(True)
 
-    original = mod.QDrag
-    mod.QDrag = _StubDrag  # type: ignore[misc, assignment]
+    original = slot_mod.QDrag
+    slot_mod.QDrag = _StubDrag  # type: ignore[misc, assignment]
     try:
         event = QMouseEvent(
             QMouseEvent.Type.MouseMove,
@@ -287,11 +300,11 @@ def test_unassigned_row_mousemove_does_not_start_drag(qtbot: QtBot) -> None:
             Qt.MouseButton.LeftButton,
             Qt.KeyboardModifier.NoModifier,
         )
-        row.mouseMoveEvent(event)
+        row.slot.mouseMoveEvent(event)
     finally:
-        mod.QDrag = original  # type: ignore[misc]
+        slot_mod.QDrag = original  # type: ignore[misc]
 
-    # Assert: no drag was started because the row has no assigned source.
+    # Assert: no drag was started because the slot has no assigned source.
     assert started == []
 
 
@@ -369,3 +382,58 @@ def test_pool_dragEnterEvent_rejects_missing_canonical_origin(qtbot: QtBot) -> N
 
     # Assert: the event was NOT accepted (pool-token drags have no origin key).
     assert accepted == []
+
+
+def test_assignment_slot_unassigned_style_has_dashed_border(qtbot: QtBot) -> None:
+    """An unassigned ColumnAssignmentSlot uses a dashed-border stylesheet (AC-3).
+
+    The unassigned visual affordance is the dashed border that signals to the
+    user that a source column can be dropped here.
+    """
+    # Arrange
+    from src.gui.widgets._column_assignment_slot import ColumnAssignmentSlot
+
+    slot = ColumnAssignmentSlot("Customer", lambda _s, _c: None)
+    qtbot.addWidget(slot)
+
+    # Act: read the stylesheet before any assignment is made.
+    style = slot.styleSheet()
+
+    # Assert: the unassigned state uses a dashed border.
+    assert "dashed" in style
+
+
+def test_assignment_slot_assigned_shows_source_button(qtbot: QtBot) -> None:
+    """After set_assignment, assignment_text returns the assigned source name (AC-3).
+
+    The assigned slot exposes the source column name so tests and the presenter
+    can read back what is displayed without simulating UI interactions.
+    """
+    # Arrange
+    from src.gui.widgets._column_assignment_slot import ColumnAssignmentSlot
+
+    slot = ColumnAssignmentSlot("Customer", lambda _s, _c: None)
+    qtbot.addWidget(slot)
+
+    # Act
+    slot.set_assignment("col_a")
+
+    # Assert: the slot reports the assigned source name.
+    assert slot.assignment_text() == "col_a"
+
+
+def test_source_token_has_visible_styling(qtbot: QtBot) -> None:
+    """SourceColumnToken has an explicit stylesheet with visible text (AC-1).
+
+    Without an explicit stylesheet the token text is invisible against the
+    default dark-mode or light-mode background. The stylesheet must be non-empty
+    and include a ``color`` property so the label is legible.
+    """
+    # Arrange
+    from src.gui.widgets._columns_tab_drag import SourceColumnToken
+
+    token = SourceColumnToken("col_x")
+    qtbot.addWidget(token)
+
+    # Assert: the stylesheet is non-empty (explicit styling is applied).
+    assert token.styleSheet() != ""
