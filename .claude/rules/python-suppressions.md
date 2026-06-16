@@ -106,14 +106,6 @@ All `# noqa` and `# type: ignore` suppressions must either:
 
 ---
 
-### override — PySide6 Qt event handler overrides
-
-**When authorized:** `QWidget` (or `QFrame`) subclasses that override Qt event handler methods (`dragEnterEvent`, `dropEvent`, `mouseMoveEvent`, etc.) with parameter types that are more precise than the PySide6 stub signature. PySide6 stubs for some Qt event handlers declare a broader base type (e.g., `QDropEvent` where the override specifies the narrower `QDragEnterEvent`), causing a false-positive `[override]` error. This suppression is authorized only when the override uses the documented Qt C++ event type (e.g., `QDragEnterEvent` for `dragEnterEvent`) and the surrounding code is a GUI widget class in `src/gui/`.
-
-**Required comment format:** `# type: ignore[override]` — no additional comment required (the authorized context is self-evident from the method name and class inheritance).
-
----
-
 ## Explicitly Not Authorized (with Required Workarounds)
 
 ### S110 — `try`-`except`-`pass` fallback chains

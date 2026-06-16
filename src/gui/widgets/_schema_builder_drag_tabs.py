@@ -90,7 +90,6 @@ class DragTabBinder:
         # Route each widget's drop seam to its presenter so a drop mutates the
         # shared state and re-renders, instead of the widgets' default no-op.
         columns_widget.assign_column = self._columns_presenter.assign_column
-        columns_widget.clear_row = self._columns_presenter.clear_row
         key_widget.add_key_part = self._key_presenter.add_part
 
     def set_columns(
