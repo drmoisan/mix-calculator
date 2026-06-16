@@ -106,6 +106,14 @@ All `# noqa` and `# type: ignore` suppressions must either:
 
 ---
 
+### call-overload — PySide6 stub missing `setParent(None)` overload
+
+**When authorized:** `QWidget.setParent(None)` calls used to detach a widget from its parent before re-inserting it in a `QSplitter` (or other parent). PySide6 stubs define `setParent(parent: QObject)` and `setParent(parent: QObject, f: Qt.WindowType)` but lack a `setParent(None)` overload, causing Pyright to raise `call-overload`. The call is correct Qt practice; the suppression is authorized only when the argument is the literal `None` and the widget is being re-parented as part of a layout restructure.
+
+**Required comment format:** `# type: ignore[call-overload]` — no additional comment required (the authorized context is clear from the `setParent(None)` call site).
+
+---
+
 ### override — PySide6 Qt event handler overrides
 
 **When authorized:** `QWidget` (or `QFrame`) subclasses that override Qt event handler methods (`dragEnterEvent`, `dropEvent`, `mouseMoveEvent`, etc.) with parameter types that are more precise than the PySide6 stub signature. PySide6 stubs for some Qt event handlers declare a broader base type (e.g., `QDropEvent` where the override specifies the narrower `QDragEnterEvent`), causing a false-positive `[override]` error. This suppression is authorized only when the override uses the documented Qt C++ event type (e.g., `QDragEnterEvent` for `dragEnterEvent`) and the surrounding code is a GUI widget class in `src/gui/`.
