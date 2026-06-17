@@ -127,6 +127,13 @@ class ColumnSpec:
             excluded from the emitted output. May be ``True`` without
             ``required`` (for example an emitted measure column that is not part
             of the required-output identity set).
+        located_by_name: Whether the column is located by its normalized name and
+            tolerated if absent from the source. This is the load-time
+            "find-by-name, do not require" signal; it is not a source-presence
+            requirement and is independent of ``required`` and ``in_output``. The
+            loader keeps and appends located-by-name columns in a trailing slot
+            without raising when they are missing (for example ``KEY`` and the
+            AOP ``YTG``). Defaults to ``False``.
         aliases: Ordered match aliases used to resolve the column from a raw
             header. This is also the persisted store for matched
             source-column-to-canonical mappings produced by the schema builder:
@@ -151,6 +158,7 @@ class ColumnSpec:
     role: str
     required: bool = True
     in_output: bool = True
+    located_by_name: bool = False
     aliases: tuple[str, ...] = ()
     numeric: bool = False
     expected_dtype: str | None = None

@@ -24,6 +24,7 @@ shared AOP fixtures. No temp files, no network.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -237,3 +238,112 @@ def test_aop_blank_total_coerces_to_zero_not_month_sum() -> None:
     # Assert: the blank YTD became 0, not sum(_MONTHS_A) (the computed month sum).
     assert out.loc[0, "YTD"] == 0.0
     assert out.loc[0, "YTD"] != sum(_MONTHS_A)
+
+
+# The AOP measure columns whose required flag the Phase 5 minimization flips to
+# False. YTG is already required=False; the simulated flip exercises the whole set.
+_AOP_MEASURES: frozenset[str] = frozenset(
+    {
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+        "YTD",
+        "Q1",
+        "Q2",
+        "Q3",
+        "Q4",
+        "YTG",
+    }
+)
+
+
+def _flip_aop_measures(schema: SchemaDefinition) -> SchemaDefinition:
+    """Return a copy of ``schema`` with every AOP measure set to required=False.
+
+    Uses :func:`dataclasses.replace` to flip each measure column's ``required``
+    flag to False while leaving every other field (including the seeded
+    ``located_by_name`` on ``KEY``/``YTG``) unchanged. This simulates the Phase 5
+    JSON minimization before the bundled file is edited, so the order-independence
+    of the loader is proven against the exact flip scenario.
+
+    Args:
+        schema: The bundled AOP schema.
+
+    Returns:
+        A schema whose measure columns are all required=False.
+    """
+    # Flip each measure's required flag to False; non-measure columns pass through.
+    flipped_columns = tuple(
+        (
+            dataclasses.replace(column, required=False)
+            if column.canonical_name in _AOP_MEASURES
+            else column
+        )
+        for column in schema.columns
+    )
+    return dataclasses.replace(schema, columns=flipped_columns)
+
+
+def test_aop_simulated_required_flip_preserves_order_with_ytg() -> None:
+    """Flipping every AOP measure to required=False preserves load_aop's order.
+
+    Reproduces the exact CF1 regression scenario before the JSON edit: with the
+    loader decouple in place, a schema whose measures are all required=False emits
+    the same column order as ``load_aop`` for the with-YTG layout.
+    """
+    # Arrange: the with-YTG fixture rows and the measure-flipped AOP schema.
+    rows = [
+        aop_fixtures.make_aop_row(customer="A", sku="1", type_="Net", months=_MONTHS_A),
+        aop_fixtures.make_aop_row(
+            customer="B", sku="2", type_="Gross", months=_MONTHS_B
+        ),
+    ]
+    raw_frame = read_excel_sheet(
+        aop_fixtures.build_aop_workbook(rows), sheet_name="AOP1", header=2
+    )
+
+    # Act: load through the flipped schema and the protected loader.
+    flipped = SchemaLoader(_flip_aop_measures(_default_aop())).load(raw_frame)
+    protected = load_aop.load_aop(
+        aop_fixtures.build_aop_workbook(rows), sheet="AOP1", key_mismatch="overwrite"
+    )
+
+    # Assert: the flipped-schema output order matches the load_aop oracle.
+    assert list(flipped.columns) == list(protected.columns)
+
+
+def test_aop_simulated_required_flip_preserves_order_without_ytg() -> None:
+    """The simulated flip preserves load_aop's order for the without-YTG layout too."""
+    # Arrange: the without-YTG fixture layout and the measure-flipped AOP schema.
+    header = aop_fixtures.aop_header_without_key(include_ytg=False)
+    rows = [
+        aop_fixtures.make_aop_row(customer="A", sku="1", type_="Net", months=_MONTHS_A),
+        aop_fixtures.make_aop_row(
+            customer="B", sku="2", type_="Gross", months=_MONTHS_B
+        ),
+    ]
+    raw_frame = read_excel_sheet(
+        aop_fixtures.build_aop_workbook(rows, header=header),
+        sheet_name="AOP1",
+        header=2,
+    )
+
+    # Act
+    flipped = SchemaLoader(_flip_aop_measures(_default_aop())).load(raw_frame)
+    protected = load_aop.load_aop(
+        aop_fixtures.build_aop_workbook(rows, header=header),
+        sheet="AOP1",
+        key_mismatch="overwrite",
+    )
+
+    # Assert: order parity holds for the without-YTG layout under the flip.
+    assert list(flipped.columns) == list(protected.columns)

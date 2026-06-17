@@ -46,6 +46,7 @@ from src._schema_json_helpers import (
     require_object,
     require_str,
 )
+from src._schema_migration import object_to_column as _object_to_column
 from src.schema_model import (
     SCHEMA_FORMAT_VERSION,
     ColumnSpec,
@@ -56,21 +57,13 @@ from src.schema_model import (
     KeySpec,
     MeasureAggregation,
     SchemaDefinition,
-    derive_expected_dtype,
 )
 
 # Declared key sets per object shape. These drive both serialization ordering and
 # the unknown-key rejection in parsing so the two directions stay in lock-step.
-_COLUMN_KEYS: tuple[str, ...] = (
-    "canonical_name",
-    "role",
-    "required",
-    "in_output",
-    "aliases",
-    "numeric",
-    "expected_dtype",
-    "sentinel_clean",
-)
+# The column key set is owned by :mod:`src._schema_migration` (where
+# ``object_to_column`` performs the parse-side rejection) so the parse-side
+# migration and the emit-side ``_column_to_object`` order share one definition.
 _MEASURE_AGG_KEYS: tuple[str, ...] = ("measure", "mode", "select_values")
 _DEDUP_KEYS: tuple[str, ...] = (
     "mode",
@@ -188,6 +181,7 @@ def _column_to_object(column: ColumnSpec) -> JsonObject:
         "role": column.role,
         "required": column.required,
         "in_output": column.in_output,
+        "located_by_name": column.located_by_name,
         "aliases": list(column.aliases),
         "numeric": column.numeric,
         "expected_dtype": column.expected_dtype,
@@ -328,70 +322,6 @@ def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
             for item in optional_object_list(obj, "fill_rules", "schema")
         ),
         drop_columns=optional_str_tuple(obj, "drop_columns", "schema"),
-    )
-
-
-def _object_to_column(obj: JsonObject, *, migrate_required: bool) -> ColumnSpec:
-    """Reconstruct a ``ColumnSpec`` from a typed JSON object.
-
-    Applies the forward migration for the ``expected_dtype`` field: when the JSON
-    omits ``expected_dtype`` (pre-bump column) but declares ``numeric: true``, the
-    column is backfilled with ``expected_dtype="float"`` so legacy numeric columns
-    carry an explicit dtype after migration.
-
-    The ``in_output`` field is additive with a safe default of ``True``: JSON that
-    predates the field (no ``in_output`` key) parses as ``in_output=True``, so the
-    column's output-membership is unchanged unless the schema declares otherwise.
-
-    Required-output migration (2.0 -> 3.0): when ``migrate_required`` is True (the
-    source schema predates 3.0), the column's ``required`` flag is recomputed as
-    ``required(3.0) = required(2.0) AND in_output(2.0)``. A column that was a
-    source-presence requirement but is not emitted (``required=True,
-    in_output=False``) is no longer a required-output column; ``in_output`` is
-    left unchanged, so the emitted-output set is preserved. This generic mapping
-    upgrades older persisted *user* schemas on load. It is NOT the source of the
-    bundled file's flag values: the bundled ``default_le`` file is hand-authored
-    directly at version 3.0 and authors the loader-produced ``Super Category``
-    column (``copy_from: "PPG"``) as ``required: false`` by hand because it is
-    emitted by the derived-column phase, not by source resolution. When
-    ``migrate_required`` is False (a 3.0-or-later source) the parsed ``required``
-    value passes through unchanged.
-
-    Args:
-        obj: The typed JSON object for one column.
-        migrate_required: Whether to apply the required-output recomputation
-            because the source schema version predates 3.0.
-
-    Returns:
-        The reconstructed ``ColumnSpec`` with migrated fields applied.
-    """
-    reject_unknown_keys(obj, _COLUMN_KEYS, "column")
-    numeric = optional_bool(obj, "numeric", "column", default=False)
-    explicit_dtype = optional_nullable_str(obj, "expected_dtype", "column")
-    # Backfill the expected dtype from the legacy numeric flag when the JSON did
-    # not declare an explicit dtype; this upgrades pre-bump columns in place.
-    migrated_dtype = derive_expected_dtype(
-        numeric=numeric, expected_dtype=explicit_dtype
-    )
-    parsed_required = optional_bool(obj, "required", "column", default=True)
-    # in_output is additive: absent in older JSON means the column is in the
-    # output (default True), so legacy schemas keep their full output set.
-    in_output = optional_bool(obj, "in_output", "column", default=True)
-    # Apply the required-output mapping only for pre-3.0 sources: a 2.0 column
-    # keeps required only when it was also emitted, so non-emitted source-presence
-    # requirements stop being required-output columns while output is unchanged.
-    migrated_required = (
-        parsed_required and in_output if migrate_required else parsed_required
-    )
-    return ColumnSpec(
-        canonical_name=require_str(obj, "canonical_name", "column"),
-        role=require_str(obj, "role", "column"),
-        required=migrated_required,
-        in_output=in_output,
-        aliases=optional_str_tuple(obj, "aliases", "column"),
-        numeric=numeric,
-        expected_dtype=migrated_dtype,
-        sentinel_clean=optional_bool(obj, "sentinel_clean", "column", default=False),
     )
 
 
