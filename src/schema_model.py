@@ -10,6 +10,15 @@ both the AOP schema (no collapse) and the LE schema (collapse-by-key with
 additive measures, a derived ``YTG`` column, and the as-built
 ``Super Category <- PPG`` quirk).
 
+Column flag semantics (format 3.0):
+    - ``required`` means "required OUTPUT column": the column is part of the
+      output-identity set (one value column plus its dimension columns). It no
+      longer means source-presence. A column that is read only to feed a derived
+      formula or a dedup discriminator is not ``required`` under 3.0.
+    - ``in_output`` means "emitted in the final output table". It may be ``True``
+      without ``required`` (for example a measure column that is emitted but is
+      not part of the required-output identity set).
+
 The spec-level value objects (``ColumnSpec``, ``MeasureAggregation``,
 ``DedupPolicy``, ``DerivedColumnSpec``, ``KeyPart``, ``KeySpec``, ``FillRule``),
 the :class:`SchemaValidationError`, and the constrained-field enumerations live
@@ -22,7 +31,7 @@ Responsibilities:
       ``__post_init__``, raising :class:`SchemaValidationError` with a
       descriptive message that names the offending reference.
     - Publish :data:`SCHEMA_FORMAT_VERSION`, the current write-format version
-      string.
+      string (``"3.0"``).
 
 Scope boundaries:
     - This module is pure data plus structural validation. It does not evaluate
@@ -64,11 +73,17 @@ from src._schema_model_specs import (
 
 # The current schema write-format version. This is the single source of truth
 # for the format version emitted by serialization and targeted by the forward
-# migration in src.schema_serialization. It is bumped to "2.0" for the
-# structured key-part model, the expected_dtype field, and the aggregate dedup
-# mode. SchemaDefinition.version remains a required per-instance field with no
-# dataclass default; this constant is the value the current write path emits.
-SCHEMA_FORMAT_VERSION: str = "2.0"
+# migration in src.schema_serialization. The 3.0 bump introduces the
+# required-output meaning of ``required``: a column's ``required`` flag now
+# denotes membership in the required OUTPUT identity set (one value column plus
+# its dimension columns), not mere source-presence. The forward migration
+# recomputes ``required(3.0) = required(2.0) AND in_output(2.0)`` while
+# preserving ``in_output`` so emitted output is unchanged. (The 2.0 bump that
+# preceded it introduced the structured key-part model, the expected_dtype
+# field, and the aggregate dedup mode.) SchemaDefinition.version remains a
+# required per-instance field with no dataclass default; this constant is the
+# value the current write path emits.
+SCHEMA_FORMAT_VERSION: str = "3.0"
 
 __all__ = [
     "COLUMN_ROLES",
@@ -112,10 +127,14 @@ class SchemaDefinition:
         are ordered lists.
 
     Version:
-        The current write format is :data:`SCHEMA_FORMAT_VERSION` (``"2.0"``).
+        The current write format is :data:`SCHEMA_FORMAT_VERSION` (``"3.0"``).
+        The 3.0 format defines ``required`` as "required OUTPUT column" and
+        ``in_output`` as "emitted in output (may be true without ``required``)".
         ``version`` is a required per-instance field with no dataclass default;
         the serialization layer emits :data:`SCHEMA_FORMAT_VERSION` as the
-        current format and the forward migration upgrades pre-bump JSON to it.
+        current format and the forward migration upgrades pre-3.0 JSON to it,
+        recomputing ``required`` from ``required AND in_output`` while preserving
+        ``in_output`` so emitted output is unchanged.
 
     As-built quirk representation:
         The LE ``Super Category <- PPG`` quirk is represented as a
@@ -178,6 +197,40 @@ class SchemaDefinition:
         self._validate_dedup_references(declared)
         self._validate_derived_references(declared)
         self._validate_fill_rule_references(declared)
+
+    def required_output_columns(self) -> tuple[str, ...]:
+        """Return the ordered canonical names of the required-output columns.
+
+        Purpose:
+            Expose the required OUTPUT identity set for this schema under the 3.0
+            ``required`` semantics: the columns that together identify a row in
+            the emitted output (one value column plus its dimension columns).
+            Callers (matching, the configurable ETL gate, the GUI builder) read
+            this to know which columns a source must supply to produce a valid
+            output identity, independent of which additional columns are merely
+            emitted (``in_output`` without ``required``).
+
+        Returns:
+            An ordered ``tuple[str, ...]`` of canonical names: every declared
+            ``ColumnSpec`` whose ``required`` flag is ``True``, in declared
+            ``columns`` order, followed by the names of any ``DerivedColumnSpec``
+            the schema designates as a required output. The bundled schemas
+            designate no required derived column, so the derived contribution is
+            empty; the structure nonetheless supports a designated required
+            derived name for later features. The result reads only ``required``
+            and never ``in_output``, so an emitted-but-not-required column (for
+            example the LE ``Super Category``) is excluded.
+        """
+        # Collect source columns flagged as required-output identity members,
+        # preserving declared order so callers see a stable, schema-defined set.
+        required_source = tuple(
+            column.canonical_name for column in self.columns if column.required
+        )
+        # No DerivedColumnSpec carries a required-output designation in CF1, so
+        # the derived contribution is empty; an empty tuple keeps the accessor
+        # structurally extensible without changing current behavior.
+        required_derived: tuple[str, ...] = ()
+        return required_source + required_derived
 
     def _declared_column_names(self) -> frozenset[str]:
         """Return the set of canonical names declared by ``columns``.

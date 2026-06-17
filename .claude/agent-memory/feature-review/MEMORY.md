@@ -19,3 +19,4 @@
 - [schema_formula col-shadow defect](schema-formula-col-shadow-defect.md) — RESOLVED issue #50 cycle 4 (a45a987): bind whitelisted callables after the alias loop in _build_symtable; suite green 942
 - [PR context summary can be stale](pr-context-summary-can-be-stale.md) — artifacts/pr_context.summary.txt may describe a prior PR/branch; verify head ref, fall back to live git diff
 - [lcov artifact can be a partial run](lcov-artifact-can-be-partial-run.md) — stored artifacts/python/lcov.info may be a targeted run understating per-file coverage; re-run full suite before trusting it
+- [dual-schema flag-alignment gap](dual-schema-flag-alignment-gap.md) — when a flag-semantics change names both default_le + default_aop, dump BOTH files' flags; executors fully edit LE and only version-bump AOP (issue #74 CF1)

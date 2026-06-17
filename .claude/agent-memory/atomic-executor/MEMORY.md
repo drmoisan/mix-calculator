@@ -9,3 +9,4 @@
 - [openpyxl append typing](openpyxl-append-typing.md) — strict Pyright: widen fixture row param to Sequence[Sequence[object]] AND list(row) at worksheet.append; both fixes needed, no suppression
 - [Rerouting a loader breaks stale monkeypatches](rerouting-loader-breaks-stale-monkeypatches.md) — moving import_aop off load_aop voided 5 GUI test patch sites; re-target at read_excel_sheet/detect_header_row or SchemaLoader.load
 - [Cross-module private test helpers need __all__](cross-module-private-test-helpers-need-all-export.md) — splitting a test file that shares an `_`-prefixed helper trips strict Pyright reportPrivateUsage; relocate into an `_`-module with `__all__`
+- [AOP required flag couples output order](aop-required-flag-couples-output-order.md) — #74 R1: flipping AOP measure `required` to false reorders SchemaLoader output cols (none-mode resolve); schema-JSON-only edit can't meet zero-regression — needs `_schema_loader_helpers` fix

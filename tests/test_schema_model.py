@@ -430,6 +430,6 @@ def test_aggregate_dedup_in_schema_validates_discriminator() -> None:
 
 
 def test_schema_format_version_value() -> None:
-    """The current write-format version constant is the bumped value."""
+    """The current write-format version constant is the required-output bump (3.0)."""
     # Assert
-    assert SCHEMA_FORMAT_VERSION == "2.0"
+    assert SCHEMA_FORMAT_VERSION == "3.0"
