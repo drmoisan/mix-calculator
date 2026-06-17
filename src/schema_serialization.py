@@ -253,6 +253,38 @@ def _fill_rule_to_object(rule: FillRule) -> JsonObject:
     }
 
 
+def _version_predates_required_output(version: str) -> bool:
+    """Return whether a source schema version predates the 3.0 required-output bump.
+
+    Purpose:
+        Decide whether the forward ``required`` migration must run for a parsed
+        schema. The 3.0 format redefines ``required`` as "required OUTPUT column";
+        any source schema written at a version below 3.0 carries the old
+        source-presence meaning and must be recomputed on load.
+
+    Args:
+        version: The raw ``version`` string read from the source JSON (for
+            example ``"1.0"``, ``"2.0"``, ``"3.0"``).
+
+    Returns:
+        ``True`` when the parsed major version is below 3 (the migration must
+        run); ``False`` for a 3.0-or-later source (``required`` passes through
+        unchanged). A version string that cannot be parsed as an integer major
+        component is treated as pre-3.0 so legacy/hand-authored inputs are
+        upgraded conservatively rather than silently skipped.
+    """
+    # Compare on the leading dotted component only; the format version uses a
+    # "<major>.<minor>" shape and the required-output change is a major bump.
+    major_text = version.split(".", 1)[0].strip()
+    try:
+        major = int(major_text)
+    except ValueError:
+        # An unparseable major component is treated as legacy so its required
+        # flags are recomputed rather than trusted as already-3.0 values.
+        return True
+    return major < 3
+
+
 def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
     """Reconstruct a ``SchemaDefinition`` from a typed JSON object.
 
@@ -271,7 +303,10 @@ def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
     # sets the in-memory version to SCHEMA_FORMAT_VERSION so a re-serialize always
     # emits the current format. require_str enforces presence/type of the source
     # field before it is superseded.
-    require_str(obj, "version", "schema")
+    source_version = require_str(obj, "version", "schema")
+    # Decide once whether the required-output migration applies to this source so
+    # every column reconstruction uses the same gate.
+    migrate_required = _version_predates_required_output(source_version)
     return SchemaDefinition(
         name=require_str(obj, "name", "schema"),
         version=SCHEMA_FORMAT_VERSION,
@@ -279,7 +314,7 @@ def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
         source_sheet_hints=optional_str_tuple(obj, "source_sheet_hints", "schema"),
         header_row=optional_int(obj, "header_row", "schema", default=0),
         columns=tuple(
-            _object_to_column(item)
+            _object_to_column(item, migrate_required=migrate_required)
             for item in optional_object_list(obj, "columns", "schema")
         ),
         key=_object_to_key(obj),
@@ -296,7 +331,7 @@ def _object_to_schema(obj: JsonObject) -> SchemaDefinition:
     )
 
 
-def _object_to_column(obj: JsonObject) -> ColumnSpec:
+def _object_to_column(obj: JsonObject, *, migrate_required: bool) -> ColumnSpec:
     """Reconstruct a ``ColumnSpec`` from a typed JSON object.
 
     Applies the forward migration for the ``expected_dtype`` field: when the JSON
@@ -307,6 +342,28 @@ def _object_to_column(obj: JsonObject) -> ColumnSpec:
     The ``in_output`` field is additive with a safe default of ``True``: JSON that
     predates the field (no ``in_output`` key) parses as ``in_output=True``, so the
     column's output-membership is unchanged unless the schema declares otherwise.
+
+    Required-output migration (2.0 -> 3.0): when ``migrate_required`` is True (the
+    source schema predates 3.0), the column's ``required`` flag is recomputed as
+    ``required(3.0) = required(2.0) AND in_output(2.0)``. A column that was a
+    source-presence requirement but is not emitted (``required=True,
+    in_output=False``) is no longer a required-output column; ``in_output`` is
+    left unchanged, so the emitted-output set is preserved. This generic mapping
+    upgrades older persisted *user* schemas on load. It is NOT the source of the
+    bundled file's flag values: the bundled ``default_le`` file is hand-authored
+    directly at version 3.0 and authors the loader-produced ``Super Category``
+    column (``copy_from: "PPG"``) as ``required: false`` by hand because it is
+    emitted by the derived-column phase, not by source resolution. When
+    ``migrate_required`` is False (a 3.0-or-later source) the parsed ``required``
+    value passes through unchanged.
+
+    Args:
+        obj: The typed JSON object for one column.
+        migrate_required: Whether to apply the required-output recomputation
+            because the source schema version predates 3.0.
+
+    Returns:
+        The reconstructed ``ColumnSpec`` with migrated fields applied.
     """
     reject_unknown_keys(obj, _COLUMN_KEYS, "column")
     numeric = optional_bool(obj, "numeric", "column", default=False)
@@ -316,13 +373,21 @@ def _object_to_column(obj: JsonObject) -> ColumnSpec:
     migrated_dtype = derive_expected_dtype(
         numeric=numeric, expected_dtype=explicit_dtype
     )
+    parsed_required = optional_bool(obj, "required", "column", default=True)
+    # in_output is additive: absent in older JSON means the column is in the
+    # output (default True), so legacy schemas keep their full output set.
+    in_output = optional_bool(obj, "in_output", "column", default=True)
+    # Apply the required-output mapping only for pre-3.0 sources: a 2.0 column
+    # keeps required only when it was also emitted, so non-emitted source-presence
+    # requirements stop being required-output columns while output is unchanged.
+    migrated_required = (
+        parsed_required and in_output if migrate_required else parsed_required
+    )
     return ColumnSpec(
         canonical_name=require_str(obj, "canonical_name", "column"),
         role=require_str(obj, "role", "column"),
-        required=optional_bool(obj, "required", "column", default=True),
-        # in_output is additive: absent in older JSON means the column is in the
-        # output (default True), so legacy schemas keep their full output set.
-        in_output=optional_bool(obj, "in_output", "column", default=True),
+        required=migrated_required,
+        in_output=in_output,
         aliases=optional_str_tuple(obj, "aliases", "column"),
         numeric=numeric,
         expected_dtype=migrated_dtype,

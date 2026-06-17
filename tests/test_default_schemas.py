@@ -393,11 +393,12 @@ def test_bundled_schema_parses_without_raising(name: str) -> None:
     assert schema.name == name
 
 
-def test_bundled_defaults_are_format_2_0_with_structured_key_parts() -> None:
-    """P12-T4: bundled defaults are version 2.0 with structured column-ref key parts."""
+def test_bundled_defaults_are_current_format_with_structured_key_parts() -> None:
+    """Bundled defaults load at the current 3.0 format with column-ref key parts."""
     from src.schema_model import SCHEMA_FORMAT_VERSION
 
-    # Both bundled schemas migrated forward to the current write format.
+    # Both bundled schemas load at the current write format (3.0), confirming the
+    # version bump and that the structured key shape is preserved.
     for name in ("default_le", "default_aop"):
         schema = _load_bundled(name)
         assert schema.version == SCHEMA_FORMAT_VERSION
@@ -418,3 +419,62 @@ def test_bundled_numeric_columns_have_float_expected_dtype() -> None:
     # A representative numeric measure column resolves to the float expected dtype.
     jan = next(c for c in schema.columns if c.canonical_name == "Jan")
     assert jan.expected_dtype == "float"
+
+
+# Output-identity dimensions that remain required under the 3.0 required-output
+# semantics for the LE schema (one value column's dimensions, in declared order).
+_LE_REQUIRED_DIMENSIONS = (
+    "Customer",
+    "SKU Descripiton",
+    "SKU #",
+    "Type",
+    "GtN Mapping",
+    "PPG",
+)
+# Measure columns that are emitted (in_output) but no longer required-output
+# columns under 3.0: the twelve months, the fiscal-year total, and the quarters.
+_LE_NON_REQUIRED_MEASURES = tuple(_MONTHS) + ("FY",) + tuple(_QUARTERS)
+
+
+def test_default_le_required_set_is_output_identity_under_3_0() -> None:
+    """default_le marks only its output-identity dimensions required under 3.0.
+
+    The six identity dimensions stay required=True; the twelve months, FY, and
+    the four quarters become required=False while remaining in_output=True; the
+    loader-produced Super Category column is required=False but in_output=True
+    (emitted by the derived-column phase, not part of the required-output set).
+    """
+    # Arrange
+    schema = _load_bundled("default_le")
+    by_name = {column.canonical_name: column for column in schema.columns}
+
+    # Assert: the output-identity dimensions remain required.
+    for name in _LE_REQUIRED_DIMENSIONS:
+        assert by_name[name].required is True, name
+
+    # Assert: each month/quarter/FY measure is no longer required but still emitted.
+    for name in _LE_NON_REQUIRED_MEASURES:
+        assert by_name[name].required is False, name
+        assert by_name[name].in_output is True, name
+
+    # Assert: the loader-produced Super Category is emitted but not required.
+    assert by_name["Super Category"].required is False
+    assert by_name["Super Category"].in_output is True
+
+
+def test_default_le_required_output_columns_accessor() -> None:
+    """required_output_columns() returns exactly the ordered LE identity dimensions.
+
+    The accessor reflects the required-output identity set and excludes both the
+    month/quarter/FY measures and the emitted-but-not-required Super Category
+    column.
+    """
+    # Arrange / Act
+    schema = _load_bundled("default_le")
+    required_outputs = schema.required_output_columns()
+
+    # Assert: the tuple equals the six ordered dimensions and excludes measures.
+    assert required_outputs == _LE_REQUIRED_DIMENSIONS
+    assert "Super Category" not in required_outputs
+    for measure in _LE_NON_REQUIRED_MEASURES:
+        assert measure not in required_outputs

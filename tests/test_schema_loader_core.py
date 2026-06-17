@@ -10,10 +10,11 @@ files, no network.
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from src._schema_loader_helpers import collapse_by_key
+from src._schema_loader_helpers import collapse_by_key, resolve_and_rename
 from src.schema_loader import SchemaLoader
 from src.schema_model import (
     ColumnSpec,
@@ -188,6 +189,61 @@ def test_load_minimal_schema_without_fill_or_numeric_columns() -> None:
     # Assert: both rows preserved, KEY created, no fill/coerce phase needed.
     assert list(out["Customer"]) == ["A", "B"]
     assert "KEY" in out.columns
+
+
+# ---------------------------------------------------------------------------
+# Required-output semantics: resolve gate (Issue #74)
+# ---------------------------------------------------------------------------
+
+# The six output-identity dimensions that remain required for default_le under
+# the 3.0 required-output semantics; a source supplying these resolves even when
+# every month/quarter/FY measure is absent.
+_LE_IDENTITY_DIMENSIONS = (
+    "Customer",
+    "SKU Descripiton",
+    "SKU #",
+    "Type",
+    "GtN Mapping",
+    "PPG",
+)
+
+
+def test_default_le_resolves_when_only_months_are_absent() -> None:
+    """The default_le resolve path succeeds when only month/quarter/FY are absent.
+
+    Under 3.0 the month/quarter/FY measures are required=False, so a source that
+    supplies the six output-identity dimensions but none of the measures must
+    resolve without raising a required-column ValueError.
+    """
+    # Arrange: a source frame with only the required-output dimensions present.
+    raw_frame = pd.DataFrame({name: ["A", "B"] for name in _LE_IDENTITY_DIMENSIONS})
+    schema = _load_default("default_le")
+
+    # Act: exercise the resolve phase directly (the phase that gates required
+    # columns); it previously raised when months were required.
+    resolved = resolve_and_rename(raw_frame, schema)
+
+    # Assert: resolution succeeds and the identity dimensions are present.
+    for name in _LE_IDENTITY_DIMENSIONS:
+        assert name in resolved.columns
+    assert list(resolved["Customer"]) == ["A", "B"]
+
+
+def test_default_le_resolve_raises_when_required_dimension_absent() -> None:
+    """The default_le resolve path still raises when a required dimension is absent.
+
+    A source missing the required-output dimension ``Customer`` must still fail
+    resolution with a ValueError, confirming required-output dimensions remain
+    gated.
+    """
+    # Arrange: drop the required Customer dimension; keep the rest present.
+    present = [name for name in _LE_IDENTITY_DIMENSIONS if name != "Customer"]
+    raw_frame = pd.DataFrame({name: ["A", "B"] for name in present})
+    schema = _load_default("default_le")
+
+    # Act / Assert: the missing required dimension raises from resolve_columns.
+    with pytest.raises(ValueError):
+        resolve_and_rename(raw_frame, schema)
 
 
 # ---------------------------------------------------------------------------
