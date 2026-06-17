@@ -23,7 +23,10 @@ Outcomes:
 ## Decomposition (Child Features/Workstreams)
 
 - CF1 Schema-model required-output semantics + bundled schema update (Issue #74)
-- CF2 Loader: enforce output-required set + drop unassigned post-derive (Issue #74)
+- CF2 Loader: enforce output-required set + drop unassigned post-derive; add a schema-model
+  located-by-name / presence-optional signal and decouple the `none`-dedup which-columns-to-keep
+  and emitted column ORDER from the `required` flag; minimize `default_aop` required flags
+  (deferred from CF1) (Issue #74)
 - CF3 Formula engine: input coercion + Derived-stage coercion errors (Issue #74)
 - CF4 Schema auto-identification by required-output set (one-to-many) (Issue #74)
 - CF5 GUI schema-builder tabs: Derived coercion errors + Columns drop-unassigned (Issue #74)
@@ -66,6 +69,12 @@ Dependencies:
 
 - Approved decisions: redefine `required` (recommendation A); include F4 auto-identification (full epic).
 - Research: artifacts/research/2026-06-16-etl-required-columns-redesign-research.md.
+- DESCOPE (2026-06-17, CF1 remediation): AOP required-flag minimization moved from CF1 to CF2.
+  Flipping AOP measures to required:false reorders SchemaLoader output for the none-dedup path
+  because the loader couples which-columns-to-keep and column ORDER to the required flag. The
+  decouple needs a located-by-name/presence-optional schema signal + a loader change — CF2 scope.
+  CF1 ships the redefined required semantics applied to default_le only (its aggregate emit is
+  order-independent). See CF1 evidence/regression-testing/r1-*-finding artifacts.
 - CORRECTION (2026-06-17, verified): The premise that the monthly/quarter columns are "deleted
   before finalize" is incorrect. `src/mix_pipeline.py` persists the LE table and reads it back
   (line 188); `src/mix_q1.py` consumes `Jan`/`Feb`/`Mar`/`Q1` from that table. Dropping months/

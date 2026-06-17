@@ -1,6 +1,6 @@
 {
   "name": "default_aop",
-  "version": "3.0",
+  "version": "2.0",
   "description": "Bundled default schema encoding the current AOP loader behavior from src/_load_aop_helpers.py. AOP preserves the full source layout (no column dropped, no derived column added) and does not collapse rows.",
   "source_sheet_hints": [],
   "header_row": 2,

@@ -54,12 +54,29 @@ is relaxed.
   `Jan`–`Dec`, `FY`, `Q1`–`Q4`; keep their `in_output: true`. Keep `required: true` on the
   output-identity columns (`Customer`, `SKU Descripiton`, `SKU #`, `Type`, `GtN Mapping`,
   `PPG`). Quirks and derived columns unchanged.
-- `src/schemas/default_aop.schema.json`: bump `version` to `3.0`; align `required` flags to
-  the new meaning without changing its emitted output.
+- `src/schemas/default_aop.schema.json`: NO change in CF1. The forward migration upgrades it to
+  3.0 in memory on load (functionally identical: every AOP measure is `in_output: true`, so
+  `required = required AND in_output` keeps it `required: true`). AOP required-flag minimization
+  is DEFERRED to CF2 — see the descope note below.
+
+### Descope note (AOP -> CF2)
+
+CF1 originally intended to align `default_aop` required flags too. Verification during remediation
+(see `evidence/regression-testing/r1-output-order-regression.2026-06-17T12-35.md` and
+`r1-scope-insufficiency-finding.2026-06-17T13-10.md`) established that flipping AOP measures to
+`required: false` reorders the SchemaLoader output for the `none`-dedup (AOP) path, because the
+loader (`src/_schema_loader_helpers.py`) couples emitted column ORDER and the located-by-name /
+which-columns-to-keep decision to the `required` flag. Decoupling that requires a new schema-model
+"located-by-name / presence-optional" signal plus a loader change to which columns are kept and
+their order — which is CF2 (loader) scope, not CF1 (model semantics). AOP minimization therefore
+moves to CF2. CF1 ships the redefined `required` semantics applied to `default_le` (whose
+`aggregate`-dedup emit rebuilds canonical order independently of the `required` flag, so it has no
+ordering coupling).
 
 ## Non-Goals
 
 - No loader enforcement changes, no "drop unassigned" behavior change (CF2).
+- No `default_aop` required-flag change (deferred to CF2 with the loader decouple).
 - No formula coercion (CF3), no auto-identification (CF4), no GUI changes (CF5).
 - No `normalize_le` migration or removal (CF6/CF7).
 - No change to which columns are emitted for the bundled schemas.
@@ -85,8 +102,8 @@ is relaxed.
 ## Technical Specifications
 
 - Files expected to change: `src/schema_model.py`, `src/_schema_model_specs.py`,
-  `src/schema_serialization.py`, `src/schemas/default_le.schema.json`,
-  `src/schemas/default_aop.schema.json`, plus their tests.
+  `src/schema_serialization.py`, `src/schemas/default_le.schema.json`, plus their tests.
+  (`src/schemas/default_aop.schema.json` is NOT changed in CF1; AOP -> CF2.)
 - Public surface: `SCHEMA_FORMAT_VERSION` value; new `required_output_columns()` accessor;
   serialization migration behavior. No change to existing constructor signatures.
 - Data flow: unchanged at runtime for bundled schemas; only input-presence gating relaxes.
@@ -109,8 +126,9 @@ is relaxed.
 
 - [x] `SCHEMA_FORMAT_VERSION == "3.0"`; docstrings define `required` = required-output column.
 - [x] Deterministic `2.0 → 3.0` migration with documented, output-preserving mapping + test.
-- [x] `default_le`/`default_aop` updated to 3.0; months/FY/quarters `required: false`,
-      `in_output` unchanged; quirks preserved.
+- [x] `default_le` updated to 3.0; months/FY/quarters (and the loader-produced `Super Category`)
+      `required: false`, `in_output` unchanged; quirks preserved. (`default_aop` minimization
+      descoped to CF2 — see Descope note; CF1 makes no AOP schema-file change.)
 - [x] `required_output_columns()` accessor returns the ordered required-output set.
 - [x] Bundled-schema loader output unchanged (zero regression); negative/positive load tests pass.
 - [x] Toolchain clean (format → lint → type-check → test); coverage maintained.
