@@ -32,6 +32,10 @@ from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 
+from src._schema_loader_keepset import (
+    by_name_optional_columns,
+    is_kept_non_located,
+)
 from src.etl_columns import normalize_name, resolve_columns
 
 if TYPE_CHECKING:
@@ -152,11 +156,12 @@ def resolve_and_rename(raw: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFr
     """
     actual_columns = list(raw.columns.astype(str))
 
-    # Columns resolved by name only (not fuzzy) and not treated as required:
-    # KEY plus any optional column (the AOP optional YTG; and the LE discriminator
-    # YTD/YTG, which is now required=false and located by name, carried through for
-    # the dedup collapse, and excluded from output by in_output=false).
-    by_name_optional = _by_name_optional_columns(schema)
+    # Columns resolved by name only (not fuzzy) and not treated as required: KEY
+    # plus any declared column marked located_by_name (the AOP optional YTG; and,
+    # once the bundled schema sets the flag, the LE KEY/YTD/YTG). These are located
+    # without raising on absence; the keep-set below uses in_output/referenced, not
+    # required, so the order is independent of the required flag.
+    by_name_optional = by_name_optional_columns(schema)
 
     # Map each by-name-optional canonical name to its actual source column (if
     # present) so it can be carried through and renamed without being required.
@@ -169,16 +174,25 @@ def resolve_and_rename(raw: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFr
                 break
 
     by_name_set = set(by_name_optional)
-    # The required expected columns are the declared columns that are required
-    # and not handled by name above.
+    # Build the flag-independent non-located resolution list in schema order. A
+    # declared column is kept when it is required, emitted (in_output), or
+    # referenced by key/dedup/fill/derived, and is NOT located by name. The
+    # required columns are always in the resolution list so an absent required
+    # column still raises; non-required kept columns join only when they are
+    # actually present by name, so an absent optional in_output column is silently
+    # dropped rather than raising. Keying off in_output (not required) makes the
+    # emitted resolution order independent of the required flag.
+    actual_norms = {normalize_name(column) for column in actual_columns}
     required_expected = [
         c.canonical_name
         for c in schema.columns
-        if c.required and c.canonical_name not in by_name_set
+        if c.canonical_name not in by_name_set
+        and is_kept_non_located(c, schema)
+        and (c.required or normalize_name(c.canonical_name) in actual_norms)
     ]
 
-    # Resolve required columns against the actual columns, excluding the located
-    # by-name columns so they are neither required nor reported as extras.
+    # Resolve the non-located columns against the actual columns, excluding the
+    # located by-name columns so they are neither required nor reported as extras.
     located_actuals = set(located.values())
     resolvable = [c for c in actual_columns if c not in located_actuals]
     mapping, extras = resolve_columns(resolvable, required_expected)
@@ -188,8 +202,11 @@ def resolve_and_rename(raw: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFr
     if extras:
         logger.warning("Ignoring extra source column(s): %s.", extras)
 
-    # Build the select+rename plan: required columns first (schema order), then
-    # the located by-name optional columns under their canonical names.
+    # Build the select+rename plan reproducing load_aop's flag-independent order:
+    # the non-located kept columns in resolution order FIRST, then the located
+    # by-name columns appended under their canonical names (KEY, then YTG). This is
+    # the none-path emitted order; the order follows resolution/in_output position,
+    # never the declared columns index, so a required-flag flip cannot move it.
     selection = {mapping[expected]: expected for expected in required_expected}
     columns_to_keep = [mapping[expected] for expected in required_expected]
     for canonical, actual in located.items():
@@ -205,34 +222,6 @@ def resolve_and_rename(raw: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFr
         frame["Customer"].astype(str).str.strip() == ""
     )
     return frame.loc[~customer_blank].copy()
-
-
-def _by_name_optional_columns(schema: SchemaDefinition) -> list[str]:
-    """Return canonical names resolved by name only, KEY first then optionals.
-
-    These are ``KEY`` (always optional/by-name) followed by any declared column
-    marked ``required=False`` in schema order. This includes the AOP optional
-    ``YTG`` and, after the bundled-schema change, the LE discriminator
-    ``YTD/YTG`` (now ``required=false, in_output=false``): it is located by name
-    (no fuzzy, no raise on absence), carried through ``resolve_and_rename`` and
-    ``collapse_by_key`` as the dedup discriminator, and excluded from the output
-    only at emit by its ``in_output=false`` flag. The order is deterministic
-    (KEY first), matching the protected loaders' ``if key ... if ytg ...`` append
-    sequence.
-
-    Args:
-        schema: The active schema.
-
-    Returns:
-        The ordered list of canonical names to locate by normalized name only.
-    """
-    by_name: list[str] = ["KEY"]
-    # Optional declared columns are located by name so an absent optional column
-    # (older AOP sheets predate YTG) is neither required nor reported as extra.
-    for column in schema.columns:
-        if not column.required and column.canonical_name not in by_name:
-            by_name.append(column.canonical_name)
-    return by_name
 
 
 def collapse_by_key(frame: pd.DataFrame, schema: SchemaDefinition) -> pd.DataFrame:
@@ -429,10 +418,15 @@ def emit_output_columns(
     ``aggregate`` mode) rebuilds the canonical declared order from the
     ``in_output`` columns with the derived ``YTG`` inserted in its declared
     position (matching ``normalize_le.TARGET_COLUMNS``). A ``none`` schema (AOP)
-    preserves the working frame's natural column order (resolution order with the
-    created ``KEY`` appended last), excluding any frame column whose declared spec
-    has ``in_output=False``, because ``load_aop`` returns the validated frame
-    without reordering.
+    preserves the working frame's natural column order, excluding any frame column
+    whose declared spec has ``in_output=False``, because ``load_aop`` returns the
+    validated frame without reordering. That natural order is the flag-independent
+    order built in :func:`resolve_and_rename`: the non-located kept columns in
+    resolution order first, then the located-by-name columns (the created ``KEY``
+    appended last by ``resolve_key``). It follows ``in_output``/resolution
+    position, never the declared columns index or the ``required`` flag, so
+    ``load_aop`` remains the order oracle even after a measure's ``required`` flag
+    is flipped to false.
 
     Args:
         frame: The fully transformed working frame.

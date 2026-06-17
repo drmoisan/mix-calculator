@@ -2,8 +2,10 @@
 
 Covers parsing legacy (pre-bump) schema JSON: the flat ``key.columns`` shape
 migrating to ordered ``column-ref`` key parts, a legacy numeric column backfilling
-``expected_dtype="float"``, and the parsed schema carrying the bumped format
-version so a re-serialize emits the current format. Split from
+``expected_dtype="float"``, the parsed schema carrying the bumped format
+version so a re-serialize emits the current format, and the ``located_by_name``
+seeding that reproduces the pre-3.0 located-by-name set (required=False columns).
+Split from
 ``test_schema_serialization.py`` to keep both files under the 500-line cap; the
 round-trip and error-handling tests remain there. All tests are pure string
 transforms; no temp files, network, or filesystem access is used.
@@ -172,3 +174,86 @@ def test_unparseable_version_is_treated_as_legacy() -> None:
 
     # Assert: the legacy mapping ran, dropping A's required flag.
     assert by_name["A"].required is False
+
+
+def _single_column_schema(
+    *, version: str, required: bool, located_key: str | None = None
+) -> str:
+    """Build single-column schema JSON for located-by-name migration tests.
+
+    Args:
+        version: The source schema ``version`` string to embed.
+        required: The column's source ``required`` flag.
+        located_key: When ``None`` the JSON omits the ``located_by_name`` key
+            entirely (exercising the seeding path); otherwise it injects the
+            literal ``"located_by_name": <located_key>`` so an explicit value is
+            present in the source.
+
+    Returns:
+        JSON text for a one-column schema whose key references that column.
+    """
+    required_flag = "true" if required else "false"
+    located_clause = (
+        "" if located_key is None else f', "located_by_name": {located_key}'
+    )
+    return (
+        f'{{"name": "syn", "version": "{version}", '
+        '"columns": ['
+        '{"canonical_name": "A", "role": "dimension", '
+        f'"required": {required_flag}{located_clause}}}], '
+        '"key": {"parts": [{"kind": "column-ref", "value": "A"}]}}'
+    )
+
+
+def test_pre_3_0_required_false_seeds_located_by_name_true() -> None:
+    """A 2.0 column required=false without the key seeds located_by_name=True.
+
+    The pre-3.0 loader treated required=False columns as located-by-name; the
+    migration must reproduce that set when the source omits the explicit field.
+    """
+    # Arrange: a 2.0 source column with required=false and no located_by_name key.
+    text = _single_column_schema(version="2.0", required=False)
+
+    # Act
+    restored = schema_from_json(text)
+
+    # Assert: the seeding rule located_by_name = not required(2.0) yields True.
+    assert restored.columns[0].located_by_name is True
+
+
+def test_pre_3_0_required_true_seeds_located_by_name_false() -> None:
+    """A 2.0 column required=true without the key seeds located_by_name=False."""
+    # Arrange: a 2.0 source column with required=true and no located_by_name key.
+    text = _single_column_schema(version="2.0", required=True)
+
+    # Act
+    restored = schema_from_json(text)
+
+    # Assert: a column that was required under the old loader was not located-by-name.
+    assert restored.columns[0].located_by_name is False
+
+
+def test_3_0_absent_located_by_name_defaults_false() -> None:
+    """A 3.0 column without the key defaults to located_by_name=False (no seeding)."""
+    # Arrange: a 3.0 source omits the field; the 2.0 seeding path must NOT run.
+    text = _single_column_schema(version="3.0", required=False)
+
+    # Act
+    restored = schema_from_json(text)
+
+    # Assert: 3.0 sources use the additive default rather than the seeding rule.
+    assert restored.columns[0].located_by_name is False
+
+
+def test_3_0_explicit_located_by_name_round_trips_idempotently() -> None:
+    """A 3.0 column with explicit located_by_name=true round-trips stably."""
+    # Arrange: a 3.0 source that declares located_by_name=true explicitly.
+    text = _single_column_schema(version="3.0", required=False, located_key="true")
+
+    # Act: parse, re-serialize, and parse again to confirm idempotence.
+    first = schema_from_json(text)
+    second = schema_from_json(schema_to_json(first))
+
+    # Assert: the explicit value is preserved and the second round-trip is equal.
+    assert first.columns[0].located_by_name is True
+    assert second == first
